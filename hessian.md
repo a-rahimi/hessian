@@ -142,7 +142,7 @@ higher order derivatives of vector-valued functions.
 The matrix $D$ is block-diagonal with its $\ell$th diagonal block containing the
 matrix $D_\ell \equiv \nabla_x f_\ell$.  Using the facts that $\vec(ABC) =
 \left(C^\top \otimes A \right) \vec(B)$, and $(A\otimes B)^\top = A^\top \otimes
-B$, we get
+B^\top$, we get
 $$\begin{align}
 b\cdot (dD)  &=
  \begin{bmatrix} b_1 & \cdots & b_L \end{bmatrix} 
@@ -280,9 +280,8 @@ M^{-1} D \\
 \vdots \\
 \vec \left(dM_L\right)
 \end{bmatrix}^\top
-P
 \begin{bmatrix} I \otimes b_1^\top \\ &\ddots  \\ && I \otimes b_L^\top \end{bmatrix} 
-M^{-1} D.
+PM^{-1} D.
 \end{align}$$
 
 Each matrix $dM_\ell = d \nabla_z f_\ell(z_{\ell-1}; x_\ell)$ varies with $dx$
@@ -312,7 +311,7 @@ $$
 We have just shown that the Hessian of the deep net has the form
 $$
 H \equiv \frac{\partial^2 z_L}{\partial x^2} 
-= D_D \left(D_{xx} + D_{zx} PM^{-1} D_x\right) + D_x^\top M^{-T}D_M P^\top \left(D_{xz}+D_{zz}P M^{-1}D_x\right)
+= D_D \left(D_{xx} + D_{zx} PM^{-1} D_x\right) + D_x^\top M^{-T}P^\top D_M \left(D_{xz}+D_{zz}P M^{-1}D_x\right)
 $$
 
 The definitions below annotate the size of the various matrices in this
@@ -370,21 +369,42 @@ M &\equiv \begin{bmatrix}
 
 # The inverse of the Hessian
 
-While all of the matrices involved in the Hessian are either diagonal or
-bi-diagonal, the Hessian itself is dense because some of these matrices are
-inverted (in particular, $M$ and $N$). Nevertheless, the inverse of the Hessian
-has a block tri-diagonal structure.
+The above shows that the Hessian is a second order matrix polynomial in
+$M^{-1}$. $M$ itself is block-biadiagonal, but because $M^{-1}$ is dense, $H$ is
+dense.  To invert $H$, we introduce changes of variables to rewrite it as a
+second order matrix polynomial in $M$. Since polynomials of banded-diagonal
+matrices are banded-diagonal, inverting $H$ under this change of variables is
+fast.
 
+With the identification $Y\equiv M^{-1}D_x$, we can rewrite the Hessian as
 $$\begin{align*}
-H &= D_D D_{xx} + D_D D_{zx} PM^{-1} D_x - D_x^\top M^{-T}D_M P^\top D_{xz} - D_x^\top M^{-T}D_M P^\top D_{zz}P M^{-1}D_x
+  H&= D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x \\
+  &= D_DD_{xx}  + D_DD_{zx} PY +  Y^\top P^\top D_M D_{xz} +  Y^\top P^\top D_M D_{zz}P Y \\
+&= \begin{bmatrix} Y \\ I \end{bmatrix}^\top
+\begin{bmatrix}
+  P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
+  D_D D_{zx} P & D_D D_{xx}
+\end{bmatrix} 
+\begin{bmatrix} Y \\ I \end{bmatrix} \\
+&= \underbrace{D_D D_{xx} -I}_{\equiv D} +  \begin{bmatrix} Y \\ I \end{bmatrix}^\top
+\underbrace{
+\begin{bmatrix}
+  P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
+  D_D D_{zx} P & I
+\end{bmatrix} }_{\equiv K}
+\begin{bmatrix} Y \\ I \end{bmatrix}.
 \end{align*}$$
 
-The main question is whether
-$$
-D_M P^\top D_{zz}P = D_M P^\top D_{xz}  D_D D_{zx} 
-$$
-# Convergence Rate
-
-Above, I claimed that a good preconditioner is one that causes the gradient to
-point toward the minimizer. This section derives a bound on the convergence rate of 
-stochastic gradient descent in terms of this alignment.
+By the matrix inversion lemma, we have
+$$\begin{align*}
+H^{-1} &= D^{-1} - D^{-1}
+\begin{bmatrix} Y \\ I \end{bmatrix}
+\left( K^{-1} + \begin{bmatrix} Y \\ I \end{bmatrix}^\top D^{-1} \begin{bmatrix} Y \\ I \end{bmatrix} \right)^{-1}
+\begin{bmatrix} Y \\ I \end{bmatrix}^\top
+D^{-1} \\
+&= D^{-1} - D^{-1}
+\begin{bmatrix} Y \\ I \end{bmatrix}
+\left( K^{-1} + D^{-1} + Y^\top D^{-1} + D^{-1} Y + Y^\top D^{-1} Y  \right)^{-1}
+\begin{bmatrix} Y \\ I \end{bmatrix}^\top
+D^{-1} \\
+\end{align*}$$
