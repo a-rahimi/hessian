@@ -370,41 +370,125 @@ M &\equiv \begin{bmatrix}
 # The inverse of the Hessian
 
 The above shows that the Hessian is a second order matrix polynomial in
-$M^{-1}$. $M$ itself is block-biadiagonal, but because $M^{-1}$ is dense, $H$ is
-dense.  To invert $H$, we introduce changes of variables to rewrite it as a
-second order matrix polynomial in $M$. Since polynomials of banded-diagonal
-matrices are banded-diagonal, inverting $H$ under this change of variables is
-fast.
+$M^{-1}$. While $M$ itself is block-biadiagonal, $M^{-1}$ is dense, so $H$ is
+dense.  Nevertheless,  this polynomial can be lifted into a higher order object
+whose inverse is easy to compute:
 
-With the identification $Y\equiv M^{-1}D_x$, we can rewrite the Hessian as
 $$\begin{align*}
   H&= D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x \\
-  &= D_DD_{xx}  + D_DD_{zx} PY +  Y^\top P^\top D_M D_{xz} +  Y^\top P^\top D_M D_{zz}P Y \\
-&= \begin{bmatrix} Y \\ I \end{bmatrix}^\top
+&= \begin{bmatrix} M^{-1}D_x \\ I \end{bmatrix}^\top
 \begin{bmatrix}
   P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
   D_D D_{zx} P & D_D D_{xx}
 \end{bmatrix} 
-\begin{bmatrix} Y \\ I \end{bmatrix} \\
-&= \underbrace{D_D D_{xx} -I}_{\equiv D} +  \begin{bmatrix} Y \\ I \end{bmatrix}^\top
+\begin{bmatrix} M^{-1}D_x \\ I \end{bmatrix} \\
+&= I +  \begin{bmatrix} D_x \\ M \end{bmatrix}^\top
+\underbrace{\begin{bmatrix}M^{-\top} & \\ & M^{-\top}\end{bmatrix}}_{M_2^{-\top}}
 \underbrace{
 \begin{bmatrix}
   P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
-  D_D D_{zx} P & I
-\end{bmatrix} }_{\equiv K}
-\begin{bmatrix} Y \\ I \end{bmatrix}.
+  D_D D_{zx} P & D_D D_{xx}-I
+\end{bmatrix} 
+}_{\equiv Q}
+\underbrace{\begin{bmatrix}M^{-1} & \\ & M^{-1}\end{bmatrix}}_{M_2^{-1}}
+\begin{bmatrix} D_x \\ M \end{bmatrix}.
 \end{align*}$$
 
-By the matrix inversion lemma, we have
-$$\begin{align*}
-H^{-1} &= D^{-1} - D^{-1}
-\begin{bmatrix} Y \\ I \end{bmatrix}
-\left( K^{-1} + \begin{bmatrix} Y \\ I \end{bmatrix}^\top D^{-1} \begin{bmatrix} Y \\ I \end{bmatrix} \right)^{-1}
-\begin{bmatrix} Y \\ I \end{bmatrix}^\top
-D^{-1} \\
-&= D^{-1} - D^{-1}
-\begin{bmatrix} Y \\ I \end{bmatrix}
-\left( K^{-1} + D^{-1} + Y^\top D^{-1} + D^{-1} Y + Y^\top D^{-1} Y  \right)^{-1}
-\begin{bmatrix} Y \\ I \end{bmatrix}^\top
-D^{-1} \\
-\end{align*}$$
+The Woodbury formula gives
+$$\begin{align}
+H^{-1} &= I - 
+ \begin{bmatrix} D_x \\ M \end{bmatrix}^\top
+\left( \left(M_2^{-\top} Q M_2^{-1}\right)^{-1} + 
+ \begin{bmatrix} D_x \\ M \end{bmatrix}
+ \begin{bmatrix} D_x \\ M \end{bmatrix}^\top
+\right)^{-1}
+\begin{bmatrix} D_x \\ M \end{bmatrix}^\top \\
+
+&= I - 
+ \begin{bmatrix} D_x \\ M \end{bmatrix}^\top
+ \left( 
+ M_2 Q^{-1} M_2^\top
+ + 
+ \begin{bmatrix}
+   D_x D_x^\top & D_x M^\top \\ 
+   M D_x^\top & M M^\top
+ \end{bmatrix}
+\right)^{-1}
+\begin{bmatrix} D_x \\ M \end{bmatrix}^\top.
+\end{align}$$
+
+The second matrix under the inverse has seven block-banded diagonals: The term
+$MM^\top$ introduces three bands on the main diagonal and on the upper and lower
+diagonals. The terms $Dx M^\top$ and $MD_x^\top$ each introduce two additional
+diagonal.
+
+The matrix $Q^{-1}$ also has a banded structure. It can be computed explicitly using the partitioned matrix inverse formula. Let
+$
+Q = \begin{bmatrix}
+Q_{11} & Q_{12} \\
+Q_{21} & Q_{22}
+\end{bmatrix}
+$,
+where
+$$\begin{align}
+Q_{11} &= P^\top D_M D_{zz} P \\
+Q_{12} &= P^\top D_M D_{xz} \\
+Q_{21} &= D_D D_{zx} P \\
+Q_{22} &= D_D D_{xx} - I,
+\end{align}$$
+and define the Schur complement $S = Q_{11} - Q_{12} Q_{22}^{-1} Q_{21}$.
+Then 
+$$
+Q^{-1} = 
+\begin{bmatrix}
+S^{-1} & -S^{-1} Q_{12} Q_{22}^{-1} \\
+- Q_{22}^{-1} Q_{21} S^{-1} & Q_{22}^{-1} + Q_{22}^{-1} Q_{21} S^{-1} Q_{12} Q_{22}^{-1}
+\end{bmatrix}.
+$$
+
+The matrix $Q$ has a two block band structure: The terms $Q_{11}$, $Q_{12}$, $Q_{21}$,
+and $Q_{22}$ are all block-diagonal.  $S$ is also block diagonal because
+$Q_{11}$ and $Q_{12} Q_{22}^{-1} Q_{21}$ are both block-diagonal. Since all the
+terms involved in the blocks of $Q^{-1}$ are block-diagonal, $Q^{-1}$ has the same banded
+structure as $Q$.
+
+Since $Q^{-1}$ has three block bands, $M_2 Q^{-1} M_2^\top$ has seven block bands
+since $M_2$ is block-bidiagonal.
+
+We have just shown that the term under the inverse has at most 13 bands: Seven
+bands from the first term, and seven bands from the second term, with the
+diagonal band shared between them. This banding structure is independent of the
+size or number of layers. No matter how large or small the network is, the term
+under the inverse has at most 13 bands!
+
+We now end up with the following algorithm to compute $H^{-1} x$ for an arbitrary
+vector $x$:
+
+**Algorithm: Computing $H^{-1} x$**
+
+Given a vector $x$, to compute $y = H^{-1} x$:
+
+1. **Compute the auxiliary vector:**
+   $$
+   v = \begin{bmatrix} D_x \\ M \end{bmatrix} x
+   $$
+
+2. **Form the banded matrix:**
+   $$
+   A = M_2 Q^{-1} M_2^\top + 
+   \begin{bmatrix}
+     D_x D_x^\top & D_x M^\top \\ 
+     M D_x^\top & M M^\top
+   \end{bmatrix}
+   $$
+
+3. **Solve the linear system:**
+   $$
+   A w = v
+   $$
+   for $w$.
+
+4. **Compute the final result:**
+   $$
+   y = x - \begin{bmatrix} D_x \\ M \end{bmatrix}^\top w
+   $$
