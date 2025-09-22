@@ -386,41 +386,158 @@ M &\equiv \begin{bmatrix}
 # The inverse of the Hessian
 
 The above shows that the Hessian is a second order matrix polynomial in
-$M^{-1}$. $M$ itself is block-biadiagonal, but because $M^{-1}$ is dense, $H$ is
-dense.  To invert $H$, we introduce changes of variables to rewrite it as a
-second order matrix polynomial in $M$. Since polynomials of banded-diagonal
-matrices are banded-diagonal, inverting $H$ under this change of variables is
-fast.
+$M^{-1}$. While $M$ itself is block-biadiagonal, $M^{-1}$ is dense, so $H$ is
+dense.  Nevertheless,  this polynomial can be lifted into a higher order object
+whose inverse is easy to compute:
 
-With the identification $Y\equiv M^{-1}D_x$, we can rewrite the Hessian as
 $$\begin{align*}
   H&= D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x \\
-  &= D_DD_{xx}  + D_DD_{zx} PY +  Y^\top P^\top D_M D_{xz} +  Y^\top P^\top D_M D_{zz}P Y \\
-&= \begin{bmatrix} Y \\ I \end{bmatrix}^\top
+&= \begin{bmatrix} M^{-1}D_x \\ I \end{bmatrix}^\top
 \begin{bmatrix}
   P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
   D_D D_{zx} P & D_D D_{xx}
 \end{bmatrix} 
-\begin{bmatrix} Y \\ I \end{bmatrix} \\
-&= \underbrace{D_D D_{xx} -I}_{\equiv D} +  \begin{bmatrix} Y \\ I \end{bmatrix}^\top
+\begin{bmatrix} M^{-1}D_x \\ I \end{bmatrix} \\
+&= I +  \begin{bmatrix} D_x \\ I \end{bmatrix}^\top
+\underbrace{\begin{bmatrix}M^{-\top} & \\ & I\end{bmatrix}}_{\hat{M}^{-\top}}
 \underbrace{
 \begin{bmatrix}
   P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
-  D_D D_{zx} P & I
-\end{bmatrix} }_{\equiv K}
-\begin{bmatrix} Y \\ I \end{bmatrix}.
+  D_D D_{zx} P & D_D D_{xx}-I
+\end{bmatrix} 
+}_{\equiv Q}
+\underbrace{\begin{bmatrix}M^{-1} & \\ & I\end{bmatrix}}_{\hat{M}^{-1}}
+\begin{bmatrix} D_x \\ I \end{bmatrix}.
 \end{align*}$$
 
-By the matrix inversion lemma, we have
-$$\begin{align*}
-H^{-1} &= D^{-1} - D^{-1}
-\begin{bmatrix} Y \\ I \end{bmatrix}
-\left( K^{-1} + \begin{bmatrix} Y \\ I \end{bmatrix}^\top D^{-1} \begin{bmatrix} Y \\ I \end{bmatrix} \right)^{-1}
-\begin{bmatrix} Y \\ I \end{bmatrix}^\top
-D^{-1} \\
-&= D^{-1} - D^{-1}
-\begin{bmatrix} Y \\ I \end{bmatrix}
-\left( K^{-1} + D^{-1} + Y^\top D^{-1} + D^{-1} Y + Y^\top D^{-1} Y  \right)^{-1}
-\begin{bmatrix} Y \\ I \end{bmatrix}^\top
-D^{-1} \\
-\end{align*}$$
+The Woodbury formula gives
+$$\begin{align}
+H^{-1} &= I - 
+ \begin{bmatrix} D_x \\ I \end{bmatrix}^\top
+\left( \left(\hat{M}^{-\top} Q \hat{M}^{-1}\right)^{-1} + 
+ \begin{bmatrix} D_x \\ I \end{bmatrix}
+ \begin{bmatrix} D_x \\ I \end{bmatrix}^\top
+\right)^{-1}
+\begin{bmatrix} D_x \\ I \end{bmatrix} \\
+
+&= I - 
+ \begin{bmatrix} D_x \\ I \end{bmatrix}^\top
+ \left(\underbrace{ 
+ \hat{M} Q^{-1} \hat{M}^\top
+ + 
+ \begin{bmatrix}
+   D_x D_x^\top & D_x  \\ 
+    D_x^\top & I
+ \end{bmatrix}
+}_{\equiv A}\right)^{-1}
+\begin{bmatrix} D_x \\ I \end{bmatrix}.
+\end{align}$$
+
+The matrix $Q^{-1}$ can be computed explicitly using the partitioned matrix
+inverse formula. 
+Define the Schur complement $S = Q_{11} - Q_{12} Q_{22}^{-1} Q_{21}$, where
+$Q_{ij}$ denote the $i,j$th block of $Q$ as defined above.  Then 
+$$
+Q^{-1} = 
+\begin{bmatrix}
+S^{-1} & -S^{-1} Q_{12} Q_{22}^{-1} \\
+- Q_{22}^{-1} Q_{21} S^{-1} & Q_{22}^{-1} + Q_{22}^{-1} Q_{21} S^{-1} Q_{12} Q_{22}^{-1}
+\end{bmatrix}.
+$$
+
+The matrices $Q_{11}$, $Q_{12}$, $Q_{21}$, and $Q_{22}$ are all block-diagonal.
+$S$ is also block diagonal because $Q_{11}$ and $Q_{12} Q_{22}^{-1} Q_{21}$ are
+both block-diagonal. Since all the terms involved in the blocks of $Q^{-1}$ are
+block-diagonal, $Q^{-1}$ has the same banded structure as $Q$.
+
+The inverse of   $A\equiv \hat{M} Q^{-1} \hat{M}^\top + \begin{bmatrix} D_x
+D_x^\top & D_x  \\ D_x^\top & I \end{bmatrix}$ can be applied efficiently.
+Instead of applying the Woodbury formula again, we'll compute its $LDL^\top$
+decomposition and apply the inverse of that decomposition. The $LDL^\top$
+decomposition of $A$ is
+$$\begin{align}
+A &= 
+\begin{bmatrix} I & A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix} 
+\begin{bmatrix}
+  A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0 \\
+  0 & A_{22}
+\end{bmatrix} 
+\begin{bmatrix} I & A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix}^\top \\
+A_{11} &= M \left[Q^{-1}\right]_{11} M^\top +D_x D_x^\top \\
+A_{12} &= M\left[Q^{-1}\right]_{12} + D_x \\
+A_{22} &= \left[Q^{-1}\right]_{22} + I.
+\end{align}$$
+so
+$$\begin{align}
+A^{-1} &= \begin{bmatrix} I & -A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix}^\top
+\begin{bmatrix}
+  A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0 \\
+  0 & A_{22}
+\end{bmatrix}^{-1}
+\begin{bmatrix} I & -A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix}
+\end{align}$$
+Since $A_{11}$ is block tri-diagonal, $A_{12}$ is block-bidiagonal, and $A_{22}$ is
+block-diagonal, applying $A^{-1}$ to a vector is fast.
+
+To summarize, the following algorithm computes $H^{-1} g$ for an arbitrary
+vector $g$:
+
+## Algorithm: Computing $H^{-1} x$
+
+Given a gradient vector $g \in \R^{Lp}$, computes $H^{-1} g$.
+
+### 1. Compute the auxiliary vector
+
+$$\begin{bmatrix}g_1' \\ g_2' \end{bmatrix} \in \R^{La + Lp} \equiv \begin{bmatrix} D_x \\ I
+\end{bmatrix} g.$$ 
+$D_x$ has $L$ $a\times p$ blocks on its diagonal, so it takes
+$Lap$ multiplications to compute $v$.
+
+### 2. Form the banded matrix
+
+$$A \in \R^{L(a+p) \times L(a+p)} \equiv \hat{M} Q^{-1} \hat{M}^\top +
+\begin{bmatrix} D_x D_x^\top & D_x  \\ D_x^\top & I \end{bmatrix}.$$
+
+To compute $Q^{-1}$, we first compute the blocks of $Q$. These take $La^3$
+multiplications for $Q_{11} \in R^{La\times La}$, $La^2p$ for $Q_{12}\in \R^{L
+a\times Lp}$ and $Q_{21}\in \R^{Lp \times La}$, and $La^2p$ for $Q_{22}\in
+\R^{Lp \times Lp}$. Computing $S\in \R^{La\times La}$ takes  $L p^3$ to compute
+$Q_{22}^{-1}$, and $2Lap^2$ to compute the product $Q_{12} Q_{22}^{-1} Q_{21}$.
+Given these quantities, for the blocks of $Q^{-1}$, it takes an additional
+$La^3$ to compute the upper left block, $L(a^2p+ap^2)$ to compute the
+off-diagonal blocks, and somewhat less than that to compute the bottom diagonal
+block since the matrices involved have already been computed. In all, it takes
+less than $9L\max(a,p)^3$ multiplications to compute $Q^{-1}$.
+
+To compute $\hat{M}Q^{-1}\hat{M}^\top$ requires an additional $2La^3$ operations
+for a total of $11L\max(a,p)^3$ multiplications. 
+
+Finally computing and adding the second term requires $La^2p$ multplications,
+bringing the tally to at most $12 L \max(a,p)^3$ multiplications to compute $A$.
+
+### 3. Apply $A^{-1}$ to $g'$:
+
+  $$
+  \begin{bmatrix}g_1'' \\ g_2''\end{bmatrix} =
+  \begin{bmatrix} I & -A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix}^\top
+  \begin{bmatrix}
+    A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0 \\
+    0 & A_{22}
+  \end{bmatrix}^{-1}
+  \begin{bmatrix} I & -A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix}
+  \begin{bmatrix}g_1' \\ g_2'\end{bmatrix}
+  $$
+  This computation requires $2L\max(a,p)^3$ multiplications to
+  compute $A_{22}^{-1}$ and $\left[A_{11}-A_{12} A_{22}^{-1}A_{12}\right]^{-1}$. The remaining operations are matrix
+  multiplications that take at most $3L\max(a,p)^2$, which is smaller than
+  $Lp^3$ when $p>3$. This brings the tally to at most $15L\max(a,p)^3$
+  multiplications.
+
+### 4. Compute the final result
+
+   $$
+   y = g - \begin{bmatrix} D_x \\ I \end{bmatrix}^\top \begin{bmatrix}g_1'' \\ g_2''\end{bmatrix}
+   $$
+
+   These are against matrix-vector multipciations that take at most
+   $L\max(a,p)^2$ when $p>1$, bringing the tally to at most $16L\max(a,p)^3$.
