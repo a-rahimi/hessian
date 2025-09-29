@@ -1,15 +1,31 @@
-# Training Deep Nets Using Conjugate Deep Nets
+# The Hessian of a Deep Net
 
 
-The rate of progress of gradient descent on a function $F(x)$ depends on the
-shape of $F$: The closer $\nabla F$ points to the minimizer of $F$, the faster
-the progress. Preconditioning is the process of aligning $\nabla F$ with
-the minimizer by introducing a change of variables $x = G(y)$, and
-performing gradient descent on $F(G(y))$ instead. The solution $y^*$ is then
-mapped back via $x^* = G^{-1}(y^*)$. Typically, $G$ is chosen to cause the Hessian
-$\nabla^2 F(G(y))$ to be close to identity. But any change of variables that
-causes $\nabla F(G(y))$ to point along $y-y^*$ would work. This document
-proposes one such preconditioner, based on the stochastic Hessian.
+Preconditioners like Adam, Shampoo, and RMS Prop are a common way to accelerte
+Stochastic Gradient Descent (SGD).  These preconditioners approximately apply
+the inverse of the deep net's Hessian to the deep net's gradient. Such
+approximations are deemed necessary because the Hessian of a modern deep network
+is a very large matrix: A model  that has  a billion parameters, the Hessian has
+a quintillion elements, larger than what can be stored in a modern data center,
+let alone inverted.
+
+This document shows that the Hessian of a deep net has a regular structure that
+makes it amenable to easy storage, multipcation and matrix inversion. Regardless
+of the operation of the layers, every twice differentiable deep net's Hessian is
+a quadratic in the inverse of a block-bi-diagonal matrix, and a number of
+block-diagonal matrices that depend on the differentials of the layers. This
+observation has two useful consequences: 1) It implies a fast way to multiply
+arbitrary vectors by the Hessian without storing the fully Hessian, 2) It
+implies a fast way to solve linear systems of equations in the Hessian without
+storing the Hessian or its inverse.
+
+In an $L$-layer deep net where each layer has $p$ parameters and produces $a$
+activations, naively storing the Hessian would require $O(L^2p^2)$ storage and
+just as many operations to multiply it by a vector, and naively solving a linear
+system in the the Hessian would require $O(L^3p^3)$ operations. By contrast, we
+show how to multiply a vector by the Hessian and solve linear systems 
+in the Hessian with only $O(L \max(a,p)^2)$ operations.
+
 
 ## Notation
 
