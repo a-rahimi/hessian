@@ -1,31 +1,50 @@
 # The Hessian of a Deep Net
 
 
-Preconditioners like Adam, Shampoo, and RMS Prop are a common way to accelerte
-Stochastic Gradient Descent (SGD).  These preconditioners approximately apply
-the inverse of the deep net's Hessian to the deep net's gradient. Such
-approximations are deemed necessary because the Hessian of a modern deep network
-is a very large matrix: A model  that has  a billion parameters, the Hessian has
-a quintillion elements, larger than what can be stored in a modern data center,
-let alone inverted.
+Preconditioners such as Adam, Shampoo, and RMSProp are widely used to accelerate
+Stochastic Gradient Descent (SGD). These methods work by approximately applying
+the inverse of the Hessian matrix to the gradient. Such approximations are
+necessary because the Hessian of a modern deep network is enormous: for a model
+with a billion parameters, the Hessian would have $10^{18}$ entries—far more
+than can be stored or inverted, even in the largest data centers.
 
-This document shows that the Hessian of a deep net has a regular structure that
-makes it amenable to easy storage, multipcation and matrix inversion. Regardless
-of the operation of the layers, every twice differentiable deep net's Hessian is
-a quadratic in the inverse of a block-bi-diagonal matrix, and a number of
-block-diagonal matrices that depend on the differentials of the layers. This
-observation has two useful consequences: 1) It implies a fast way to multiply
-arbitrary vectors by the Hessian without storing the fully Hessian, 2) It
-implies a fast way to solve linear systems of equations in the Hessian without
-storing the Hessian or its inverse.
+However, the Hessian of a deep net has a highly regular structure that makes it
+much more tractable than it first appears. In this document, we show that,
+regardless of the specific operations in each layer, the Hessian can be
+represented compactly. This structure allows us to multiply the Hessian by a
+vector, or solve linear systems involving the Hessian, without ever forming or
+storing the full matrix. As a result, we can avoid the prohibitive memory and
+computational costs that would otherwise make such operations infeasible.
 
-In an $L$-layer deep net where each layer has $p$ parameters and produces $a$
-activations, naively storing the Hessian would require $O(L^2p^2)$ storage and
-just as many operations to multiply it by a vector, and naively solving a linear
-system in the the Hessian would require $O(L^3p^3)$ operations. By contrast, we
-show how to multiply a vector by the Hessian and solve linear systems 
-in the Hessian with only $O(L \max(a,p)^2)$ operations.
+For an $L$-layer deep net where each layer has $p$ parameters and produces $a$
+activations, naively storing the Hessian would require $O(L^2p^2)$ memory, and
+multiplying it by a vector or solving a linear system would require $O(L^2p^2)$
+and $O(L^3p^3)$ operations, respectively. In contrast, we will show how to
+perform these operations using only $O(L \max(a, p)^2)$ computations, making
+them practical even for very large networks.
 
+## The agenda
+
+Our objective is to efficiently solve linear systems of the form $H x = g$,
+where $H$ is the Hessian of a deep neural network. Forming $H$ explicitly is
+infeasible due to its size, and directly inverting or multiplying by $H$ would
+require $O(L^3p^3)$ and $O(L^2p^2)$ operations, respectively—both prohibitively
+expensive for large networks. To overcome this, we employ the following
+strategy:
+
+1. We'll write down the gradient of the deep net as a bi-diagonal system of
+linear equations.  Solving this system of equations uses back-substitution,
+which requires a forward and backward pass similar to those used in
+backpropagation. In fact, back-substituion and back propagation are identical in
+this context.
+
+2. Differentiate the components of this linear system, including the bi-diagonal
+matrix itself, to obtain the the second-order derivatives.
+
+3. Reformulate the resulting expressions so that the Hessian appears as a
+second-order polynomial in the inverse of the bi-diagonal matrix.
+
+4. Derive a fast algorithm to apply the inverse of such polynomials.
 
 ## Notation
 
@@ -50,7 +69,7 @@ training labels are subsumed in $z_0$, and are propagated through the layers
 until they're used in the loss. Second, the last layer fuses the loss (which has no
 parameters) and the last layer (which does).
 
-# Backpropagation and forward propagation, the recursive way
+# Backpropagation, the matrix way
 
 We would like to fit the vector of parameters $x = (x_1, \ldots, x_L)$ given a
 training dataset, which we'll represent by a stochastic input $z_0$ to the
@@ -71,9 +90,6 @@ b_\ell &= b_{\ell+1} \cdot \nabla_z f_{\ell+1},
 \end{align*}
 $$
 with the base case $b_L = 1$, a scalar. 
-
-
-# Backpropagation, the matrix way
 
 The above equations can be written in vector form as
 $$\frac{\partial z_L}{\partial x} = 
@@ -482,9 +498,9 @@ block-diagonal, applying $A^{-1}$ to a vector is fast.
 To summarize, the following algorithm computes $H^{-1} g$ for an arbitrary
 vector $g$:
 
-## Algorithm: Computing $H^{-1} x$
+## Algorithm: Computing $H^{-1} g$
 
-Given a gradient vector $g \in \R^{Lp}$, computes $H^{-1} g$.
+Given a vector $g \in \R^{Lp}$, computes $H^{-1} g$.
 
 ### 1. Compute the auxiliary vector
 
@@ -517,27 +533,28 @@ bringing the tally to at most $12 L \max(a,p)^3$ multiplications to compute $A$.
 
 ### 3. Apply $A^{-1}$ to $g'$:
 
-  $$
-  \begin{bmatrix}g_1'' \\ g_2''\end{bmatrix} =
-  \begin{bmatrix} I & -A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix}^\top
-  \begin{bmatrix}
-    A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0 \\
-    0 & A_{22}
-  \end{bmatrix}^{-1}
-  \begin{bmatrix} I & -A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix}
-  \begin{bmatrix}g_1' \\ g_2'\end{bmatrix}
-  $$
-  This computation requires $2L\max(a,p)^3$ multiplications to
-  compute $A_{22}^{-1}$ and $\left[A_{11}-A_{12} A_{22}^{-1}A_{12}\right]^{-1}$. The remaining operations are matrix
-  multiplications that take at most $3L\max(a,p)^2$, which is smaller than
-  $Lp^3$ when $p>3$. This brings the tally to at most $15L\max(a,p)^3$
-  multiplications.
+$$
+\begin{bmatrix}g_1'' \\ g_2''\end{bmatrix} =
+\begin{bmatrix} I & -A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix}^\top
+\begin{bmatrix}
+  A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0 \\
+  0 & A_{22}
+\end{bmatrix}^{-1}
+\begin{bmatrix} I & -A_{12} A_{22}^{-1} \\ 0 & I \end{bmatrix}
+\begin{bmatrix}g_1' \\ g_2'\end{bmatrix}
+$$
+
+This computation requires $2L\max(a,p)^3$ multiplications to
+compute $A_{22}^{-1}$ and $\left[A_{11}-A_{12} A_{22}^{-1}A_{12}\right]^{-1}$. The remaining operations are matrix
+multiplications that take at most $3L\max(a,p)^2$, which is smaller than
+$Lp^3$ when $p>3$. This brings the tally to at most $15L\max(a,p)^3$
+multiplications.
 
 ### 4. Compute the final result
 
-   $$
-   y = g - \begin{bmatrix} D_x \\ I \end{bmatrix}^\top \begin{bmatrix}g_1'' \\ g_2''\end{bmatrix}
-   $$
+$$
+y = g - \begin{bmatrix} D_x \\ I \end{bmatrix}^\top \begin{bmatrix}g_1'' \\ g_2''\end{bmatrix}
+$$
 
-   These are against matrix-vector multipciations that take at most
-   $L\max(a,p)^2$ when $p>1$, bringing the tally to at most $16L\max(a,p)^3$.
+These are against matrix-vector multipciations that take at most
+$L\max(a,p)^2$ when $p>1$, bringing the tally to at most $16L\max(a,p)^3$.
