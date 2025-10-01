@@ -1,0 +1,52 @@
+# LaTeXindent configuration file
+# Set maximum line length to 120 characters
+
+# Indentation character (4 spaces)
+defaultIndent: "    "
+
+# Look for align delimiters
+lookForAlignDelims:
+    tabular: 1
+    align: 1
+    alignat: 1
+    aligned: 1
+    bmatrix: 1
+    pmatrix: 1
+    cases: 1
+
+# Indent rules for specific environments
+indentRules:
+    document: 0
+    align: 1
+    equation: 1
+    bmatrix: 1
+    pmatrix: 1
+    enumerate: 1
+    itemize: 1
+
+# Don't indent after headings (they stay at column 0)
+indentAfterHeadings:
+    section:
+        indentAfterThisHeading: 0
+    subsection:
+        indentAfterThisHeading: 0
+    subsubsection:
+        indentAfterThisHeading: 0
+
+# Modify line breaks settings
+modifyLineBreaks:
+    textWrapOptions:
+        columns: 80
+        when: before
+        
+    # Environment settings
+    environments:
+        BeginStartsOnOwnLine: 0
+        BodyStartsOnOwnLine: 1
+        EndStartsOnOwnLine: 1
+        EndFinishesWithLineBreak: 1
+    
+    # Item settings
+    items:
+        ItemStartsOnOwnLine: 1
+        ItemFinishesWithLineBreak: 1
