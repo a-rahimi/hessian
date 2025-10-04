@@ -16,28 +16,40 @@
 
 \section{Introduction}
 
-Preconditioners such as Adam, Shampoo, and RMSProp are widely used to
-accelerate Stochastic Gradient Descent (SGD). These methods work by
-approximately applying the inverse of the Hessian matrix to the gradient. Such
-approximations are necessary because the Hessian of a modern deep network is
-enormous: for a model with a billion parameters, the Hessian would have
-$10^{18}$ entries---far more than can be stored or inverted, even in the
-largest data centers.
+The Hessian of a deep net is the matrix of second-order mixed partial
+derivatives of its loss with respect to the parameters. Equivalently, it's the
+derivative of the gradient with respect to the parameters. Over the past few
+decades, relying on this Hessian has come in and out of favor. In the 80s, when
+deep nets had only thousands of parameters, the Hessian could be used to
+implement second order optimizers that converged must faster than gradient
+descent \cite{deep-net-second-order}. As the number of parameters in deep nets
+grew, approximations of the Hessian were employed: low-rank estimates used in
+LBFGS \cite{deep-net-lbfg}, and diagonal approximations of the Hessian used in
+Adagrad \cite{adagrad}. Methods have also been proposed to approximate the
+spectrum of the Hessian to glean insights about the behavior of training
+algorithms \cite{ying-behrooz-hessian-spectrum}. However, as modern deep nets
+get larger, these methods have become increasingly less practical to apply: for
+a model with a billion parameters, the Hessian would have a quintillion
+entries, which far more than can be stored, multiplied, factorized, or
+inverted, even in the largest data centers.
 
-However, the Hessian of a deep net has a highly regular structure that makes it
-much more tractable than it first appears. In this document, we show that,
-regardless of the specific operations in each layer, the Hessian can be
-represented compactly. This structure allows us to multiply the Hessian by a
-vector, or solve linear systems involving the Hessian, without ever forming or
-storing the full matrix. As a result, we can avoid the prohibitive memory and
-computational costs that would otherwise make such operations infeasible.
-
-For an $L$-layer deep net where each layer has $p$ parameters and produces $a$
-activations, naively storing the Hessian would require $O(L^2p^2)$ memory, and
-multiplying it by a vector or solving a linear system would require $O(L^2p^2)$
-and $O(L^3p^3)$ operations, respectively. In contrast, we will show how to
-perform these operations using only $O(L \max(a, p)^2)$ computations, making
-them practical even for very large networks.
+We show that the Hessian of a deep net has a regular structure that makes it
+more amenable to these operations. Regardless of the specific operations in
+each layer, the Hessian can be represented as a matrix polynomial that involves
+the first order and second order mixed derivatives of each layer. This
+polynomial is also second order in the inverse of of a block-bi-diagonal
+operator that represents the backpropoagatin algorithm. This structure allows
+us to multiply the Hessian by a vector, or solve linear systems involving the
+Hessian without ever forming or storing the full matrix. For an $L$-layer deep
+net where each layer has $p$ parameters and produces $a$ activations, naively
+storing the Hessian would require $O(L^2p^2)$ memory, and multiplying it by a
+vector or solving a linear system would require $O(L^2p^2 + L\max(a,p)^3)$ and
+$O(L^3p^3)$ operations, respectively. In contrast, we will show how to perform
+these operations using only $O(L \max(a, p)^3)$ computations. The dependence on
+the parameters on the number of activations and parameters in each layer is
+still cubic, but the dependence on the number of layers is only linear. This
+makes operating on the Hessian of tall and skinny networks more efficient than
+the Hessian of short and fat networks.
 
 \section{Overview}
 
@@ -401,14 +413,17 @@ through both $x_\ell$ and $z_{\ell -1}$ as $d\,\mathrm{vec} \left(M_\ell\right)
 \subsection{Putting it all Together}
 
 We have just shown that the Hessian of the deep net has the form
-\begin{equation}
+\begin{align}
     H \equiv \frac{\partial^2 z_L}{\partial x^2}
-    = D_D \left(D_{xx} + D_{zx} PM^{-1} D_x\right) + D_x^\top M^{-T}P^\top D_M \left(D_{xz}+D_{zz}P M^{-1}D_x\right)
-\end{equation}
+     & = D_D \left(D_{xx} + D_{zx} PM^{-1} D_x\right) + D_x^\top M^{-T}P^\top D_M \left(D_{xz}+D_{zz}P M^{-1}D_x\right)           \\
+     & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x.
+\end{align}
 
 The definitions below annotate the size of the various matrices in this
-expression assuming the first layer has $a$-dimensional activations ($z_1 \in
-    \mathbb{R}^a$) and $p$-dimensional parameters ($x_1 \in \mathbb{R}^p$):
+expression assuming all but the last $L$ layers have $a$-dimensional
+activations ($z_\ell \in \mathbb{R}^a$) and $p$-dimensional parameters ($x_\ell
+    \in \mathbb{R}^p$):
+
 \begin{align*}
     D_D    & \equiv \begin{bmatrix}
                         \underbrace{I \otimes b_1}_{p \times ap} &        &               \\
@@ -422,25 +437,31 @@ expression assuming the first layer has $a$-dimensional activations ($z_1 \in
                                                              & \ddots &               \\
                                                              &        & I \otimes b_L
                \end{bmatrix}
-    ,
-    \qquad
-    P  \equiv \begin{bmatrix}
-                  0 \\ I & 0 \\ &\ddots \\ &I&0
-              \end{bmatrix}
+    ,                                                                                                \\                                                                                     \\
+    P      & \equiv \begin{bmatrix}
+                        0 \\ I & 0 \\ &\ddots \\ &I&0
+                    \end{bmatrix}
+    ,    \qquad
+    M       \equiv \begin{bmatrix}
+                       I                                                                                    \\
+                       \underbrace{-\nabla_z f_2}_{a \times a} & I                                          \\
+                                                               & -\nabla_z f_3 & I                          \\
+                                                               &               & \ddots & \ddots            \\
+                                                               &               &        & -\nabla_z f_L & 1 \\
+                   \end{bmatrix}
     ,                                                                                                \\
     D_x    & \equiv  \begin{bmatrix}
                          \underbrace{\nabla_x f_1}_{a\times p} &                       \\
                                                                & \ddots                \\
                                                                &        & \nabla_x f_L
                      \end{bmatrix}
-    \\
-    D_{xx} & \equiv \begin{bmatrix}
-                        \underbrace{\nabla_{xx} f_1}_{ap\times p} &        &                 \\
-                                                                  & \ddots &                 \\
-                                                                  &        & \nabla_{xx} f_L
-                    \end{bmatrix}
-    ,
-    \qquad
+    , \qquad
+    D_{xx} \equiv \begin{bmatrix}
+                      \underbrace{\nabla_{xx} f_1}_{ap\times p} &        &                 \\
+                                                                & \ddots &                 \\
+                                                                &        & \nabla_{xx} f_L
+                  \end{bmatrix}
+    , \qquad
     D_{xz} \equiv
     \begin{bmatrix}
         \underbrace{\nabla_{xz} f_1}_{a^2 \times p} &        &                 \\
@@ -460,16 +481,21 @@ expression assuming the first layer has $a$-dimensional activations ($z_1 \in
                                                                   & \ddots &                 \\
                                                                   &        & \nabla_{zz} f_L
                    \end{bmatrix}
-    ,                                                                                                \\
-    M      & \equiv \begin{bmatrix}
-                        I                                                          \\
-                        -\nabla_z f_2 & I                                          \\
-                                      & -\nabla_z f_3 & I                          \\
-                                      &               & \ddots & \ddots            \\
-                                      &               &        & -\nabla_z f_L & 1 \\
-                    \end{bmatrix}
     .
 \end{align*}
+
+\subsection{Mulitplying a vector by the Hessian}
+
+Given a vector $g \in \mathbb{R}^{Lp}$, one the formula above allows us to
+compute $H g$ in $O\left(Lap^2 + L a^2p +La^3\right)$ operations without
+forming $H$. This cost is dominated by multiplying by the $D_{xx}$, $D_{zx}$,
+and $D_{zz}$ matrices.
+
+It's tempting to use this insight to use Krylove methods to solve systems of
+the form $H x = b$ without forming $H$. This would require compute $H g$ some
+number of times that depends on the condition number of $H$. However, the next
+section shows how to compute $H^{-1} b$ with roughly only as many operations as
+are needed to comptue $H g$.
 
 \section{The Inverse of the Hessian}
 
