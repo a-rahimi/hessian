@@ -183,25 +183,28 @@ and $b=e_L M^{-1}$ to write
 
 We compute each of these terms separately.
 
-As part of this agenda, we need to define the gradient of tensor-valued
-functions $g:\mathbb{R}^d \to \mathbb{R}^{o_1 \times \cdots \times o_k}$. We
-define this gradient $\nabla_x g(x)\in \mathbb{R}^{(o_1 \cdots o_k) \times d}$
-as the unique matrix-valued function that satisfies $\mathrm{vec} \left(g(x+dx)
-    - g(x)\right) \to \nabla_x g(x) \; dx$ as $dx \to 0$. This convention allows us
-to readily define, for example, the Hessian of a vector-valued function: If
+As part of this agenda, we will rely on the gradient of tensor-valued functions
+$g:\mathbb{R}^d \to \mathbb{R}^{o_1 \times \cdots \times o_k}$. Define this
+gradient $\nabla_x g(x)\in \mathbb{R}^{(o_1 \cdots o_k) \times d}$ as the
+unique matrix-valued function that satisfies \begin{equation}
+    \mathrm{vec}
+    \left(g(x+dx) - g(x)\right) \to \nabla_x g(x) \cdot dx
+\end{equation}
+as $dx \to
+    0$.  This convention readily implies the Hessian of a vector-valued function: If
 $g:\mathbb{R}^d \to \mathbb{R}^o$, then $\nabla_{xx} g(x) \in
     \mathbb{R}^{o\times d^2}$ is the unique matrix such that $\mathrm{vec}
     \left(\nabla_x g(x+dx) - \nabla_x g(x)\right) \to \nabla_{xx} g(x) \; dx$. This
-convention also supports the chain rule as expected: For example, the gradient
-of $h(x) \equiv f(g(x))$ for a matrix-valued $f$ and $g$ can be written as
-$\nabla f \nabla g$ as expected. The chain rule in turn lets us define mixed
-partial derivatives, like $\nabla_{yz} g$ for $g:\mathbb{R}^{|x|} \to
-    \mathbb{R}^{|g|}$. For example, if $y\in \mathbb{R}^{|y|}$ and $z\in
-    \mathbb{R}^{|z|}$ are restrictions of $x \in \mathbb{R}^{|x|}$ to some $|y|$
-and $|z|$-dimensional subsets, then $\nabla_z g(x) \in \mathbb{R}^{|g| \times
-        |z|}$, and $\nabla_{yz} g(x) = \nabla_y \nabla_z g(x) \in \mathbb{R}^{|g||z|
-        \times |y|}$. See Chapter 6 of Magnus \& Neudecker for a deeper treatment of
-higher order derivatives of vector-valued functions.
+convention also readily accommodates the chain rule. For example, the gradient
+of $h(x) \equiv f(g(x))$ for matrix-valued $f$ and $g$ can be written as $\nabla
+    f \nabla g$ as expected. It also implies partial derivatives like $\nabla_{yz}
+    g$ for $g:\mathbb{R}^{|x|} \to \mathbb{R}^{|g|}$.  If $y\in \mathbb{R}^{|y|}$
+and $z\in \mathbb{R}^{|z|}$ are restrictions of $x \in \mathbb{R}^{|x|}$ to some
+$|y|$ and $|z|$-dimensional subsets, then $\nabla_z g(x) \in \mathbb{R}^{|g|
+        \times |z|}$, and $\nabla_{yz} g(x) = \nabla_y \nabla_z g(x) \in
+    \mathbb{R}^{|g||z| \times |y|}$. See Chapter 6 of Magnus \& Neudecker
+\cite{magnus-neudecker} for a deeper treatment of higher order derivatives of
+vector-valued functions.
 
 \subsection{The Term Involving $dD$}
 
@@ -714,5 +717,8 @@ Given a vector $g \in \mathbb{R}^{Lp}$, compute $H^{-1} g$ as follows:
           These are again matrix-vector multiplications that take at most $L\max(a,p)^2$
           when $p>1$, bringing the tally to at most $16L\max(a,p)^3$.
 \end{enumerate}
+
+\bibliographystyle{plain}
+\bibliography{hessian}
 
 \end{document}
