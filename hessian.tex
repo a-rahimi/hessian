@@ -7,7 +7,7 @@
 
 \geometry{margin=1in}
 
-\title{The Hessian of a Deep Net}
+\title{The Hessian of tall-skinny networks is easy to invert}
 \author{Ali Rahimi}
 
 \begin{document}
@@ -17,16 +17,15 @@
 \section{Introduction}
 
 The Hessian of a deep net is the matrix of second-order mixed partial
-derivatives of its loss with respect to the parameters. Equivalently, it's the
-derivative of the gradient with respect to the parameters. Over the past few
-decades, relying on this Hessian has come in and out of favor. In the 80s, when
-deep nets had only thousands of parameters, the Hessian could be used to
-implement second order optimizers that converged must faster than gradient
-descent \cite{deep-net-second-order}. As the number of parameters in deep nets
-grew, approximations of the Hessian were employed: low-rank estimates used in
-LBFGS \cite{deep-net-lbfg}, and diagonal approximations of the Hessian used in
-Adagrad \cite{adagrad}. Methods have also been proposed to approximate the
-spectrum of the Hessian to glean insights about the behavior of training
+derivatives of its loss with respect to its parameters. Reliance on the Hessian
+has come in and out of favor over the past few decades. In the 80s, when deep
+nets had only thousands of parameters, the Hessian could be used to implement
+second order optimizers that converged must faster than gradient descent
+\cite{Watrous1987, Barnard1992}. As the number of parameters in deep nets grew,
+approximations of the Hessian were employed: low-rank estimates used in LBFGS
+\cite{Webb1988, lbfgs-deep-net}, and diagonal approximations of the Hessian
+used in Adagrad \cite{adagrad}. Methods have also been proposed to approximate
+the spectrum of the Hessian to glean insights about the behavior of training
 algorithms \cite{ying-behrooz-hessian-spectrum}. However, as modern deep nets
 get larger, these methods have become increasingly less practical to apply: for
 a model with a billion parameters, the Hessian would have a quintillion
@@ -97,7 +96,22 @@ subsumed in $z_0$, and are propagated through the layers until they're used in
 the loss. Second, the last layer fuses the loss (which has no parameters) and
 the last layer (which does).
 
-\section{Backpropagation, the Matrix Way}
+We'll assume the first and partial derivatives of each layer with respect to
+its parameters and its inputs exist. This poses some complications with ReLU
+activations and other non-differentiable operations in modern networks.
+Notably, for the Hessian to be symmetric,
+
+some We'll largely ignoring this complication and assume that differentiable
+approximations to these operations are used.
+
+At the end of each section, we'll count the number of floating point operations
+required to compute various expressions. While the derivations do not impose
+any restrictions on the shape of the layers, for the purpose of this
+accounting, we'll assume all but the last $L$ layers have $a$-dimensional
+activations ($z_\ell \in \mathbb{R}^a$) and $p$-dimensional parameters ($x_\ell
+    \in \mathbb{R}^p$).
+
+\section{Backpropagation, the matrix way}
 
 We would like to fit the vector of parameters $x = (x_1, \ldots, x_L)$ given a
 training dataset, which we represent by a stochastic input $z_0$ to the
@@ -105,17 +119,15 @@ pipeline. Training the model proceeds by gradient descent steps along the
 stochastic gradient $\partial z_L(z_0;x) / \partial x$. The components of this
 direction can be computed by the chain rule with a backward recursion:
 \begin{align*}
-    \frac{\partial z_L}{\partial x_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell}}}_{b_\ell} \underbrace{\frac{\partial z_\ell}{\partial x_\ell}}_{\nabla_x f_\ell}               \\
-    \frac{\partial z_L}{\partial z_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell+1}}}_{b_{\ell+1}} \underbrace{\frac{\partial z_{\ell+1}}{\partial z_\ell}}_{\nabla_z f_{\ell+1}}
+    \frac{\partial z_L}{\partial x_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell}}}_{b_\ell} \underbrace{\frac{\partial z_\ell}{\partial x_\ell}}_{\nabla_x f_\ell}                \\
+    \frac{\partial z_L}{\partial z_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell+1}}}_{b_{\ell+1}} \underbrace{\frac{\partial z_{\ell+1}}{\partial z_\ell}}_{\nabla_z f_{\ell+1}}.
 \end{align*}
 The identification $b_\ell \equiv \frac{\partial z_L}{\partial z_\ell}$, $\nabla_x f_\ell \equiv \frac{\partial z_\ell}{\partial x_\ell}$, and $\nabla_z f_\ell \equiv \frac{\partial z_\ell}{\partial z_{\ell-1}}$ turns this recurrence into
 \begin{align*}
     \frac{\partial z_L}{\partial x_\ell} & = b_\ell \cdot \nabla_x f_\ell          \\
     b_\ell                               & = b_{\ell+1} \cdot \nabla_z f_{\ell+1},
 \end{align*}
-with the base case $b_L = 1$, a scalar.
-
-The above equations can be written in vector form as
+with the base case $b_L = 1$, a scalar.  These two equations can be written in vector form as
 \begin{equation}
     \frac{\partial z_L}{\partial x} =
     \begin{bmatrix}
@@ -131,7 +143,7 @@ The above equations can be written in vector form as
                          & \ddots                \\
                          &        & \nabla_x f_L
         \end{bmatrix}
-    }_{\equiv D}
+    }_{\equiv D_x},
 \end{equation}
 and
 \begin{equation}
@@ -156,15 +168,17 @@ and
 
 Solving for $b$ and substituting back gives
 \begin{equation}
-    \frac{\partial z_L}{\partial x} =  e_L M^{-1} D.
+    \frac{\partial z_L}{\partial x} =  e_L M^{-1} D_x.
 \end{equation}
 
 The matrix $M$ is block bi-diagonal. Its diagonal entries are identity
 matrices, and its off-diagonal matrices are the gradient of the intermediate
-activations with respect to the layer's parameters. The matrix $D$ is block
+activations with respect to the layer's parameters. The matrix $D_x$ is block
 diagonal, with the block as the derivative of each layer's activations with
 respect to its inputs. $M$ is invertible because the spectrum of a triangular
 matrix can be read off its diagonal, which in this case is all ones.
+
+The number of operations required to compute
 
 \section{The Hessian}
 
@@ -175,23 +189,21 @@ unique matrix $H(x)$ such that $dv^\top \equiv v^\top(x+dx) - v^\top(x) \to
     H(x)\; dx$ as $dx \to 0$. We use the facts that $dM^{-1} = -M^{-1} (dM) M^{-1}$
 and $b=e_L M^{-1}$ to write
 \begin{align}
-    dv & = d(e_L M^{-1} D) \nonumber                             \\
-       & = e_L M^{-1} (dD)+ e_L \left(dM^{-1}\right) D \nonumber \\
-       & = b \cdot dD  - e_L M^{-1} (dM) M^{-1} D \nonumber      \\
-       & = b \cdot dD  - b \cdot (dM) M^{-1} D
+    dv & = d(e_L M^{-1} D_x) \nonumber                               \\
+       & = e_L M^{-1} (dD_x)+ e_L \left(dM^{-1}\right) D_x \nonumber \\
+       & = b \cdot dD_x  - e_L M^{-1} (dM) M^{-1} D_x \nonumber      \\
+       & = b \cdot dD_x  - b \cdot (dM) M^{-1} D_x
 \end{align}
 
-We compute each of these terms separately.
-
-As part of this agenda, we will rely on the gradient of tensor-valued functions
-$g:\mathbb{R}^d \to \mathbb{R}^{o_1 \times \cdots \times o_k}$. Define this
-gradient $\nabla_x g(x)\in \mathbb{R}^{(o_1 \cdots o_k) \times d}$ as the
-unique matrix-valued function that satisfies \begin{equation}
+We compute each of these terms separately. As part of this agenda, we will rely
+on the gradient of tensor-valued functions $g:\mathbb{R}^d \to \mathbb{R}^{o_1
+        \times \cdots \times o_k}$. Define this gradient $\nabla_x g(x)\in
+    \mathbb{R}^{(o_1 \cdots o_k) \times d}$ as the unique matrix-valued function
+that satisfies \begin{equation}
     \mathrm{vec}
     \left(g(x+dx) - g(x)\right) \to \nabla_x g(x) \cdot dx
 \end{equation}
-as $dx \to
-    0$.  This convention readily implies the Hessian of a vector-valued function: If
+as $dx \to 0$.  This convention readily implies the Hessian of a vector-valued function: If
 $g:\mathbb{R}^d \to \mathbb{R}^o$, then $\nabla_{xx} g(x) \in
     \mathbb{R}^{o\times d^2}$ is the unique matrix such that $\mathrm{vec}
     \left(\nabla_x g(x+dx) - \nabla_x g(x)\right) \to \nabla_{xx} g(x) \; dx$. This
@@ -206,14 +218,14 @@ $|y|$ and $|z|$-dimensional subsets, then $\nabla_z g(x) \in \mathbb{R}^{|g|
 \cite{magnus-neudecker} for a deeper treatment of higher order derivatives of
 vector-valued functions.
 
-\subsection{The Term Involving $dD$}
+\subsection{The term involving $dD_x$}
 
-The matrix $D$ is block-diagonal with its $\ell$th diagonal block containing
+The matrix $D_x$ is block-diagonal with its $\ell$th diagonal block containing
 the matrix $D_\ell \equiv \nabla_x f_\ell$. Using the facts that
 $\mathrm{vec}(ABC) = \left(C^\top \otimes A \right) \mathrm{vec}(B)$, and
 $(A\otimes B)^\top = A^\top \otimes B^\top$, we get
 \begin{align}
-    b\cdot (dD) & =
+    b\cdot (dD_x) & =
     \begin{bmatrix}
         b_1 & \cdots & b_L
     \end{bmatrix}
@@ -222,22 +234,22 @@ $(A\otimes B)^\top = A^\top \otimes B^\top$, we get
              & \ddots &      \\
              &        & dD_L
     \end{bmatrix}
-    \nonumber                                                                            \\
-                & = \begin{bmatrix}
-                        b_1 \cdot dD_1 & \cdots & b_L \cdot dD_L
-                    \end{bmatrix}
-    \nonumber                                                                            \\
-                & = \begin{bmatrix}
-                        \mathrm{vec}\left(dD_1\right)^\top \left(I \otimes b_1^\top\right) &
-                        \cdots                                                             &
-                        \mathrm{vec}\left(dD_L\right)^\top \left(I \otimes b_L^\top\right)
-                    \end{bmatrix}
-    \nonumber                                                                            \\
-                & = \begin{bmatrix}
-                        \mathrm{vec}\left(dD_1\right) \\
-                        \vdots                        \\
-                        \mathrm{vec}\left(dD_L\right)
-                    \end{bmatrix}
+    \nonumber                                                                              \\
+                  & = \begin{bmatrix}
+                          b_1 \cdot dD_1 & \cdots & b_L \cdot dD_L
+                      \end{bmatrix}
+    \nonumber                                                                              \\
+                  & = \begin{bmatrix}
+                          \mathrm{vec}\left(dD_1\right)^\top \left(I \otimes b_1^\top\right) &
+                          \cdots                                                             &
+                          \mathrm{vec}\left(dD_L\right)^\top \left(I \otimes b_L^\top\right)
+                      \end{bmatrix}
+    \nonumber                                                                              \\
+                  & = \begin{bmatrix}
+                          \mathrm{vec}\left(dD_1\right) \\
+                          \vdots                        \\
+                          \mathrm{vec}\left(dD_L\right)
+                      \end{bmatrix}
     ^\top
     \begin{bmatrix}
         I \otimes b_1^\top &        &                    \\
@@ -304,7 +316,7 @@ the input $z_0$ does not vary with $dx$. Stacking up this recurrence gives
 We can solve for the vector $\begin{bmatrix}
         dz_1 \\ \vdots \\ dz_L
     \end{bmatrix}
-    = M^{-1} D dx$ and use the downshifting matrix
+    = M^{-1} D_x dx$ and use the downshifting matrix
 \begin{equation}
     P \equiv \begin{bmatrix}
         0 \\ I & 0 \\ &\ddots \\ &I&0
@@ -313,7 +325,7 @@ We can solve for the vector $\begin{bmatrix}
 to plug back the vector $\begin{bmatrix}
         dz_0 \\ \vdots \\ dz_{L-1}
     \end{bmatrix}
-    =PM^{-1}D dx$:
+    =PM^{-1}D_x dx$:
 \begin{align}
     \begin{bmatrix}
         \mathrm{vec}\left(dD_1\right) \\
@@ -331,16 +343,16 @@ to plug back the vector $\begin{bmatrix}
     \begin{bmatrix}
         \nabla_{zx} f_1 \\ &\ddots& \\ &&\nabla_{zx} f_L
     \end{bmatrix}
-    P M^{-1} D
+    P M^{-1} D_x
     \right)dx.
 \end{align}
 
-\subsection{The Term Involving $dM$}
+\subsection{The term involving $dM$}
 
 The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell
     \equiv d \nabla_z f_\ell$. Similar to the above, we can write
 \begin{align}
-    b & \cdot (dM) M^{-1} D =
+    b & \cdot (dM) M^{-1} D_x =
     \begin{bmatrix}
         b_1 & \cdots & b_{L-1} & b_L
     \end{bmatrix}
@@ -350,18 +362,18 @@ The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell
               & \ddots     \\
               & -dM_L  & 0 \\
     \end{bmatrix}
-    M^{-1} D \nonumber                                                           \\
+    M^{-1} D_x                                                                   \\
       & = -\begin{bmatrix}
                b_2 \cdot dM_2 & \cdots & b_L \cdot dM_L & 0
            \end{bmatrix}
-    M^{-1} D \nonumber                                                           \\
+    M^{-1} D_x                                                                   \\
       & = -\begin{bmatrix}
                \mathrm{vec} \left(dM_2\right)^\top \left(I \otimes b_2^\top\right) &
                \cdots                                                              &
                \mathrm{vec} \left(dM_L\right)^\top \left(I \otimes b_L^\top\right) &
                0
            \end{bmatrix}
-    M^{-1} D \nonumber                                                           \\
+    M^{-1} D_x                                                                   \\
       & =
     -\begin{bmatrix}
          \mathrm{vec} \left(dM_1\right) \\
@@ -375,7 +387,7 @@ The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell
                            &   & \ddots                 \\
                            &   & I \otimes b_L^\top & 0
     \end{bmatrix}
-    M^{-1} D \nonumber                                                           \\
+    M^{-1} D_x                                                                   \\
       & = -\begin{bmatrix}
                \mathrm{vec} \left(dM_1\right) \\
                \vdots                         \\
@@ -385,7 +397,7 @@ The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell
     \begin{bmatrix}
         I \otimes b_1^\top \\ &\ddots  \\ && I \otimes b_L^\top
     \end{bmatrix}
-    PM^{-1} D.
+    PM^{-1} D_x.
 \end{align}
 
 Each matrix $dM_\ell = d \nabla_z f_\ell(z_{\ell-1}; x_\ell)$ varies with $dx$
@@ -409,11 +421,11 @@ through both $x_\ell$ and $z_{\ell -1}$ as $d\,\mathrm{vec} \left(M_\ell\right)
     \begin{bmatrix}
         \nabla_{zz} f_1 \\ &\ddots& \\ && \nabla_{zz} f_L
     \end{bmatrix}
-    P M^{-1} D
+    P M^{-1} D_x
     \right)dx.
 \end{align}
 
-\subsection{Putting it all Together}
+\subsection{Putting it all together}
 
 We have just shown that the Hessian of the deep net has the form
 \begin{align}
@@ -422,10 +434,7 @@ We have just shown that the Hessian of the deep net has the form
      & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x.
 \end{align}
 
-The definitions below annotate the size of the various matrices in this
-expression assuming all but the last $L$ layers have $a$-dimensional
-activations ($z_\ell \in \mathbb{R}^a$) and $p$-dimensional parameters ($x_\ell
-    \in \mathbb{R}^p$):
+The various matrices involved are recapitulated below:
 
 \begin{align*}
     D_D    & \equiv \begin{bmatrix}
@@ -494,13 +503,13 @@ compute $H g$ in $O\left(Lap^2 + L a^2p +La^3\right)$ operations without
 forming $H$. This cost is dominated by multiplying by the $D_{xx}$, $D_{zx}$,
 and $D_{zz}$ matrices.
 
-It's tempting to use this insight to use Krylove methods to solve systems of
-the form $H x = b$ without forming $H$. This would require compute $H g$ some
+It's tempting to use this insight to use Krylov methods to solve systems of the
+form $H x = b$ without forming $H$. This would require compute $H g$ some
 number of times that depends on the condition number of $H$. However, the next
 section shows how to compute $H^{-1} b$ with roughly only as many operations as
 are needed to comptue $H g$.
 
-\section{The Inverse of the Hessian}
+\section{The inverse of the Hessian}
 
 The above shows that the Hessian is a second order matrix polynomial in
 $M^{-1}$. While $M$ itself is block-bidiagonal, $M^{-1}$ is dense, so $H$ is
