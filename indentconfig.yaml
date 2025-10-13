@@ -7,7 +7,7 @@ defaultIndent: "    "
 # Look for align delimiters
 lookForAlignDelims:
     tabular: 1
-    align: 1
+    align: 0
     alignat: 1
     aligned: 1
     bmatrix: 1
