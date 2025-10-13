@@ -5,6 +5,8 @@
 \usepackage{mathtools}
 \usepackage{authblk}
 
+\newcommand{\R}{\mathop{\mathbb{R}}}
+
 \geometry{margin=1in}
 
 \title{The Hessian of tall-skinny networks is easy to invert}
@@ -13,63 +15,68 @@
 \begin{document}
 
 \maketitle
+\begin{abstract}
+    We show how to solve linear systems that involve the Hessian of a deep net.
+    Compared to the naive approach of first computing the Hessian, then solving
+    the linear system, which takes storage that's quadratic in the number of
+    parameters and cubically many operations, the method scales roughly like
+    Pearlmutter's algorithm for computing Hessian-vector products. That means
+    Hessian-inverse-vector products can be computed in time and storage that
+    scale linearly in the number of parameters.
+\end{abstract}
 
 \section{Introduction}
 
-The Hessian of a deep net is the matrix of second-order mixed partial
-derivatives of its loss with respect to its parameters. Reliance on the Hessian
-has come in and out of favor over the past few decades. In the 80s, when deep
-nets had only thousands of parameters, the Hessian could be used to implement
-second order optimizers that converged must faster than gradient descent
-\cite{Watrous1987, Barnard1992}. As the number of parameters in deep nets grew,
-approximations of the Hessian were employed: low-rank estimates used in LBFGS
-\cite{Webb1988, lbfgs-deep-net}, and diagonal approximations of the Hessian
-used in Adagrad \cite{adagrad}. Methods have also been proposed to approximate
-the spectrum of the Hessian to glean insights about the behavior of training
-algorithms \cite{ying-behrooz-hessian-spectrum}. However, as modern deep nets
-get larger, these methods have become increasingly less practical to apply: for
-a model with a billion parameters, the Hessian would have a quintillion
-entries, which far more than can be stored, multiplied, factorized, or
-inverted, even in the largest data centers.
+The Hessian of a deep net is the matrix of second-order mixed partial derivatives of its loss with respect to its
+parameters. Decades ago, when deep nets had only hundreds or thousands of parameters, the Hessian matrix could be
+inverted to implement optimizers that converged much faster than gradient descent \cite{Watrous1987, Barnard1992}.
+However, much larger modern deep nets, using the Hessian has become increasingly less practical: The Hessian of a model
+with a billion parameters would have a quintillion entries, which is far larger than can be stored, multiplied,
+factorized, or inverted, even in the largest data centers. A common workaround is to approximate the Hessian as a
+low-rank matrix \cite{Webb1988, lbfgs-deep-net} or as a diagonal matrix \cite{becker-lecun-89, adagrad, adam}. Such
+approximations makes it easier to apply the inverse of the Hessian to a vector.
 
-We show that the Hessian of a deep net has a regular structure that makes it
-more amenable to these operations. Regardless of the specific operations in
-each layer, the Hessian can be represented as a matrix polynomial that involves
-the first order and second order mixed derivatives of each layer. This
-polynomial is also second order in the inverse of of a block-bi-diagonal
-operator that represents the backpropoagatin algorithm. This structure allows
-us to multiply the Hessian by a vector, or solve linear systems involving the
-Hessian without ever forming or storing the full matrix. For an $L$-layer deep
-net where each layer has $p$ parameters and produces $a$ activations, naively
-storing the Hessian would require $O(L^2p^2)$ memory, and multiplying it by a
-vector or solving a linear system would require $O(L^2p^2 + L\max(a,p)^3)$ and
-$O(L^3p^3)$ operations, respectively. In contrast, we will show how to perform
-these operations using only $O(L \max(a, p)^3)$ computations. The dependence on
-the parameters on the number of activations and parameters in each layer is
-still cubic, but the dependence on the number of layers is only linear. This
-makes operating on the Hessian of tall and skinny networks more efficient than
+It has long been known that the product of the Hessian with a fixed vector (the so-called Hessian-vector product) can
+be computed in time and storage that scales linearly with with the number of parameters in the network. This is
+dramatically less than the cubic scaling of the naive algorithm that first computes the Hessian matrix and then
+multiplies it by the vector. The trick, which is due to Pearlmutter \cite{pearlmutter94}, is to modify the original
+network to cause the gradient of the modified network to become the desired Hessian-vector product. Given a way to
+compute the Hessian-vector product, one can then compute the Hessian-inverse-vector product by, say Krylov iterations
+like Conjugate Gradient. However, the quality of the result would then depend on the conditioning of the Hessian, which
+is notoriously poor for deep nets \cite{ying-behrooz-hessian-spectrum}. Unfortunately, there seems to exist no variant
+of Pearlmutter's trick to compute the Hessian-inverse-vector products directly.
+
+This article offers a way to compute Hessian-inverse-vector products using roughly as much time as Pearlmutter's
+algorithm requires to compute Hessian-vector products. The Hessian of a deep net has a regular structure that makes it
+possible to compute Hessian-inverse-vector products exactly and efficiently. Regardless of the specific operations in
+each layer, the Hessian of a layerwise deep net is a low-order matrix polynomial that involves the first order and
+second order mixed derivatives of each layer, and the inverse of a block-bi-diagonal operator that represents the
+backpropoagation algorithm. Exploiting this structure offers a a direct way to compute Hessian-vector products using
+exactly the same operations as Pearlmutter's algorithm (see Appendix \ref{sec:pearlmutter}). It also leads to a way to
+compute Hessian-inverse-vector product that does not require forming or storing the full Hessian, and without incurring
+quadratically (let alone qubically) many FLOPs. For an $L$-layer deep net where each layer has $p$ parameters and
+produces $a$ activations, naively storing the Hessian would require $O(L^2p^2)$ memory, and multiplying it by a vector
+or solving a linear system would require $O(L^2p^2 + L\max(a,p)^3)$ and $O(L^3p^3)$ operations, respectively. In
+contrast, we will show how to perform these operations using only $O(L \max(a, p)^3)$ computations. The dependence on
+the parameters on the number of activations and parameters in each layer is still cubic, but the dependence on the
+number of layers is only linear. This makes operating on the Hessian of tall and skinny networks more efficient than
 the Hessian of short and fat networks.
 
 \section{Overview}
 
-Our objective is to efficiently solve linear systems of the form $H x = g$,
-where $H$ is the Hessian of a deep neural network. Forming $H$ explicitly is
-infeasible due to its size, and directly inverting or multiplying by $H$ would
-require $O(L^3p^3)$ and $O(L^2p^2)$ operations, respectively---both
-prohibitively expensive for large networks. To overcome this, we employ the
-following strategy:
+Our objective is to efficiently solve linear systems of the form $H x = g$, where $H$ is the Hessian of a deep neural
+network, without forming $H$ explicitly. To do this, we employ the following strategy:
 \begin{enumerate}
     \item
-          Write down the gradient of the deep net as a bi-diagonal system of linear
-          equations. Solving this system uses back-substitution, which requires a forward
-          and backward pass similar to those used in backpropagation. In fact,
-          back-substitution and backpropagation are identical in this context.
+          Write down the gradient of the deep net in matrix form, as a bi-diagonal system of linear
+          equations. Solving this system uses back-substitution, which in this case
+          coincides exactly with the computations carried out by backpropagation.
     \item
-          Differentiate the components of this linear system, including the bi-diagonal
-          matrix itself, to obtain the second-order derivatives.
+          Differentiate this matrix form to obtain the second-order derivatives. Write the result in matrix form,
+          hiwch involves a second-order polynomial in the inverse of the aforementioned bi-diagonal matrix.
     \item
-          Reformulate the resulting expressions so that the Hessian appears as a
-          second-order polynomial in the inverse of the bi-diagonal matrix.
+          Lift this polynomial into a higher-dimensional matrix form, and use the Woodbury formula to invert the resulting
+          matrix.
     \item
           Derive a fast algorithm to apply the inverse of such polynomials.
 \end{enumerate}
@@ -79,54 +86,48 @@ following strategy:
 We write a deep net as a pipeline of functions $\ell = 1, \ldots, L$,
 \begin{align}
     z_1    & = f_1(z_0; x_1) \nonumber              \\
-           & \ldots \nonumber                       \\
+    & \ldots \nonumber                       \\
     z_\ell & = f_\ell(z_{\ell-1}; x_\ell) \nonumber \\
-           & \ldots \nonumber                       \\
+    & \ldots \nonumber                       \\
     z_L    & = f_L(z_{L-1}; x_L)
 \end{align}
 
-The vectors $x_1,\ldots, x_L$ are the parameters of the pipeline. The vectors
-$z_1,\ldots, z_L$ are its intermediate activations, and $z_0$ is the input to
-the pipeline. The last layer $f_L$ computes the final activations and their
-training loss, so the scalar $z_L$ is the loss of the model on the input $z_0$.
-To make this loss's dependence on $z_0$ and the parameters explicit, we
-sometimes write it as $z_L(z_0;x)$. This formalization deviates slightly from
-the traditional deep net formalism in two ways: First, the training labels are
-subsumed in $z_0$, and are propagated through the layers until they're used in
-the loss. Second, the last layer fuses the loss (which has no parameters) and
+The vectors $x_1,\ldots, x_L$ are the parameters of the pipeline. The vectors $z_1,\ldots, z_L$ are its intermediate
+activations, and $z_0$ is the input to the pipeline. The last layer $f_L$ computes the final activations and their
+training loss, so the scalar $z_L$ is the loss of the model on the input $z_0$. To make this loss's dependence on $z_0$
+and the parameters explicit, we sometimes write it as $z_L(z_0;x)$. This formalization deviates slightly from the
+traditional deep net formalism in two ways: First, the training labels are subsumed in $z_0$, and are propagated
+through the layers until they're used in the loss. Second, the last layer fuses the loss (which has no parameters) and
 the last layer (which does).
 
-We'll assume the first and partial derivatives of each layer with respect to
-its parameters and its inputs exist. This poses some complications with ReLU
-activations and other non-differentiable operations in modern networks.
-Notably, for the Hessian to be symmetric,
+We'll assume the first and partial derivatives of each layer with respect to its parameters and its inputs exist. This
+poses some complications with ReLU activations and other non-differentiable operations in modern networks. Notably, for
+the Hessian to be symmetric,
 
-some We'll largely ignoring this complication and assume that differentiable
-approximations to these operations are used.
+some We'll largely ignoring this complication and assume that differentiable approximations to these operations are
+used.
 
-At the end of each section, we'll count the number of floating point operations
-required to compute various expressions. While the derivations do not impose
-any restrictions on the shape of the layers, for the purpose of this
-accounting, we'll assume all but the last $L$ layers have $a$-dimensional
-activations ($z_\ell \in \mathbb{R}^a$) and $p$-dimensional parameters ($x_\ell
-    \in \mathbb{R}^p$).
+At the end of each section, we'll count the number of floating point operations required to compute various
+expressions. While the derivations do not impose any restrictions on the shape of the layers, for the purpose of this
+accounting, we'll assume all but the last $L$ layers have $a$-dimensional activations ($z_\ell \in \R^a$) and
+$p$-dimensional parameters ($x_\ell \in \R^p$).
 
 \section{Backpropagation, the matrix way}
 
-We would like to fit the vector of parameters $x = (x_1, \ldots, x_L)$ given a
-training dataset, which we represent by a stochastic input $z_0$ to the
-pipeline. Training the model proceeds by gradient descent steps along the
-stochastic gradient $\partial z_L(z_0;x) / \partial x$. The components of this
-direction can be computed by the chain rule with a backward recursion:
-\begin{align*}
+We would like to fit the vector of parameters $x = (x_1, \ldots, x_L)$ given a training dataset, which we represent by
+a stochastic input $z_0$ to the pipeline. Training the model proceeds by gradient descent steps along the stochastic
+gradient $\partial z_L(z_0;x) / \partial x$. The components of this direction can be computed by the chain rule with a
+backward recursion:
+\begin{align}
+    \label{eq:backprop}
     \frac{\partial z_L}{\partial x_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell}}}_{b_\ell} \underbrace{\frac{\partial z_\ell}{\partial x_\ell}}_{\nabla_x f_\ell}                \\
     \frac{\partial z_L}{\partial z_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell+1}}}_{b_{\ell+1}} \underbrace{\frac{\partial z_{\ell+1}}{\partial z_\ell}}_{\nabla_z f_{\ell+1}}.
-\end{align*}
+\end{align}
 The identification $b_\ell \equiv \frac{\partial z_L}{\partial z_\ell}$, $\nabla_x f_\ell \equiv \frac{\partial z_\ell}{\partial x_\ell}$, and $\nabla_z f_\ell \equiv \frac{\partial z_\ell}{\partial z_{\ell-1}}$ turns this recurrence into
-\begin{align*}
+\begin{align}
     \frac{\partial z_L}{\partial x_\ell} & = b_\ell \cdot \nabla_x f_\ell          \\
     b_\ell                               & = b_{\ell+1} \cdot \nabla_z f_{\ell+1},
-\end{align*}
+\end{align}
 with the base case $b_L = 1$, a scalar.  These two equations can be written in vector form as
 \begin{equation}
     \frac{\partial z_L}{\partial x} =
@@ -171,59 +172,50 @@ Solving for $b$ and substituting back gives
     \frac{\partial z_L}{\partial x} =  e_L M^{-1} D_x.
 \end{equation}
 
-The matrix $M$ is block bi-diagonal. Its diagonal entries are identity
-matrices, and its off-diagonal matrices are the gradient of the intermediate
-activations with respect to the layer's parameters. The matrix $D_x$ is block
-diagonal, with the block as the derivative of each layer's activations with
-respect to its inputs. $M$ is invertible because the spectrum of a triangular
-matrix can be read off its diagonal, which in this case is all ones.
+The matrix $M$ is block bi-diagonal. Its diagonal entries are identity matrices, and its off-diagonal matrices are the
+gradient of the intermediate activations with respect to the layer's parameters. The matrix $D_x$ is block diagonal,
+with the block as the derivative of each layer's activations with respect to its inputs. $M$ is invertible because the
+spectrum of a triangular matrix can be read off its diagonal, which in this case is all ones.
 
 The number of operations required to compute
 
 \section{The Hessian}
 
-The gradient we computed above is the unique vector $v$ such that $d z_L \equiv
-    z_L(x+dx) - z_L(dx) \to v(x) \cdot dx$ as $dx\to 0$. In this section, we
-compute the Hessian $H$ of $z_L$ with respect to the parameters. This is the
-unique matrix $H(x)$ such that $dv^\top \equiv v^\top(x+dx) - v^\top(x) \to
-    H(x)\; dx$ as $dx \to 0$. We use the facts that $dM^{-1} = -M^{-1} (dM) M^{-1}$
-and $b=e_L M^{-1}$ to write
+The gradient we computed above is the unique vector $v$ such that $d z_L \equiv z_L(x+dx) - z_L(dx) \to v(x) \cdot dx$
+as $dx\to 0$. In this section, we compute the Hessian $H$ of $z_L$ with respect to the parameters. This is the unique
+matrix $H(x)$ such that $dv^\top \equiv v^\top(x+dx) - v^\top(x) \to H(x)\; dx$ as $dx \to 0$. We use the facts that
+$dM^{-1} = -M^{-1} (dM) M^{-1}$ and $b=e_L M^{-1}$ to write
 \begin{align}
     dv & = d(e_L M^{-1} D_x) \nonumber                               \\
-       & = e_L M^{-1} (dD_x)+ e_L \left(dM^{-1}\right) D_x \nonumber \\
-       & = b \cdot dD_x  - e_L M^{-1} (dM) M^{-1} D_x \nonumber      \\
-       & = b \cdot dD_x  - b \cdot (dM) M^{-1} D_x
+    & = e_L M^{-1} (dD_x)+ e_L \left(dM^{-1}\right) D_x \nonumber \\
+    & = b \cdot dD_x  - e_L M^{-1} (dM) M^{-1} D_x \nonumber      \\
+    & = b \cdot dD_x  - b \cdot (dM) M^{-1} D_x
 \end{align}
 
-We compute each of these terms separately. As part of this agenda, we will rely
-on the gradient of tensor-valued functions $g:\mathbb{R}^d \to \mathbb{R}^{o_1
-        \times \cdots \times o_k}$. Define this gradient $\nabla_x g(x)\in
-    \mathbb{R}^{(o_1 \cdots o_k) \times d}$ as the unique matrix-valued function
-that satisfies \begin{equation}
-    \mathrm{vec}
-    \left(g(x+dx) - g(x)\right) \to \nabla_x g(x) \cdot dx
+We compute each of these terms separately. As part of this agenda, we will rely on the gradient of tensor-valued
+functions $g:\R^d \to \R^{o_1 \times \cdots \times o_k}$. Define this gradient $\nabla_x g(x)\in \R^{(o_1 \cdots o_k)
+        \times d}$ as the unique matrix-valued function that satisfies
+
+\begin{equation}
+    \mathrm{vec} \left(g(x+dx) - g(x)\right) \to \nabla_x g(x)
+    \cdot dx
 \end{equation}
-as $dx \to 0$.  This convention readily implies the Hessian of a vector-valued function: If
-$g:\mathbb{R}^d \to \mathbb{R}^o$, then $\nabla_{xx} g(x) \in
-    \mathbb{R}^{o\times d^2}$ is the unique matrix such that $\mathrm{vec}
-    \left(\nabla_x g(x+dx) - \nabla_x g(x)\right) \to \nabla_{xx} g(x) \; dx$. This
-convention also readily accommodates the chain rule. For example, the gradient
-of $h(x) \equiv f(g(x))$ for matrix-valued $f$ and $g$ can be written as $\nabla
-    f \nabla g$ as expected. It also implies partial derivatives like $\nabla_{yz}
-    g$ for $g:\mathbb{R}^{|x|} \to \mathbb{R}^{|g|}$.  If $y\in \mathbb{R}^{|y|}$
-and $z\in \mathbb{R}^{|z|}$ are restrictions of $x \in \mathbb{R}^{|x|}$ to some
-$|y|$ and $|z|$-dimensional subsets, then $\nabla_z g(x) \in \mathbb{R}^{|g|
-        \times |z|}$, and $\nabla_{yz} g(x) = \nabla_y \nabla_z g(x) \in
-    \mathbb{R}^{|g||z| \times |y|}$. See Chapter 6 of Magnus \& Neudecker
-\cite{magnus-neudecker} for a deeper treatment of higher order derivatives of
-vector-valued functions.
+
+as $dx \to 0$. This convention readily implies the Hessian of a vector-valued function: If $g:\R^d \to \R^o$, then
+$\nabla_{xx} g(x) \in \R^{o\times d^2}$ is the unique matrix such that $\mathrm{vec} \left(\nabla_x g(x+dx) - \nabla_x
+    g(x)\right) \to \nabla_{xx} g(x) \; dx$. This convention also readily accommodates the chain rule. For example, the
+gradient of $h(x) \equiv f(g(x))$ for matrix-valued $f$ and $g$ can be written as $\nabla f \nabla g$ as expected. It
+also implies partial derivatives like $\nabla_{yz} g$ for $g:\R^{|x|} \to \R^{|g|}$. If $y\in \R^{|y|}$ and $z\in
+    \R^{|z|}$ are restrictions of $x \in \R^{|x|}$ to some $|y|$ and $|z|$-dimensional subsets, then $\nabla_z g(x) \in
+    \R^{|g| \times |z|}$, and $\nabla_{yz} g(x) = \nabla_y \nabla_z g(x) \in \R^{|g||z| \times |y|}$. See Chapter 6 of
+Magnus \& Neudecker \cite{magnus-neudecker} for a deeper treatment of higher order derivatives of vector-valued
+functions.
 
 \subsection{The term involving $dD_x$}
 
-The matrix $D_x$ is block-diagonal with its $\ell$th diagonal block containing
-the matrix $D_\ell \equiv \nabla_x f_\ell$. Using the facts that
-$\mathrm{vec}(ABC) = \left(C^\top \otimes A \right) \mathrm{vec}(B)$, and
-$(A\otimes B)^\top = A^\top \otimes B^\top$, we get
+The matrix $D_x$ is block-diagonal with its $\ell$th diagonal block containing the matrix $D_\ell \equiv \nabla_x
+    f_\ell$. Using the facts that $\mathrm{vec}(ABC) = \left(C^\top \otimes A \right) \mathrm{vec}(B)$, and $(A\otimes
+    B)^\top = A^\top \otimes B^\top$, we get
 \begin{align}
     b\cdot (dD_x) & =
     \begin{bmatrix}
@@ -235,21 +227,21 @@ $(A\otimes B)^\top = A^\top \otimes B^\top$, we get
              &        & dD_L
     \end{bmatrix}
     \nonumber                                                                              \\
-                  & = \begin{bmatrix}
-                          b_1 \cdot dD_1 & \cdots & b_L \cdot dD_L
-                      \end{bmatrix}
+    & = \begin{bmatrix}
+        b_1 \cdot dD_1 & \cdots & b_L \cdot dD_L
+    \end{bmatrix}
     \nonumber                                                                              \\
-                  & = \begin{bmatrix}
-                          \mathrm{vec}\left(dD_1\right)^\top \left(I \otimes b_1^\top\right) &
-                          \cdots                                                             &
-                          \mathrm{vec}\left(dD_L\right)^\top \left(I \otimes b_L^\top\right)
-                      \end{bmatrix}
+    & = \begin{bmatrix}
+        \mathrm{vec}\left(dD_1\right)^\top \left(I \otimes b_1^\top\right) &
+        \cdots                                                             &
+        \mathrm{vec}\left(dD_L\right)^\top \left(I \otimes b_L^\top\right)
+    \end{bmatrix}
     \nonumber                                                                              \\
-                  & = \begin{bmatrix}
-                          \mathrm{vec}\left(dD_1\right) \\
-                          \vdots                        \\
-                          \mathrm{vec}\left(dD_L\right)
-                      \end{bmatrix}
+    & = \begin{bmatrix}
+        \mathrm{vec}\left(dD_1\right) \\
+        \vdots                        \\
+        \mathrm{vec}\left(dD_L\right)
+    \end{bmatrix}
     ^\top
     \begin{bmatrix}
         I \otimes b_1^\top &        &                    \\
@@ -258,10 +250,9 @@ $(A\otimes B)^\top = A^\top \otimes B^\top$, we get
     \end{bmatrix}
 \end{align}
 
-Observe that $\mathrm{vec}\left(dD_\ell\right) = d\,\mathrm{vec} \nabla_x
-    f_\ell(z_{\ell-1}; x_\ell)$ varies with $dx$ through both its arguments
-$x_\ell$ and $z_{\ell-1}$. Using mixed partials of vector-valued functions
-described above, we get
+Observe that $\mathrm{vec}\left(dD_\ell\right) = d\,\mathrm{vec} \nabla_x f_\ell(z_{\ell-1}; x_\ell)$ varies with $dx$
+through both its arguments $x_\ell$ and $z_{\ell-1}$. Using mixed partials of vector-valued functions described above,
+we get
 \begin{equation}
     \mathrm{vec} \left(dD_\ell\right) = d\,\mathrm{vec}\left(\nabla_x f_\ell\right) = \left(\nabla_{xx} f_\ell\right)\; dx_\ell  + \left(\nabla_{zx} f_\ell\right)\; dz_{\ell-1}.
 \end{equation}
@@ -273,7 +264,7 @@ Stacking these equations gives
         \vdots                        \\
         \mathrm{vec}\left(dD_L\right)
     \end{bmatrix}
-     & =
+    & =
     \begin{bmatrix}
         \nabla_{xx} f_1 &        &                 \\
                         & \ddots &                 \\
@@ -292,9 +283,9 @@ Stacking these equations gives
     .
 \end{align}
 
-Each vector $dz_\ell$ in turn varies with $dx$ via $dz_\ell = (\nabla_x f_\ell)
-    dx_\ell + (\nabla_z f_\ell) dz_{\ell-1}$, with the base case $dz_0 = 0$, since
-the input $z_0$ does not vary with $dx$. Stacking up this recurrence gives
+Each vector $dz_\ell$ in turn varies with $dx$ via $dz_\ell = (\nabla_x f_\ell) dx_\ell + (\nabla_z f_\ell)
+    dz_{\ell-1}$, with the base case $dz_0 = 0$, since the input $z_0$ does not vary with $dx$. Stacking up this recurrence
+gives
 \begin{align}
     \begin{bmatrix}
         I             &   &                   \\
@@ -349,8 +340,8 @@ to plug back the vector $\begin{bmatrix}
 
 \subsection{The term involving $dM$}
 
-The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell
-    \equiv d \nabla_z f_\ell$. Similar to the above, we can write
+The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell \equiv d \nabla_z f_\ell$. Similar to
+the above, we can write
 \begin{align}
     b & \cdot (dM) M^{-1} D_x =
     \begin{bmatrix}
@@ -363,23 +354,23 @@ The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell
               & -dM_L  & 0 \\
     \end{bmatrix}
     M^{-1} D_x                                                                   \\
-      & = -\begin{bmatrix}
-               b_2 \cdot dM_2 & \cdots & b_L \cdot dM_L & 0
-           \end{bmatrix}
+    & = -\begin{bmatrix}
+        b_2 \cdot dM_2 & \cdots & b_L \cdot dM_L & 0
+    \end{bmatrix}
     M^{-1} D_x                                                                   \\
-      & = -\begin{bmatrix}
-               \mathrm{vec} \left(dM_2\right)^\top \left(I \otimes b_2^\top\right) &
-               \cdots                                                              &
-               \mathrm{vec} \left(dM_L\right)^\top \left(I \otimes b_L^\top\right) &
-               0
-           \end{bmatrix}
+    & = -\begin{bmatrix}
+        \mathrm{vec} \left(dM_2\right)^\top \left(I \otimes b_2^\top\right) &
+        \cdots                                                              &
+        \mathrm{vec} \left(dM_L\right)^\top \left(I \otimes b_L^\top\right) &
+        0
+    \end{bmatrix}
     M^{-1} D_x                                                                   \\
-      & =
+    & =
     -\begin{bmatrix}
-         \mathrm{vec} \left(dM_1\right) \\
-         \vdots                         \\
-         \mathrm{vec} \left(dM_L\right)
-     \end{bmatrix}
+        \mathrm{vec} \left(dM_1\right) \\
+        \vdots                         \\
+        \mathrm{vec} \left(dM_L\right)
+    \end{bmatrix}
     ^\top
     \begin{bmatrix}
         0                                               \\
@@ -388,11 +379,11 @@ The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell
                            &   & I \otimes b_L^\top & 0
     \end{bmatrix}
     M^{-1} D_x                                                                   \\
-      & = -\begin{bmatrix}
-               \mathrm{vec} \left(dM_1\right) \\
-               \vdots                         \\
-               \mathrm{vec} \left(dM_L\right)
-           \end{bmatrix}
+    & = -\begin{bmatrix}
+        \mathrm{vec} \left(dM_1\right) \\
+        \vdots                         \\
+        \mathrm{vec} \left(dM_L\right)
+    \end{bmatrix}
     ^\top
     \begin{bmatrix}
         I \otimes b_1^\top \\ &\ddots  \\ && I \otimes b_L^\top
@@ -400,9 +391,8 @@ The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell
     PM^{-1} D_x.
 \end{align}
 
-Each matrix $dM_\ell = d \nabla_z f_\ell(z_{\ell-1}; x_\ell)$ varies with $dx$
-through both $x_\ell$ and $z_{\ell -1}$ as $d\,\mathrm{vec} \left(M_\ell\right)
-    = \left(\nabla_{xz} f_\ell\right) dx_\ell + \left(\nabla_{zz} f_\ell\right)
+Each matrix $dM_\ell = d \nabla_z f_\ell(z_{\ell-1}; x_\ell)$ varies with $dx$ through both $x_\ell$ and $z_{\ell -1}$
+as $d\,\mathrm{vec} \left(M_\ell\right) = \left(\nabla_{xz} f_\ell\right) dx_\ell + \left(\nabla_{zz} f_\ell\right)
     dz_{\ell-1}$. Following the steps of the previous section gives
 \begin{align}
     \begin{bmatrix}
@@ -430,8 +420,9 @@ through both $x_\ell$ and $z_{\ell -1}$ as $d\,\mathrm{vec} \left(M_\ell\right)
 We have just shown that the Hessian of the deep net has the form
 \begin{align}
     H \equiv \frac{\partial^2 z_L}{\partial x^2}
-     & = D_D \left(D_{xx} + D_{zx} PM^{-1} D_x\right) + D_x^\top M^{-T}P^\top D_M \left(D_{xz}+D_{zz}P M^{-1}D_x\right)           \\
-     & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x.
+    & = D_D \left(D_{xx} + D_{zx} PM^{-1} D_x\right) + D_x^\top M^{-T}P^\top D_M \left(D_{xz}+D_{zz}P M^{-1}D_x\right)           \\
+    \label{eq:hessian}
+    & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x.
 \end{align}
 
 The various matrices involved are recapitulated below:
@@ -498,29 +489,26 @@ The various matrices involved are recapitulated below:
 
 \subsection{Mulitplying a vector by the Hessian}
 
-Given a vector $g \in \mathbb{R}^{Lp}$, one the formula above allows us to
-compute $H g$ in $O\left(Lap^2 + L a^2p +La^3\right)$ operations without
-forming $H$. This cost is dominated by multiplying by the $D_{xx}$, $D_{zx}$,
-and $D_{zz}$ matrices.
+Given a vector $g \in \R^{Lp}$, the formula above allows us to compute $H g$ in $O\left(Lap^2 + L a^2p +La^3\right)$
+operations without forming $H$. This cost is dominated by multiplying by the $D_{xx}$, $D_{zx}$, and $D_{zz}$ matrices.
+Appendix \ref{sec:pearlmutter} shows that these operations are exactly the operations involved in Pearlmutter's trick
+to compute the Hessian-vector product.
 
-It's tempting to use this insight to use Krylov methods to solve systems of the
-form $H x = b$ without forming $H$. This would require compute $H g$ some
-number of times that depends on the condition number of $H$. However, the next
-section shows how to compute $H^{-1} b$ with roughly only as many operations as
-are needed to comptue $H g$.
+It's tempting to use this insight to use Krylov methods to solve systems of the form $H x = b$ without forming $H$.
+This would require compute $H g$ some number of times that depends on the condition number of $H$. However, the next
+section shows how to compute $H^{-1} b$ with roughly only as many operations as are needed to comptue $H g$.
 
 \section{The inverse of the Hessian}
 
-The above shows that the Hessian is a second order matrix polynomial in
-$M^{-1}$. While $M$ itself is block-bidiagonal, $M^{-1}$ is dense, so $H$ is
-dense. Nevertheless, this polynomial can be lifted into a higher order object
-whose inverse is easy to compute:
+The above shows that the Hessian is a second order matrix polynomial in $M^{-1}$. While $M$ itself is block-bidiagonal,
+$M^{-1}$ is dense, so $H$ is dense. Nevertheless, this polynomial can be lifted into a higher order object whose
+inverse is easy to compute:
 
-\begin{align*}
+\begin{align}
     H & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x \\
-      & = \begin{bmatrix}
-              M^{-1}D_x \\ I
-          \end{bmatrix}
+    & = \begin{bmatrix}
+        M^{-1}D_x \\ I
+    \end{bmatrix}
     ^\top
     \begin{bmatrix}
         P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
@@ -530,13 +518,13 @@ whose inverse is easy to compute:
         M^{-1}D_x \\ I
     \end{bmatrix}
     \\
-      & = I +  \begin{bmatrix}
-                   D_x \\ I
-               \end{bmatrix}
+    & = I +  \begin{bmatrix}
+        D_x \\ I
+    \end{bmatrix}
     ^\top
     \underbrace{\begin{bmatrix}
-                        M^{-\top} & \\ & I
-                    \end{bmatrix}
+            M^{-\top} & \\ & I
+        \end{bmatrix}
     }_{\hat{M}^{-\top}}
     \underbrace{
         \begin{bmatrix}
@@ -545,14 +533,14 @@ whose inverse is easy to compute:
         \end{bmatrix}
     }_{\equiv Q}
     \underbrace{\begin{bmatrix}
-                        M^{-1} & \\ & I
-                    \end{bmatrix}
+            M^{-1} & \\ & I
+        \end{bmatrix}
     }_{\hat{M}^{-1}}
     \begin{bmatrix}
         D_x \\ I
     \end{bmatrix}
     .
-\end{align*}
+\end{align}
 
 The Woodbury formula gives
 \begin{align}
@@ -574,7 +562,7 @@ The Woodbury formula gives
         D_x \\ I
     \end{bmatrix}
     \nonumber      \\
-           & = I -
+    & = I -
     \begin{bmatrix}
         D_x \\ I
     \end{bmatrix}
@@ -593,8 +581,8 @@ The Woodbury formula gives
     .
 \end{align}
 
-The matrix $Q^{-1}$ can be computed explicitly using the partitioned matrix
-inverse formula. Define the Schur complement $S = Q_{11} - Q_{12} Q_{22}^{-1}
+Both inverses in the above can be either computed or applied efficiently. The matrix $Q^{-1}$ can be computed
+explicitly using the partitioned matrix inverse formula. Define the Schur complement $S = Q_{11} - Q_{12} Q_{22}^{-1}
     Q_{21}$, where $Q_{ij}$ denote the $i,j$th block of $Q$ as defined above. Then
 \begin{equation}
     Q^{-1} =
@@ -605,17 +593,23 @@ inverse formula. Define the Schur complement $S = Q_{11} - Q_{12} Q_{22}^{-1}
     .
 \end{equation}
 
-The matrices $Q_{11}$, $Q_{12}$, $Q_{21}$, and $Q_{22}$ are all block-diagonal.
-$S$ is also block diagonal because $Q_{11}$ and $Q_{12} Q_{22}^{-1} Q_{21}$ are
-both block-diagonal. Since all the terms involved in the blocks of $Q^{-1}$ are
-block-diagonal, $Q^{-1}$ has the same banded structure as $Q$.
+The matrices $Q_{11}$, $Q_{12}$, $Q_{21}$, and $Q_{22}$ are all block-diagonal. $S$ is also block diagonal because
+$Q_{11}$ and $Q_{12} Q_{22}^{-1} Q_{21}$ are block-diagonal. So the four blocks four blocks of $Q^{-1}$ are also
+block-diagonal and computing them only requires operatins on block-diagonal matrices.
 
 The inverse of $A\equiv \hat{M} Q^{-1} \hat{M}^\top + \begin{bmatrix}
         D_x D_x^\top & D_x \\ D_x^\top & I
     \end{bmatrix}
-$ can be applied efficiently. Instead of applying the Woodbury formula again, we compute its $LDL^\top$ decomposition and apply the inverse of that decomposition. The $LDL^\top$ decomposition of $A$ is
+$ can be applied efficiently. Instead of applying the Woodbury formula again, we compute its $LDL^\top$ decomposition and apply the inverse of that decomposition.
+With the blocks
 \begin{align}
-    A      & =
+    A_{11} & = M \left[Q^{-1}\right]_{11} M^\top +D_x D_x^\top \nonumber \\
+    A_{12} & = M\left[Q^{-1}\right]_{12} + D_x \nonumber                 \\
+    A_{22} & = \left[Q^{-1}\right]_{22} + I,
+\end{align}
+the $LDL^\top$ decomposition of $A$ is
+\begin{equation}
+    A       =
     \begin{bmatrix}
         I & A_{12} A_{22}^{-1} \\ 0 & I
     \end{bmatrix}
@@ -626,16 +620,13 @@ $ can be applied efficiently. Instead of applying the Woodbury formula again, we
     \begin{bmatrix}
         I & A_{12} A_{22}^{-1} \\ 0 & I
     \end{bmatrix}
-    ^\top \nonumber                                                      \\
-    A_{11} & = M \left[Q^{-1}\right]_{11} M^\top +D_x D_x^\top \nonumber \\
-    A_{12} & = M\left[Q^{-1}\right]_{12} + D_x \nonumber                 \\
-    A_{22} & = \left[Q^{-1}\right]_{22} + I.
-\end{align}
+    ^\top,
+\end{equation}
 so
 \begin{align}
     A^{-1} & = \begin{bmatrix}
-                   I & -A_{12} A_{22}^{-1} \\ 0 & I
-               \end{bmatrix}
+        I & -A_{12} A_{22}^{-1} \\ 0 & I
+    \end{bmatrix}
     ^\top
     \begin{bmatrix}
         A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
@@ -650,13 +641,13 @@ Since $A_{11}$ is block tri-diagonal, $A_{12}$ is block-bidiagonal, and $A_{22}$
 
 \subsection*{Summary: Algorithm to compute $H^{-1} g$}
 
-Given a vector $g \in \mathbb{R}^{Lp}$, compute $H^{-1} g$ as follows:
+Given a vector $g \in \R^{Lp}$, compute $H^{-1} g$ as follows:
 
 \begin{enumerate}
     \item
           \textbf{Compute the auxiliary vector:}
           \[
-              g'  \in \mathbb{R}^{La + Lp} \equiv \begin{bmatrix}
+              g'  \in \R^{La + Lp} \equiv \begin{bmatrix}
                   D_x \\ I
               \end{bmatrix}
               g.
@@ -666,30 +657,25 @@ Given a vector $g \in \mathbb{R}^{Lp}$, compute $H^{-1} g$ as follows:
     \item
           \textbf{Form the banded matrix:}
           \[
-              A \in \mathbb{R}^{L(a+p) \times L(a+p)} \equiv \hat{M} Q^{-1} \hat{M}^\top +
+              A \in \R^{L(a+p) \times L(a+p)} \equiv \hat{M} Q^{-1} \hat{M}^\top +
               \begin{bmatrix}
                   D_x D_x^\top & D_x \\ D_x^\top & I
               \end{bmatrix}
               .
           \]
-          To compute $Q^{-1}$, we first compute the blocks of $Q$. These take $La^3$
-          multiplications for $Q_{11} \in \mathbb{R}^{La\times La}$, $La^2p$ for
-          $Q_{12}\in \mathbb{R}^{L a\times Lp}$ and $Q_{21}\in \mathbb{R}^{Lp \times
-                  La}$, and $La^2p$ for $Q_{22}\in \mathbb{R}^{Lp \times Lp}$. Computing $S\in
-              \mathbb{R}^{La\times La}$ takes $L p^3$ to compute $Q_{22}^{-1}$, and $2Lap^2$
-          to compute the product $Q_{12} Q_{22}^{-1} Q_{21}$. Given these quantities, for
-          the blocks of $Q^{-1}$, it takes an additional $La^3$ to compute the upper left
-          block, $L(a^2p+ap^2)$ to compute the off-diagonal blocks, and somewhat less
-          than that to compute the bottom diagonal block since the matrices involved have
-          already been computed. In all, it takes less than $9L\max(a,p)^3$
-          multiplications to compute $Q^{-1}$.
+          To compute $Q^{-1}$, we first compute the blocks of $Q$. These take $La^3$ multiplications for $Q_{11} \in \R^{La\times
+                  La}$, $La^2p$ for $Q_{12}\in \R^{L a\times Lp}$ and $Q_{21}\in \R^{Lp \times La}$, and $La^2p$ for $Q_{22}\in \R^{Lp
+                  \times Lp}$. Computing $S\in \R^{La\times La}$ takes $L p^3$ to compute $Q_{22}^{-1}$, and $2Lap^2$ to compute the
+          product $Q_{12} Q_{22}^{-1} Q_{21}$. Given these quantities, for the blocks of $Q^{-1}$, it takes an additional $La^3$
+          to compute the upper left block, $L(a^2p+ap^2)$ to compute the off-diagonal blocks, and somewhat less than that to
+          compute the bottom diagonal block since the matrices involved have already been computed. In all, it takes less than
+          $9L\max(a,p)^3$ multiplications to compute $Q^{-1}$.
 
-          To compute $\hat{M}Q^{-1}\hat{M}^\top$ requires an additional $2La^3$
-          operations for a total of $11L\max(a,p)^3$ multiplications.
+          To compute $\hat{M}Q^{-1}\hat{M}^\top$ requires an additional $2La^3$ operations for a total of $11L\max(a,p)^3$
+          multiplications.
 
-          Finally, computing and adding the second term requires $La^2p$ multiplications,
-          bringing the tally to at most $12 L \max(a,p)^3$ multiplications to compute
-          $A$.
+          Finally, computing and adding the second term requires $La^2p$ multiplications, bringing the tally to at most $12 L
+              \max(a,p)^3$ multiplications to compute $A$.
 
     \item
           \textbf{Apply $A^{-1}$ to $g'$:}
@@ -709,11 +695,9 @@ Given a vector $g \in \mathbb{R}^{Lp}$, compute $H^{-1} g$ as follows:
               \end{bmatrix}
               g'.
           \]
-          This computation requires $2L\max(a,p)^3$ multiplications to compute
-          $A_{22}^{-1}$ and $\left[A_{11}-A_{12} A_{22}^{-1}A_{12}\right]^{-1}$. The
-          remaining operations are matrix multiplications that take at most
-          $3L\max(a,p)^2$, which is smaller than $Lp^3$ when $p>3$. This brings the tally
-          to at most $15L\max(a,p)^3$ multiplications.
+          This computation requires $2L\max(a,p)^3$ multiplications to compute $A_{22}^{-1}$ and $\left[A_{11}-A_{12}
+                  A_{22}^{-1}A_{12}\right]^{-1}$. The remaining operations are matrix multiplications that take at most $3L\max(a,p)^2$,
+          which is smaller than $Lp^3$ when $p>3$. This brings the tally to at most $15L\max(a,p)^3$ multiplications.
 
     \item
           \textbf{Compute the final result:}
@@ -723,11 +707,90 @@ Given a vector $g \in \mathbb{R}^{Lp}$, compute $H^{-1} g$ as follows:
               \end{bmatrix}
               ^\top g''.
           \]
-          These are again matrix-vector multiplications that take at most $L\max(a,p)^2$
-          when $p>1$, bringing the tally to at most $16L\max(a,p)^3$.
+          These are again matrix-vector multiplications that take at most $L\max(a,p)^2$ when $p>1$, bringing the tally to at
+          most $16L\max(a,p)^3$.
 \end{enumerate}
 
 \bibliographystyle{plain}
 \bibliography{hessian}
+
+\appendix \section{Equation (\ref{eq:hessian}) is Pearlmutter's Hessian-vector multiplication algorithm}
+\label{sec:pearlmutter}
+
+We showed that Equation (\ref{eq:hessian}) makes it possible to compute Hessian-vector product $H v$ in time linear in
+$L$. These operations are equivalent to Pearlmutter's \cite{pearlmutter94} algorithm, a framework to compute
+Hessian-vector products in networks with arbitrary topologies. This section specializes Pearlmutter's machinery to the
+pipeline topology, and shows that the operations it produces coincide exactly with those of Equation
+(\ref{eq:hessian}).
+
+Consider a set of vectors $v_1,\ldots,v_L$ that match the dimensions of the parameter vectors $x_1,\ldots,x_L$. Just as
+$z_L(x_1,\ldots,x_L)$ denotes the loss under the parameters $w$, we'll consider the perturbed loss $z_L(x_1+\alpha v_1,
+    \ldots, x_L+\alpha v_L)$ with a scalar $\alpha$. By the chain rule,
+\begin{equation}
+    \frac{\partial}{\partial \alpha} z_L(x_1+\alpha_1 v_1, \ldots, x_L+\alpha_L v_L) \bigg|_{\alpha=0} =
+    \nabla_x z_L(x_1, \ldots, x_L) \cdot v.
+\end{equation}
+Applying $\nabla_x$ to both sides gives
+\begin{equation}
+    \nabla_x \frac{\partial}{\partial \alpha} z_L(x_1+\alpha_1 v_1, \ldots, x_L+\alpha_L v_L) \bigg|_{\alpha=0} =
+    \nabla_x^2 z_L(x_1, \ldots, x_L) \cdot v.
+\end{equation}
+In other words, to compute the Hessian-vector product $\nabla_x^2 z_L \cdot v$,
+it suffices to compute the gradient of $\frac{\partial z_L}{\partial \alpha} $
+with respect to $x$.  We can do this by applying standard backpropoagation
+to $\frac{\partial z_L}{\partial \alpha}$. At each stage $\ell$ during its
+backward pass, backpropagation produces $\frac{\partial}{\partial x_\ell}
+    \frac{\partial z_L}{\partial \alpha} = \nabla_{x_\ell, x} z_L \cdot v$, yielding
+a block of rows in in $\nabla_x^2 z_L \cdot v$.
+
+To see that this generates the same operations as applying Equation (\ref{eq:hessian}) to $v$, we'll write the backprop
+operations from Equation (\ref{eq:backprop}) against $\frac{\partial z_L}{\partial \alpha}$ explicitly. We'll use again
+the fact that $z_\ell$ depends on $\alpha$ through both $z_{\ell-1}$ and $x_\ell + \alpha v_\ell$ to massage the
+backward recursion of for $\frac{\partial z_L}{\partial \alpha}$ into a format that matches Equation
+(\ref{eq:backprop}):
+\begin{align}
+    b'_\ell &\equiv \frac{\partial}{\partial z_\ell} \frac{\partial z_L}{\partial \alpha}
+    = \frac{\partial}{\partial \alpha} \frac{\partial z_L}{\partial z_\ell}
+    = \frac{\partial}{\partial \alpha} b_\ell
+    = \frac{\partial}{\partial \alpha} \left[b_{\ell+1} \cdot \nabla_z f_{\ell+1}\right] \\
+    &= b'_{\ell+1} \cdot \nabla_z f_{\ell+1} + \left[\left(I \otimes b_{\ell+1}\right) \frac{\partial}{\partial \alpha} \text{vec}\left(\nabla_z f_{\ell+1}\right) \right]^\top \\
+    &= b'_{\ell+1} \cdot \nabla_z f_{\ell+1} + \left[\left(I \otimes b_{\ell+1}\right) \left(\nabla_{zz} f_{\ell+1} \cdot \frac{\partial z_\ell}{\partial \alpha} + \nabla_{xz} f_{\ell+1} \cdot v_{\ell+1}\right)\right]^\top.
+\end{align}
+During the backward pass, from $b_\ell$ and $b'_\ell$, we compute
+\begin{align}
+    \frac{\partial }{\partial x_\ell} \frac{\partial z_L}{\partial \alpha}
+    &=\left(\nabla_{x_\ell, x} z_L\right) \cdot v
+    = \frac{\partial}{\partial \alpha} \frac{\partial z_L}{\partial x_\ell}
+    = \frac{\partial}{\partial \alpha} \left[\frac{\partial z_L}{\partial z_{\ell}} \frac{\partial z_\ell}{\partial x_\ell}\right]
+    = \frac{\partial}{\partial \alpha} \left[b_\ell \cdot \nabla_x f_\ell\right] \\
+    &= b'_\ell \cdot \nabla_x f_\ell + \left[\left(I\otimes b_\ell\right) \frac{\partial}{\partial \alpha} \text{vec}\left(\nabla_x f_\ell\right)\right]^\top \\
+    &= b'_\ell \cdot \nabla_x f_\ell + \left[\left(I\otimes b_\ell\right) \left(\nabla_{zx} f_\ell \cdot \frac{\partial z_{\ell-1}}{\partial \alpha} + \nabla_{xx} f_\ell \cdot v_\ell\right)\right]^\top.
+\end{align}
+Stacking these backward equations horizontally with $b'\equiv\left[\begin{smallmatrix}
+            b'_1 & \cdots & b'_L
+        \end{smallmatrix}
+        \right]$,
+$g^\alpha_\ell \equiv \frac{\partial z_\ell}{\partial \alpha}$ and $g^\alpha\equiv\left[\begin{smallmatrix}
+            g^\alpha_1 \\ \vdots \\ g^\alpha_L
+        \end{smallmatrix}
+        \right]$, then transposing, gives
+\begin{align}
+    \label{eq:pearlmutter-2}
+    M^\top \left(b'\right)^\top &= P D_M  \left(D_{zz} g^\alpha + D_{xz} v\right) \nonumber\\
+    \nabla_x^2 z_L \cdot v &= D_x^\top \left(b'\right)^\top + D_D \left(D_{zx} P g^\alpha + D_{xx} v\right).
+\end{align}
+
+$g^\alpha_\ell$ can be computed during the forward pass via
+\begin{equation}
+    g^\alpha_\ell \equiv \frac{\partial z_\ell}{\partial \alpha}
+    = \nabla_z f_\ell \cdot \frac{\partial z_{\ell-1}}{\partial \alpha} + \nabla_x f_\ell \cdot v_\ell
+    = \nabla_z f_\ell \cdot g^\alpha_{\ell-1} + \nabla_x f_\ell \cdot v_\ell,
+\end{equation}
+which when stacked up, gives $M g^\alpha = D_x v$.  Plugging $g^\alpha$ back
+into Equation (\ref{eq:pearlmutter-2}) and solving for $b'$ gives
+\begin{equation}
+    \nabla_x^2 z_L \cdot v = D_x^\top M^{-\top} P D_M  \left(D_{zz} M^{-1} D_x v + D_{xz} v\right) +  D_D \left(D_{zx} P M^{-1} D_x v + D_{xx} v\right).
+\end{equation}
+This coincides with Equation (\ref{eq:hessian}), showing that the two algorithms are equivalent.
 
 \end{document}
