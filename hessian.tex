@@ -16,13 +16,13 @@
 
 \maketitle
 \begin{abstract}
-    We show how to solve linear systems that involve the Hessian of a deep net.
-    Compared to the naive approach of first computing the Hessian, then solving
-    the linear system, which takes storage that's quadratic in the number of
-    parameters and cubically many operations, the method scales roughly like
-    Pearlmutter's algorithm for computing Hessian-vector products. That means
-    Hessian-inverse-vector products can be computed in time and storage that
-    scale linearly in the number of parameters.
+  We show how to solve linear systems that involve the Hessian of a deep net.
+  Compared to the naive approach of first computing the Hessian, then solving
+  the linear system, which takes storage that's quadratic in the number of
+  parameters and cubically many operations, the method scales roughly like
+  Pearlmutter's algorithm for computing Hessian-vector products. That means
+  Hessian-inverse-vector products can be computed in time and storage that
+  scale linearly in the number of parameters.
 \end{abstract}
 
 \section{Introduction}
@@ -67,29 +67,29 @@ the Hessian of short and fat networks.
 Our objective is to efficiently solve linear systems of the form $H x = g$, where $H$ is the Hessian of a deep neural
 network, without forming $H$ explicitly. To do this, we employ the following strategy:
 \begin{enumerate}
-    \item
-          Write down the gradient of the deep net in matrix form, as a bi-diagonal system of linear
-          equations. Solving this system uses back-substitution, which in this case
-          coincides exactly with the computations carried out by backpropagation.
-    \item
-          Differentiate this matrix form to obtain the second-order derivatives. Write the result in matrix form,
-          hiwch involves a second-order polynomial in the inverse of the aforementioned bi-diagonal matrix.
-    \item
-          Lift this polynomial into a higher-dimensional matrix form, and use the Woodbury formula to invert the resulting
-          matrix.
-    \item
-          Derive a fast algorithm to apply the inverse of such polynomials.
+  \item
+    Write down the gradient of the deep net in matrix form, as a bi-diagonal system of linear
+    equations. Solving this system uses back-substitution, which in this case
+    coincides exactly with the computations carried out by backpropagation.
+  \item
+    Differentiate this matrix form to obtain the second-order derivatives. Write the result in matrix form,
+    hiwch involves a second-order polynomial in the inverse of the aforementioned bi-diagonal matrix.
+  \item
+    Lift this polynomial into a higher-dimensional matrix form, and use the Woodbury formula to invert the resulting
+    matrix.
+  \item
+    Derive a fast algorithm to apply the inverse of such polynomials.
 \end{enumerate}
 
 \section{Notation}
 
 We write a deep net as a pipeline of functions $\ell = 1, \ldots, L$,
 \begin{align}
-    z_1    & = f_1(z_0; x_1) \nonumber              \\
-    & \ldots \nonumber                       \\
-    z_\ell & = f_\ell(z_{\ell-1}; x_\ell) \nonumber \\
-    & \ldots \nonumber                       \\
-    z_L    & = f_L(z_{L-1}; x_L)
+  z_1    & = f_1(z_0; x_1) \nonumber              \\
+  & \ldots \nonumber                       \\
+  z_\ell & = f_\ell(z_{\ell-1}; x_\ell) \nonumber \\
+  & \ldots \nonumber                       \\
+  z_L    & = f_L(z_{L-1}; x_L)
 \end{align}
 
 The vectors $x_1,\ldots, x_L$ are the parameters of the pipeline. The vectors $z_1,\ldots, z_L$ are its intermediate
@@ -119,57 +119,60 @@ a stochastic input $z_0$ to the pipeline. Training the model proceeds by gradien
 gradient $\partial z_L(z_0;x) / \partial x$. The components of this direction can be computed by the chain rule with a
 backward recursion:
 \begin{align}
-    \label{eq:backprop}
-    \frac{\partial z_L}{\partial x_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell}}}_{b_\ell} \underbrace{\frac{\partial z_\ell}{\partial x_\ell}}_{\nabla_x f_\ell}                \\
-    \frac{\partial z_L}{\partial z_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell+1}}}_{b_{\ell+1}} \underbrace{\frac{\partial z_{\ell+1}}{\partial z_\ell}}_{\nabla_z f_{\ell+1}}.
+  \label{eq:backprop}
+  \frac{\partial z_L}{\partial x_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell}}}_{b_\ell} \underbrace{\frac{\partial z_\ell}{\partial x_\ell}}_{\nabla_x f_\ell}                \\
+  \frac{\partial z_L}{\partial z_\ell} & = \underbrace{\frac{\partial z_L}{\partial z_{\ell+1}}}_{b_{\ell+1}} \underbrace{\frac{\partial z_{\ell+1}}{\partial z_\ell}}_{\nabla_z f_{\ell+1}}.
 \end{align}
 The identification $b_\ell \equiv \frac{\partial z_L}{\partial z_\ell}$, $\nabla_x f_\ell \equiv \frac{\partial z_\ell}{\partial x_\ell}$, and $\nabla_z f_\ell \equiv \frac{\partial z_\ell}{\partial z_{\ell-1}}$ turns this recurrence into
 \begin{align}
-    \frac{\partial z_L}{\partial x_\ell} & = b_\ell \cdot \nabla_x f_\ell          \\
-    b_\ell                               & = b_{\ell+1} \cdot \nabla_z f_{\ell+1},
+  \frac{\partial z_L}{\partial x_\ell} & = b_\ell \cdot \nabla_x f_\ell          \\
+  b_\ell                               & = b_{\ell+1} \cdot \nabla_z f_{\ell+1},
 \end{align}
 with the base case $b_L = 1$, a scalar.  These two equations can be written in vector form as
 \begin{equation}
-    \frac{\partial z_L}{\partial x} =
+  \frac{\partial z_L}{\partial x} =
+  \begin{bmatrix}
+    \frac{\partial z_L}{\partial x_1} & \cdots & \frac{\partial z_L}{\partial x_L}
+  \end{bmatrix}
+  =
+  \underbrace{
     \begin{bmatrix}
-        \frac{\partial z_L}{\partial x_1} & \cdots & \frac{\partial z_L}{\partial x_L}
+      b_1 & \cdots & b_L
     \end{bmatrix}
-    =
-    \underbrace{\begin{bmatrix}
-            b_1 & \cdots & b_L
-        \end{bmatrix}
-    }_{\equiv b}
-    \underbrace{\begin{bmatrix}
-            \nabla_x f_1 &                       \\
-                         & \ddots                \\
-                         &        & \nabla_x f_L
-        \end{bmatrix}
-    }_{\equiv D_x},
+  }_{\equiv b}
+  \underbrace{
+    \begin{bmatrix}
+      \nabla_x f_1 &                       \\
+      & \ddots                \\
+      &        & \nabla_x f_L
+    \end{bmatrix}
+  }_{\equiv D_x},
 \end{equation}
 and
 \begin{equation}
+  \begin{bmatrix}
+    b_1 & b_2 & b_3 & \cdots & b_{L-1} & b_L
+  \end{bmatrix}
+  \underbrace{
     \begin{bmatrix}
-        b_1 & b_2 & b_3 & \cdots & b_{L-1} & b_L
+      I                                                          \\
+      -\nabla_z f_2 & I                                          \\
+      & -\nabla_z f_3 & I                          \\
+      &               & \ddots & \ddots            \\
+      &               &        & -\nabla_z f_L & 1 \\
     \end{bmatrix}
-    \underbrace{
-        \begin{bmatrix}
-            I                                                          \\
-            -\nabla_z f_2 & I                                          \\
-                          & -\nabla_z f_3 & I                          \\
-                          &               & \ddots & \ddots            \\
-                          &               &        & -\nabla_z f_L & 1 \\
-        \end{bmatrix}
-    }_{\equiv M}
-    =
-    \underbrace{\begin{bmatrix}
-            0 & \cdots & 1
-        \end{bmatrix}
-    }_{\equiv e_L}.
+  }_{\equiv M}
+  =
+  \underbrace{
+    \begin{bmatrix}
+      0 & \cdots & 1
+    \end{bmatrix}
+  }_{\equiv e_L}.
 \end{equation}
 
 Solving for $b$ and substituting back gives
 \begin{equation}
-    \frac{\partial z_L}{\partial x} =  e_L M^{-1} D_x.
+  \frac{\partial z_L}{\partial x} =  e_L M^{-1} D_x.
 \end{equation}
 
 The matrix $M$ is block bi-diagonal. Its diagonal entries are identity matrices, and its off-diagonal matrices are the
@@ -186,156 +189,162 @@ as $dx\to 0$. In this section, we compute the Hessian $H$ of $z_L$ with respect 
 matrix $H(x)$ such that $dv^\top \equiv v^\top(x+dx) - v^\top(x) \to H(x)\; dx$ as $dx \to 0$. We use the facts that
 $dM^{-1} = -M^{-1} (dM) M^{-1}$ and $b=e_L M^{-1}$ to write
 \begin{align}
-    dv & = d(e_L M^{-1} D_x) \nonumber                               \\
-    & = e_L M^{-1} (dD_x)+ e_L \left(dM^{-1}\right) D_x \nonumber \\
-    & = b \cdot dD_x  - e_L M^{-1} (dM) M^{-1} D_x \nonumber      \\
-    & = b \cdot dD_x  - b \cdot (dM) M^{-1} D_x
+  dv & = d(e_L M^{-1} D_x) \nonumber                               \\
+  & = e_L M^{-1} (dD_x)+ e_L \left(dM^{-1}\right) D_x \nonumber \\
+  & = b \cdot dD_x  - e_L M^{-1} (dM) M^{-1} D_x \nonumber      \\
+  & = b \cdot dD_x  - b \cdot (dM) M^{-1} D_x
 \end{align}
 
 We compute each of these terms separately. As part of this agenda, we will rely on the gradient of tensor-valued
 functions $g:\R^d \to \R^{o_1 \times \cdots \times o_k}$. Define this gradient $\nabla_x g(x)\in \R^{(o_1 \cdots o_k)
-        \times d}$ as the unique matrix-valued function that satisfies
+\times d}$ as the unique matrix-valued function that satisfies
 
 \begin{equation}
-    \mathrm{vec} \left(g(x+dx) - g(x)\right) \to \nabla_x g(x)
-    \cdot dx
+  \mathrm{vec} \left(g(x+dx) - g(x)\right) \to \nabla_x g(x)
+  \cdot dx
 \end{equation}
 
 as $dx \to 0$. This convention readily implies the Hessian of a vector-valued function: If $g:\R^d \to \R^o$, then
 $\nabla_{xx} g(x) \in \R^{o\times d^2}$ is the unique matrix such that $\mathrm{vec} \left(\nabla_x g(x+dx) - \nabla_x
-    g(x)\right) \to \nabla_{xx} g(x) \; dx$. This convention also readily accommodates the chain rule. For example, the
+g(x)\right) \to \nabla_{xx} g(x) \; dx$. This convention also readily accommodates the chain rule. For example, the
 gradient of $h(x) \equiv f(g(x))$ for matrix-valued $f$ and $g$ can be written as $\nabla f \nabla g$ as expected. It
 also implies partial derivatives like $\nabla_{yz} g$ for $g:\R^{|x|} \to \R^{|g|}$. If $y\in \R^{|y|}$ and $z\in
-    \R^{|z|}$ are restrictions of $x \in \R^{|x|}$ to some $|y|$ and $|z|$-dimensional subsets, then $\nabla_z g(x) \in
-    \R^{|g| \times |z|}$, and $\nabla_{yz} g(x) = \nabla_y \nabla_z g(x) \in \R^{|g||z| \times |y|}$. See Chapter 6 of
+\R^{|z|}$ are restrictions of $x \in \R^{|x|}$ to some $|y|$ and $|z|$-dimensional subsets, then $\nabla_z g(x) \in
+\R^{|g| \times |z|}$, and $\nabla_{yz} g(x) = \nabla_y \nabla_z g(x) \in \R^{|g||z| \times |y|}$. See Chapter 6 of
 Magnus \& Neudecker \cite{magnus-neudecker} for a deeper treatment of higher order derivatives of vector-valued
 functions.
 
 \subsection{The term involving $dD_x$}
 
 The matrix $D_x$ is block-diagonal with its $\ell$th diagonal block containing the matrix $D_\ell \equiv \nabla_x
-    f_\ell$. Using the facts that $\mathrm{vec}(ABC) = \left(C^\top \otimes A \right) \mathrm{vec}(B)$, and $(A\otimes
-    B)^\top = A^\top \otimes B^\top$, we get
+f_\ell$. Using the facts that $\mathrm{vec}(ABC) = \left(C^\top \otimes A \right) \mathrm{vec}(B)$, and $(A\otimes
+B)^\top = A^\top \otimes B^\top$, we get
 \begin{align}
-    b\cdot (dD_x) & =
-    \begin{bmatrix}
-        b_1 & \cdots & b_L
-    \end{bmatrix}
-    \begin{bmatrix}
-        dD_1 &        &      \\
-             & \ddots &      \\
-             &        & dD_L
-    \end{bmatrix}
-    \nonumber                                                                              \\
-    & = \begin{bmatrix}
-        b_1 \cdot dD_1 & \cdots & b_L \cdot dD_L
-    \end{bmatrix}
-    \nonumber                                                                              \\
-    & = \begin{bmatrix}
-        \mathrm{vec}\left(dD_1\right)^\top \left(I \otimes b_1^\top\right) &
-        \cdots                                                             &
-        \mathrm{vec}\left(dD_L\right)^\top \left(I \otimes b_L^\top\right)
-    \end{bmatrix}
-    \nonumber                                                                              \\
-    & = \begin{bmatrix}
-        \mathrm{vec}\left(dD_1\right) \\
-        \vdots                        \\
-        \mathrm{vec}\left(dD_L\right)
-    \end{bmatrix}
-    ^\top
-    \begin{bmatrix}
-        I \otimes b_1^\top &        &                    \\
-                           & \ddots &                    \\
-                           &        & I \otimes b_L^\top
-    \end{bmatrix}
+  b\cdot (dD_x) & =
+  \begin{bmatrix}
+    b_1 & \cdots & b_L
+  \end{bmatrix}
+  \begin{bmatrix}
+    dD_1 &        &      \\
+    & \ddots &      \\
+    &        & dD_L
+  \end{bmatrix}
+  \nonumber                                                                              \\
+  & =
+  \begin{bmatrix}
+    b_1 \cdot dD_1 & \cdots & b_L \cdot dD_L
+  \end{bmatrix}
+  \nonumber                                                                              \\
+  & =
+  \begin{bmatrix}
+    \mathrm{vec}\left(dD_1\right)^\top \left(I \otimes b_1^\top\right) &
+    \cdots                                                             &
+    \mathrm{vec}\left(dD_L\right)^\top \left(I \otimes b_L^\top\right)
+  \end{bmatrix}
+  \nonumber                                                                              \\
+  & =
+  \begin{bmatrix}
+    \mathrm{vec}\left(dD_1\right) \\
+    \vdots                        \\
+    \mathrm{vec}\left(dD_L\right)
+  \end{bmatrix}
+  ^\top
+  \begin{bmatrix}
+    I \otimes b_1^\top &        &                    \\
+    & \ddots &                    \\
+    &        & I \otimes b_L^\top
+  \end{bmatrix}
 \end{align}
 
 Observe that $\mathrm{vec}\left(dD_\ell\right) = d\,\mathrm{vec} \nabla_x f_\ell(z_{\ell-1}; x_\ell)$ varies with $dx$
 through both its arguments $x_\ell$ and $z_{\ell-1}$. Using mixed partials of vector-valued functions described above,
 we get
 \begin{equation}
-    \mathrm{vec} \left(dD_\ell\right) = d\,\mathrm{vec}\left(\nabla_x f_\ell\right) = \left(\nabla_{xx} f_\ell\right)\; dx_\ell  + \left(\nabla_{zx} f_\ell\right)\; dz_{\ell-1}.
+  \mathrm{vec} \left(dD_\ell\right) = d\,\mathrm{vec}\left(\nabla_x f_\ell\right) = \left(\nabla_{xx} f_\ell\right)\; dx_\ell  + \left(\nabla_{zx} f_\ell\right)\; dz_{\ell-1}.
 \end{equation}
 
 Stacking these equations gives
 \begin{align}
-    \begin{bmatrix}
-        \mathrm{vec}\left(dD_1\right) \\
-        \vdots                        \\
-        \mathrm{vec}\left(dD_L\right)
-    \end{bmatrix}
-    & =
-    \begin{bmatrix}
-        \nabla_{xx} f_1 &        &                 \\
-                        & \ddots &                 \\
-                        &        & \nabla_{xx} f_L
-    \end{bmatrix}
-    dx
-    +
-    \begin{bmatrix}
-        \nabla_{zx} f_1 &        &                 \\
-                        & \ddots &                 \\
-                        &        & \nabla_{zx} f_L
-    \end{bmatrix}
-    \begin{bmatrix}
-        dz_0 \\ \vdots \\ dz_{L-1}
-    \end{bmatrix}
-    .
+  \begin{bmatrix}
+    \mathrm{vec}\left(dD_1\right) \\
+    \vdots                        \\
+    \mathrm{vec}\left(dD_L\right)
+  \end{bmatrix}
+  & =
+  \begin{bmatrix}
+    \nabla_{xx} f_1 &        &                 \\
+    & \ddots &                 \\
+    &        & \nabla_{xx} f_L
+  \end{bmatrix}
+  dx
+  +
+  \begin{bmatrix}
+    \nabla_{zx} f_1 &        &                 \\
+    & \ddots &                 \\
+    &        & \nabla_{zx} f_L
+  \end{bmatrix}
+  \begin{bmatrix}
+    dz_0 \\ \vdots \\ dz_{L-1}
+  \end{bmatrix}
+  .
 \end{align}
 
 Each vector $dz_\ell$ in turn varies with $dx$ via $dz_\ell = (\nabla_x f_\ell) dx_\ell + (\nabla_z f_\ell)
-    dz_{\ell-1}$, with the base case $dz_0 = 0$, since the input $z_0$ does not vary with $dx$. Stacking up this recurrence
+dz_{\ell-1}$, with the base case $dz_0 = 0$, since the input $z_0$ does not vary with $dx$. Stacking up this recurrence
 gives
 \begin{align}
-    \begin{bmatrix}
-        I             &   &                   \\
-        -\nabla_z f_2 & I &                   \\
-                      &   & \ddots            \\
-                      &   & -\nabla_z f_L & 1 \\
-    \end{bmatrix}
-    \begin{bmatrix}
-        dz_1 \\ \vdots \\ dz_{L-1}  \\ dz_L
-    \end{bmatrix}
-    =
-    \begin{bmatrix}
-        \nabla_x f_1 &        &              \\
-                     & \ddots &              \\
-                     &        & \nabla_x f_L
-    \end{bmatrix}
-    dx.
+  \begin{bmatrix}
+    I             &   &                   \\
+    -\nabla_z f_2 & I &                   \\
+    &   & \ddots            \\
+    &   & -\nabla_z f_L & 1 \\
+  \end{bmatrix}
+  \begin{bmatrix}
+    dz_1 \\ \vdots \\ dz_{L-1}  \\ dz_L
+  \end{bmatrix}
+  =
+  \begin{bmatrix}
+    \nabla_x f_1 &        &              \\
+    & \ddots &              \\
+    &        & \nabla_x f_L
+  \end{bmatrix}
+  dx.
 \end{align}
-We can solve for the vector $\begin{bmatrix}
-        dz_1 \\ \vdots \\ dz_L
-    \end{bmatrix}
-    = M^{-1} D_x dx$ and use the downshifting matrix
+We can solve for the vector $
+\begin{bmatrix}
+  dz_1 \\ \vdots \\ dz_L
+\end{bmatrix}
+= M^{-1} D_x dx$ and use the downshifting matrix
 \begin{equation}
-    P \equiv \begin{bmatrix}
-        0 \\ I & 0 \\ &\ddots \\ &I&0
-    \end{bmatrix}
+  P \equiv
+  \begin{bmatrix}
+    0 \\ I & 0 \\ &\ddots \\ &I&0
+  \end{bmatrix}
 \end{equation}
-to plug back the vector $\begin{bmatrix}
-        dz_0 \\ \vdots \\ dz_{L-1}
-    \end{bmatrix}
-    =PM^{-1}D_x dx$:
+to plug back the vector $
+\begin{bmatrix}
+  dz_0 \\ \vdots \\ dz_{L-1}
+\end{bmatrix}
+=PM^{-1}D_x dx$:
 \begin{align}
+  \begin{bmatrix}
+    \mathrm{vec}\left(dD_1\right) \\
+    \vdots                        \\
+    \mathrm{vec}\left(dD_L\right)
+  \end{bmatrix}
+  =
+  \left(
     \begin{bmatrix}
-        \mathrm{vec}\left(dD_1\right) \\
-        \vdots                        \\
-        \mathrm{vec}\left(dD_L\right)
-    \end{bmatrix}
-    =
-    \left(
-    \begin{bmatrix}
-        \nabla_{xx} f_1 &        &                 \\
-                        & \ddots &                 \\
-                        &        & \nabla_{xx} f_L
+      \nabla_{xx} f_1 &        &                 \\
+      & \ddots &                 \\
+      &        & \nabla_{xx} f_L
     \end{bmatrix}
     +
     \begin{bmatrix}
-        \nabla_{zx} f_1 \\ &\ddots& \\ &&\nabla_{zx} f_L
+      \nabla_{zx} f_1 \\ &\ddots& \\ &&\nabla_{zx} f_L
     \end{bmatrix}
     P M^{-1} D_x
-    \right)dx.
+  \right)dx.
 \end{align}
 
 \subsection{The term involving $dM$}
@@ -343,148 +352,160 @@ to plug back the vector $\begin{bmatrix}
 The matrix $dM$ is lower-block-diagonal with $dM_2,\ldots, dM_L$, and $dM_\ell \equiv d \nabla_z f_\ell$. Similar to
 the above, we can write
 \begin{align}
-    b & \cdot (dM) M^{-1} D_x =
-    \begin{bmatrix}
-        b_1 & \cdots & b_{L-1} & b_L
-    \end{bmatrix}
-    \begin{bmatrix}
-        0                  \\
-        -dM_2 & 0          \\
-              & \ddots     \\
-              & -dM_L  & 0 \\
-    \end{bmatrix}
-    M^{-1} D_x                                                                   \\
-    & = -\begin{bmatrix}
-        b_2 \cdot dM_2 & \cdots & b_L \cdot dM_L & 0
-    \end{bmatrix}
-    M^{-1} D_x                                                                   \\
-    & = -\begin{bmatrix}
-        \mathrm{vec} \left(dM_2\right)^\top \left(I \otimes b_2^\top\right) &
-        \cdots                                                              &
-        \mathrm{vec} \left(dM_L\right)^\top \left(I \otimes b_L^\top\right) &
-        0
-    \end{bmatrix}
-    M^{-1} D_x                                                                   \\
-    & =
-    -\begin{bmatrix}
-        \mathrm{vec} \left(dM_1\right) \\
-        \vdots                         \\
-        \mathrm{vec} \left(dM_L\right)
-    \end{bmatrix}
-    ^\top
-    \begin{bmatrix}
-        0                                               \\
-        I \otimes b_2^\top & 0                          \\
-                           &   & \ddots                 \\
-                           &   & I \otimes b_L^\top & 0
-    \end{bmatrix}
-    M^{-1} D_x                                                                   \\
-    & = -\begin{bmatrix}
-        \mathrm{vec} \left(dM_1\right) \\
-        \vdots                         \\
-        \mathrm{vec} \left(dM_L\right)
-    \end{bmatrix}
-    ^\top
-    \begin{bmatrix}
-        I \otimes b_1^\top \\ &\ddots  \\ && I \otimes b_L^\top
-    \end{bmatrix}
-    PM^{-1} D_x.
+  b & \cdot (dM) M^{-1} D_x =
+  \begin{bmatrix}
+    b_1 & \cdots & b_{L-1} & b_L
+  \end{bmatrix}
+  \begin{bmatrix}
+    0                  \\
+    -dM_2 & 0          \\
+    & \ddots     \\
+    & -dM_L  & 0 \\
+  \end{bmatrix}
+  M^{-1} D_x                                                                   \\
+  & = -
+  \begin{bmatrix}
+    b_2 \cdot dM_2 & \cdots & b_L \cdot dM_L & 0
+  \end{bmatrix}
+  M^{-1} D_x                                                                   \\
+  & = -
+  \begin{bmatrix}
+    \mathrm{vec} \left(dM_2\right)^\top \left(I \otimes b_2^\top\right) &
+    \cdots                                                              &
+    \mathrm{vec} \left(dM_L\right)^\top \left(I \otimes b_L^\top\right) &
+    0
+  \end{bmatrix}
+  M^{-1} D_x                                                                   \\
+  & =
+  -
+  \begin{bmatrix}
+    \mathrm{vec} \left(dM_1\right) \\
+    \vdots                         \\
+    \mathrm{vec} \left(dM_L\right)
+  \end{bmatrix}
+  ^\top
+  \begin{bmatrix}
+    0                                               \\
+    I \otimes b_2^\top & 0                          \\
+    &   & \ddots                 \\
+    &   & I \otimes b_L^\top & 0
+  \end{bmatrix}
+  M^{-1} D_x                                                                   \\
+  & = -
+  \begin{bmatrix}
+    \mathrm{vec} \left(dM_1\right) \\
+    \vdots                         \\
+    \mathrm{vec} \left(dM_L\right)
+  \end{bmatrix}
+  ^\top
+  \begin{bmatrix}
+    I \otimes b_1^\top \\ &\ddots  \\ && I \otimes b_L^\top
+  \end{bmatrix}
+  PM^{-1} D_x.
 \end{align}
 
 Each matrix $dM_\ell = d \nabla_z f_\ell(z_{\ell-1}; x_\ell)$ varies with $dx$ through both $x_\ell$ and $z_{\ell -1}$
 as $d\,\mathrm{vec} \left(M_\ell\right) = \left(\nabla_{xz} f_\ell\right) dx_\ell + \left(\nabla_{zz} f_\ell\right)
-    dz_{\ell-1}$. Following the steps of the previous section gives
+dz_{\ell-1}$. Following the steps of the previous section gives
 \begin{align}
+  \begin{bmatrix}
+    \mathrm{vec}\left(dM_1\right) \\
+    \vdots                        \\
+    \mathrm{vec}\left(dM_L\right)
+  \end{bmatrix}
+  =
+  \left(
     \begin{bmatrix}
-        \mathrm{vec}\left(dM_1\right) \\
-        \vdots                        \\
-        \mathrm{vec}\left(dM_L\right)
-    \end{bmatrix}
-    =
-    \left(
-    \begin{bmatrix}
-        \nabla_{xz} f_1 &        &                 \\
-                        & \ddots &                 \\
-                        &        & \nabla_{xz} f_L
+      \nabla_{xz} f_1 &        &                 \\
+      & \ddots &                 \\
+      &        & \nabla_{xz} f_L
     \end{bmatrix}
     +
     \begin{bmatrix}
-        \nabla_{zz} f_1 \\ &\ddots& \\ && \nabla_{zz} f_L
+      \nabla_{zz} f_1 \\ &\ddots& \\ && \nabla_{zz} f_L
     \end{bmatrix}
     P M^{-1} D_x
-    \right)dx.
+  \right)dx.
 \end{align}
 
 \subsection{Putting it all together}
 
 We have just shown that the Hessian of the deep net has the form
 \begin{align}
-    H \equiv \frac{\partial^2 z_L}{\partial x^2}
-    & = D_D \left(D_{xx} + D_{zx} PM^{-1} D_x\right) + D_x^\top M^{-T}P^\top D_M \left(D_{xz}+D_{zz}P M^{-1}D_x\right)           \\
-    \label{eq:hessian}
-    & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x.
+  H \equiv \frac{\partial^2 z_L}{\partial x^2}
+  & = D_D \left(D_{xx} + D_{zx} PM^{-1} D_x\right) + D_x^\top M^{-T}P^\top D_M \left(D_{xz}+D_{zz}P M^{-1}D_x\right)           \\
+  \label{eq:hessian}
+  & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x.
 \end{align}
 
 The various matrices involved are recapitulated below:
 
 \begin{align*}
-    D_D    & \equiv \begin{bmatrix}
-                        \underbrace{I \otimes b_1}_{p \times ap} &        &               \\
-                                                                 & \ddots &               \\
-                                                                 &        & I \otimes b_L
-                    \end{bmatrix}
-    ,
-    \qquad
-    D_M \equiv \begin{bmatrix}
-                   \underbrace{I \otimes b_1}_{a \times a^2} &        &               \\
-                                                             & \ddots &               \\
-                                                             &        & I \otimes b_L
-               \end{bmatrix}
-    ,                                                                                                \\                                                                                     \\
-    P      & \equiv \begin{bmatrix}
-                        0 \\ I & 0 \\ &\ddots \\ &I&0
-                    \end{bmatrix}
-    ,    \qquad
-    M       \equiv \begin{bmatrix}
-                       I                                                                                    \\
-                       \underbrace{-\nabla_z f_2}_{a \times a} & I                                          \\
-                                                               & -\nabla_z f_3 & I                          \\
-                                                               &               & \ddots & \ddots            \\
-                                                               &               &        & -\nabla_z f_L & 1 \\
-                   \end{bmatrix}
-    ,                                                                                                \\
-    D_x    & \equiv  \begin{bmatrix}
-                         \underbrace{\nabla_x f_1}_{a\times p} &                       \\
-                                                               & \ddots                \\
-                                                               &        & \nabla_x f_L
-                     \end{bmatrix}
-    , \qquad
-    D_{xx} \equiv \begin{bmatrix}
-                      \underbrace{\nabla_{xx} f_1}_{ap\times p} &        &                 \\
-                                                                & \ddots &                 \\
-                                                                &        & \nabla_{xx} f_L
-                  \end{bmatrix}
-    , \qquad
-    D_{xz} \equiv
-    \begin{bmatrix}
-        \underbrace{\nabla_{xz} f_1}_{a^2 \times p} &        &                 \\
-                                                    & \ddots &                 \\
-                                                    &        & \nabla_{xz} f_L
-    \end{bmatrix}
-    ,                                                                                                \\
-    D_{zx} & \equiv \begin{bmatrix}
-                        \underbrace{\nabla_{zx} f_1}_{ap \times a} &        &                 \\
-                                                                   & \ddots &                 \\
-                                                                   &        & \nabla_{zx} f_L
-                    \end{bmatrix}
-    ,
-    \qquad
-    D_{zz}  \equiv \begin{bmatrix}
-                       \underbrace{\nabla_{zz} f_1}_{a^2\times a} &        &                 \\
-                                                                  & \ddots &                 \\
-                                                                  &        & \nabla_{zz} f_L
-                   \end{bmatrix}
-    .
+  D_D    & \equiv
+  \begin{bmatrix}
+    \underbrace{I \otimes b_1}_{p \times ap} &        &               \\
+    & \ddots &               \\
+    &        & I \otimes b_L
+  \end{bmatrix}
+  ,
+  \qquad
+  D_M \equiv
+  \begin{bmatrix}
+    \underbrace{I \otimes b_1}_{a \times a^2} &        &               \\
+    & \ddots &               \\
+    &        & I \otimes b_L
+  \end{bmatrix}
+  ,                                                                                                \\                                                                                     \\
+  P      & \equiv
+  \begin{bmatrix}
+    0 \\ I & 0 \\ &\ddots \\ &I&0
+  \end{bmatrix}
+  ,    \qquad
+  M       \equiv
+  \begin{bmatrix}
+    I                                                                                    \\
+    \underbrace{-\nabla_z f_2}_{a \times a} & I                                          \\
+    & -\nabla_z f_3 & I                          \\
+    &               & \ddots & \ddots            \\
+    &               &        & -\nabla_z f_L & 1 \\
+  \end{bmatrix}
+  ,                                                                                                \\
+  D_x    & \equiv
+  \begin{bmatrix}
+    \underbrace{\nabla_x f_1}_{a\times p} &                       \\
+    & \ddots                \\
+    &        & \nabla_x f_L
+  \end{bmatrix}
+  , \qquad
+  D_{xx} \equiv
+  \begin{bmatrix}
+    \underbrace{\nabla_{xx} f_1}_{ap\times p} &        &                 \\
+    & \ddots &                 \\
+    &        & \nabla_{xx} f_L
+  \end{bmatrix}
+  , \qquad
+  D_{xz} \equiv
+  \begin{bmatrix}
+    \underbrace{\nabla_{xz} f_1}_{a^2 \times p} &        &                 \\
+    & \ddots &                 \\
+    &        & \nabla_{xz} f_L
+  \end{bmatrix}
+  ,                                                                                                \\
+  D_{zx} & \equiv
+  \begin{bmatrix}
+    \underbrace{\nabla_{zx} f_1}_{ap \times a} &        &                 \\
+    & \ddots &                 \\
+    &        & \nabla_{zx} f_L
+  \end{bmatrix}
+  ,
+  \qquad
+  D_{zz}  \equiv
+  \begin{bmatrix}
+    \underbrace{\nabla_{zz} f_1}_{a^2\times a} &        &                 \\
+    & \ddots &                 \\
+    &        & \nabla_{zz} f_L
+  \end{bmatrix}
+  .
 \end{align*}
 
 \subsection{Mulitplying a vector by the Hessian}
@@ -505,137 +526,143 @@ $M^{-1}$ is dense, so $H$ is dense. Nevertheless, this polynomial can be lifted 
 inverse is easy to compute:
 
 \begin{align}
-    H & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x \\
-    & = \begin{bmatrix}
-        M^{-1}D_x \\ I
-    \end{bmatrix}
-    ^\top
+  H & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x \\
+  & =
+  \begin{bmatrix}
+    M^{-1}D_x \\ I
+  \end{bmatrix}
+  ^\top
+  \begin{bmatrix}
+    P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
+    D_D D_{zx} P        & D_D D_{xx}
+  \end{bmatrix}
+  \begin{bmatrix}
+    M^{-1}D_x \\ I
+  \end{bmatrix}
+  \\
+  & = I +
+  \begin{bmatrix}
+    D_x \\ I
+  \end{bmatrix}
+  ^\top
+  \underbrace{
     \begin{bmatrix}
-        P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
-        D_D D_{zx} P        & D_D D_{xx}
+      M^{-\top} & \\ & I
     \end{bmatrix}
+  }_{\hat{M}^{-\top}}
+  \underbrace{
     \begin{bmatrix}
-        M^{-1}D_x \\ I
+      P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
+      D_D D_{zx} P        & D_D D_{xx}-I
     \end{bmatrix}
-    \\
-    & = I +  \begin{bmatrix}
-        D_x \\ I
-    \end{bmatrix}
-    ^\top
-    \underbrace{\begin{bmatrix}
-            M^{-\top} & \\ & I
-        \end{bmatrix}
-    }_{\hat{M}^{-\top}}
-    \underbrace{
-        \begin{bmatrix}
-            P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
-            D_D D_{zx} P        & D_D D_{xx}-I
-        \end{bmatrix}
-    }_{\equiv Q}
-    \underbrace{\begin{bmatrix}
-            M^{-1} & \\ & I
-        \end{bmatrix}
-    }_{\hat{M}^{-1}}
+  }_{\equiv Q}
+  \underbrace{
     \begin{bmatrix}
-        D_x \\ I
+      M^{-1} & \\ & I
     \end{bmatrix}
-    .
+  }_{\hat{M}^{-1}}
+  \begin{bmatrix}
+    D_x \\ I
+  \end{bmatrix}
+  .
 \end{align}
 
 The Woodbury formula gives
 \begin{align}
-    H^{-1} & = I -
+  H^{-1} & = I -
+  \begin{bmatrix}
+    D_x \\ I
+  \end{bmatrix}
+  ^\top
+  \left( \left(\hat{M}^{-\top} Q \hat{M}^{-1}\right)^{-1} +
     \begin{bmatrix}
-        D_x \\ I
+      D_x \\ I
+    \end{bmatrix}
+    \begin{bmatrix}
+      D_x \\ I
     \end{bmatrix}
     ^\top
-    \left( \left(\hat{M}^{-\top} Q \hat{M}^{-1}\right)^{-1} +
-    \begin{bmatrix}
-        D_x \\ I
-    \end{bmatrix}
-    \begin{bmatrix}
-        D_x \\ I
-    \end{bmatrix}
-    ^\top
-    \right)^{-1}
-    \begin{bmatrix}
-        D_x \\ I
-    \end{bmatrix}
-    \nonumber      \\
-    & = I -
-    \begin{bmatrix}
-        D_x \\ I
-    \end{bmatrix}
-    ^\top
-    \left(\underbrace{
-        \hat{M} Q^{-1} \hat{M}^\top
-        +
-        \begin{bmatrix}
-            D_x D_x^\top & D_x \\
-            D_x^\top     & I
-        \end{bmatrix}
-    }_{\equiv A}\right)^{-1}
-    \begin{bmatrix}
-        D_x \\ I
-    \end{bmatrix}
-    .
+  \right)^{-1}
+  \begin{bmatrix}
+    D_x \\ I
+  \end{bmatrix}
+  \nonumber      \\
+  & = I -
+  \begin{bmatrix}
+    D_x \\ I
+  \end{bmatrix}
+  ^\top
+  \left(\underbrace{
+      \hat{M} Q^{-1} \hat{M}^\top
+      +
+      \begin{bmatrix}
+        D_x D_x^\top & D_x \\
+        D_x^\top     & I
+      \end{bmatrix}
+  }_{\equiv A}\right)^{-1}
+  \begin{bmatrix}
+    D_x \\ I
+  \end{bmatrix}
+  .
 \end{align}
 
 Both inverses in the above can be either computed or applied efficiently. The matrix $Q^{-1}$ can be computed
 explicitly using the partitioned matrix inverse formula. Define the Schur complement $S = Q_{11} - Q_{12} Q_{22}^{-1}
-    Q_{21}$, where $Q_{ij}$ denote the $i,j$th block of $Q$ as defined above. Then
+Q_{21}$, where $Q_{ij}$ denote the $i,j$th block of $Q$ as defined above. Then
 \begin{equation}
-    Q^{-1} =
-    \begin{bmatrix}
-        S^{-1}                      & -S^{-1} Q_{12} Q_{22}^{-1}                                 \\
-        - Q_{22}^{-1} Q_{21} S^{-1} & Q_{22}^{-1} + Q_{22}^{-1} Q_{21} S^{-1} Q_{12} Q_{22}^{-1}
-    \end{bmatrix}
-    .
+  Q^{-1} =
+  \begin{bmatrix}
+    S^{-1}                      & -S^{-1} Q_{12} Q_{22}^{-1}                                 \\
+    - Q_{22}^{-1} Q_{21} S^{-1} & Q_{22}^{-1} + Q_{22}^{-1} Q_{21} S^{-1} Q_{12} Q_{22}^{-1}
+  \end{bmatrix}
+  .
 \end{equation}
 
 The matrices $Q_{11}$, $Q_{12}$, $Q_{21}$, and $Q_{22}$ are all block-diagonal. $S$ is also block diagonal because
 $Q_{11}$ and $Q_{12} Q_{22}^{-1} Q_{21}$ are block-diagonal. So the four blocks four blocks of $Q^{-1}$ are also
 block-diagonal and computing them only requires operatins on block-diagonal matrices.
 
-The inverse of $A\equiv \hat{M} Q^{-1} \hat{M}^\top + \begin{bmatrix}
-        D_x D_x^\top & D_x \\ D_x^\top & I
-    \end{bmatrix}
+The inverse of $A\equiv \hat{M} Q^{-1} \hat{M}^\top +
+\begin{bmatrix}
+  D_x D_x^\top & D_x \\ D_x^\top & I
+\end{bmatrix}
 $ can be applied efficiently. Instead of applying the Woodbury formula again, we compute its $LDL^\top$ decomposition and apply the inverse of that decomposition.
 With the blocks
 \begin{align}
-    A_{11} & = M \left[Q^{-1}\right]_{11} M^\top +D_x D_x^\top \nonumber \\
-    A_{12} & = M\left[Q^{-1}\right]_{12} + D_x \nonumber                 \\
-    A_{22} & = \left[Q^{-1}\right]_{22} + I,
+  A_{11} & = M \left[Q^{-1}\right]_{11} M^\top +D_x D_x^\top \nonumber \\
+  A_{12} & = M\left[Q^{-1}\right]_{12} + D_x \nonumber                 \\
+  A_{22} & = \left[Q^{-1}\right]_{22} + I,
 \end{align}
 the $LDL^\top$ decomposition of $A$ is
 \begin{equation}
-    A       =
-    \begin{bmatrix}
-        I & A_{12} A_{22}^{-1} \\ 0 & I
-    \end{bmatrix}
-    \begin{bmatrix}
-        A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
-        0                                       & A_{22}
-    \end{bmatrix}
-    \begin{bmatrix}
-        I & A_{12} A_{22}^{-1} \\ 0 & I
-    \end{bmatrix}
-    ^\top,
+  A       =
+  \begin{bmatrix}
+    I & A_{12} A_{22}^{-1} \\ 0 & I
+  \end{bmatrix}
+  \begin{bmatrix}
+    A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
+    0                                       & A_{22}
+  \end{bmatrix}
+  \begin{bmatrix}
+    I & A_{12} A_{22}^{-1} \\ 0 & I
+  \end{bmatrix}
+  ^\top,
 \end{equation}
 so
 \begin{align}
-    A^{-1} & = \begin{bmatrix}
-        I & -A_{12} A_{22}^{-1} \\ 0 & I
-    \end{bmatrix}
-    ^\top
-    \begin{bmatrix}
-        A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
-        0                                       & A_{22}
-    \end{bmatrix}
-    ^{-1}
-    \begin{bmatrix}
-        I & -A_{12} A_{22}^{-1} \\ 0 & I
-    \end{bmatrix}
+  A^{-1} & =
+  \begin{bmatrix}
+    I & -A_{12} A_{22}^{-1} \\ 0 & I
+  \end{bmatrix}
+  ^\top
+  \begin{bmatrix}
+    A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
+    0                                       & A_{22}
+  \end{bmatrix}
+  ^{-1}
+  \begin{bmatrix}
+    I & -A_{12} A_{22}^{-1} \\ 0 & I
+  \end{bmatrix}
 \end{align}
 Since $A_{11}$ is block tri-diagonal, $A_{12}$ is block-bidiagonal, and $A_{22}$ is block-diagonal, applying $A^{-1}$ to a vector is fast.
 
@@ -644,77 +671,80 @@ Since $A_{11}$ is block tri-diagonal, $A_{12}$ is block-bidiagonal, and $A_{22}$
 Given a vector $g \in \R^{Lp}$, compute $H^{-1} g$ as follows:
 
 \begin{enumerate}
-    \item
-          \textbf{Compute the auxiliary vector:}
-          \[
-              g'  \in \R^{La + Lp} \equiv \begin{bmatrix}
-                  D_x \\ I
-              \end{bmatrix}
-              g.
-          \]
-          $D_x$ has $L$ $a\times p$ blocks on its diagonal, so it takes $Lap$ multiplications to compute $v$.
+  \item
+    \textbf{Compute the auxiliary vector:}
+    \[
+      g'  \in \R^{La + Lp} \equiv
+      \begin{bmatrix}
+        D_x \\ I
+      \end{bmatrix}
+      g.
+    \]
+    $D_x$ has $L$ $a\times p$ blocks on its diagonal, so it takes $Lap$ multiplications to compute $v$.
 
-    \item
-          \textbf{Form the banded matrix:}
-          \[
-              A \in \R^{L(a+p) \times L(a+p)} \equiv \hat{M} Q^{-1} \hat{M}^\top +
-              \begin{bmatrix}
-                  D_x D_x^\top & D_x \\ D_x^\top & I
-              \end{bmatrix}
-              .
-          \]
-          To compute $Q^{-1}$, we first compute the blocks of $Q$. These take $La^3$ multiplications for $Q_{11} \in \R^{La\times
-                  La}$, $La^2p$ for $Q_{12}\in \R^{L a\times Lp}$ and $Q_{21}\in \R^{Lp \times La}$, and $La^2p$ for $Q_{22}\in \R^{Lp
-                  \times Lp}$. Computing $S\in \R^{La\times La}$ takes $L p^3$ to compute $Q_{22}^{-1}$, and $2Lap^2$ to compute the
-          product $Q_{12} Q_{22}^{-1} Q_{21}$. Given these quantities, for the blocks of $Q^{-1}$, it takes an additional $La^3$
-          to compute the upper left block, $L(a^2p+ap^2)$ to compute the off-diagonal blocks, and somewhat less than that to
-          compute the bottom diagonal block since the matrices involved have already been computed. In all, it takes less than
-          $9L\max(a,p)^3$ multiplications to compute $Q^{-1}$.
+  \item
+    \textbf{Form the banded matrix:}
+    \[
+      A \in \R^{L(a+p) \times L(a+p)} \equiv \hat{M} Q^{-1} \hat{M}^\top +
+      \begin{bmatrix}
+        D_x D_x^\top & D_x \\ D_x^\top & I
+      \end{bmatrix}
+      .
+    \]
+    To compute $Q^{-1}$, we first compute the blocks of $Q$. These take $La^3$ multiplications for $Q_{11} \in \R^{La\times
+    La}$, $La^2p$ for $Q_{12}\in \R^{L a\times Lp}$ and $Q_{21}\in \R^{Lp \times La}$, and $La^2p$ for $Q_{22}\in \R^{Lp
+    \times Lp}$. Computing $S\in \R^{La\times La}$ takes $L p^3$ to compute $Q_{22}^{-1}$, and $2Lap^2$ to compute the
+    product $Q_{12} Q_{22}^{-1} Q_{21}$. Given these quantities, for the blocks of $Q^{-1}$, it takes an additional $La^3$
+    to compute the upper left block, $L(a^2p+ap^2)$ to compute the off-diagonal blocks, and somewhat less than that to
+    compute the bottom diagonal block since the matrices involved have already been computed. In all, it takes less than
+    $9L\max(a,p)^3$ multiplications to compute $Q^{-1}$.
 
-          To compute $\hat{M}Q^{-1}\hat{M}^\top$ requires an additional $2La^3$ operations for a total of $11L\max(a,p)^3$
-          multiplications.
+    To compute $\hat{M}Q^{-1}\hat{M}^\top$ requires an additional $2La^3$ operations for a total of $11L\max(a,p)^3$
+    multiplications.
 
-          Finally, computing and adding the second term requires $La^2p$ multiplications, bringing the tally to at most $12 L
-              \max(a,p)^3$ multiplications to compute $A$.
+    Finally, computing and adding the second term requires $La^2p$ multiplications, bringing the tally to at most $12 L
+    \max(a,p)^3$ multiplications to compute $A$.
 
-    \item
-          \textbf{Apply $A^{-1}$ to $g'$:}
-          \[
-              g'' =
-              \begin{bmatrix}
-                  I & -A_{12} A_{22}^{-1} \\ 0 & I
-              \end{bmatrix}
-              ^\top
-              \begin{bmatrix}
-                  A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
-                  0                                       & A_{22}
-              \end{bmatrix}
-              ^{-1}
-              \begin{bmatrix}
-                  I & -A_{12} A_{22}^{-1} \\ 0 & I
-              \end{bmatrix}
-              g'.
-          \]
-          This computation requires $2L\max(a,p)^3$ multiplications to compute $A_{22}^{-1}$ and $\left[A_{11}-A_{12}
-                  A_{22}^{-1}A_{12}\right]^{-1}$. The remaining operations are matrix multiplications that take at most $3L\max(a,p)^2$,
-          which is smaller than $Lp^3$ when $p>3$. This brings the tally to at most $15L\max(a,p)^3$ multiplications.
+  \item
+    \textbf{Apply $A^{-1}$ to $g'$:}
+    \[
+      g'' =
+      \begin{bmatrix}
+        I & -A_{12} A_{22}^{-1} \\ 0 & I
+      \end{bmatrix}
+      ^\top
+      \begin{bmatrix}
+        A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
+        0                                       & A_{22}
+      \end{bmatrix}
+      ^{-1}
+      \begin{bmatrix}
+        I & -A_{12} A_{22}^{-1} \\ 0 & I
+      \end{bmatrix}
+      g'.
+    \]
+    This computation requires $2L\max(a,p)^3$ multiplications to compute $A_{22}^{-1}$ and $\left[A_{11}-A_{12}
+    A_{22}^{-1}A_{12}\right]^{-1}$. The remaining operations are matrix multiplications that take at most $3L\max(a,p)^2$,
+    which is smaller than $Lp^3$ when $p>3$. This brings the tally to at most $15L\max(a,p)^3$ multiplications.
 
-    \item
-          \textbf{Compute the final result:}
-          \[
-              y = g - \begin{bmatrix}
-                  D_x \\ I
-              \end{bmatrix}
-              ^\top g''.
-          \]
-          These are again matrix-vector multiplications that take at most $L\max(a,p)^2$ when $p>1$, bringing the tally to at
-          most $16L\max(a,p)^3$.
+  \item
+    \textbf{Compute the final result:}
+    \[
+      y = g -
+      \begin{bmatrix}
+        D_x \\ I
+      \end{bmatrix}
+      ^\top g''.
+    \]
+    These are again matrix-vector multiplications that take at most $L\max(a,p)^2$ when $p>1$, bringing the tally to at
+    most $16L\max(a,p)^3$.
 \end{enumerate}
 
 \bibliographystyle{plain}
 \bibliography{hessian}
 
-\appendix \section{Equation (\ref{eq:hessian}) is Pearlmutter's Hessian-vector multiplication algorithm}
+\appendix
+\section{Equation (\ref{eq:hessian}) is Pearlmutter's Hessian-vector multiplication algorithm}
 \label{sec:pearlmutter}
 
 We showed that Equation (\ref{eq:hessian}) makes it possible to compute Hessian-vector product $H v$ in time linear in
@@ -725,22 +755,22 @@ pipeline topology, and shows that the operations it produces coincide exactly wi
 
 Consider a set of vectors $v_1,\ldots,v_L$ that match the dimensions of the parameter vectors $x_1,\ldots,x_L$. Just as
 $z_L(x_1,\ldots,x_L)$ denotes the loss under the parameters $w$, we'll consider the perturbed loss $z_L(x_1+\alpha v_1,
-    \ldots, x_L+\alpha v_L)$ with a scalar $\alpha$. By the chain rule,
+\ldots, x_L+\alpha v_L)$ with a scalar $\alpha$. By the chain rule,
 \begin{equation}
-    \frac{\partial}{\partial \alpha} z_L(x_1+\alpha_1 v_1, \ldots, x_L+\alpha_L v_L) \bigg|_{\alpha=0} =
-    \nabla_x z_L(x_1, \ldots, x_L) \cdot v.
+  \frac{\partial}{\partial \alpha} z_L(x_1+\alpha_1 v_1, \ldots, x_L+\alpha_L v_L) \bigg|_{\alpha=0} =
+  \nabla_x z_L(x_1, \ldots, x_L) \cdot v.
 \end{equation}
 Applying $\nabla_x$ to both sides gives
 \begin{equation}
-    \nabla_x \frac{\partial}{\partial \alpha} z_L(x_1+\alpha_1 v_1, \ldots, x_L+\alpha_L v_L) \bigg|_{\alpha=0} =
-    \nabla_x^2 z_L(x_1, \ldots, x_L) \cdot v.
+  \nabla_x \frac{\partial}{\partial \alpha} z_L(x_1+\alpha_1 v_1, \ldots, x_L+\alpha_L v_L) \bigg|_{\alpha=0} =
+  \nabla_x^2 z_L(x_1, \ldots, x_L) \cdot v.
 \end{equation}
 In other words, to compute the Hessian-vector product $\nabla_x^2 z_L \cdot v$,
 it suffices to compute the gradient of $\frac{\partial z_L}{\partial \alpha} $
 with respect to $x$.  We can do this by applying standard backpropoagation
 to $\frac{\partial z_L}{\partial \alpha}$. At each stage $\ell$ during its
 backward pass, backpropagation produces $\frac{\partial}{\partial x_\ell}
-    \frac{\partial z_L}{\partial \alpha} = \nabla_{x_\ell, x} z_L \cdot v$, yielding
+\frac{\partial z_L}{\partial \alpha} = \nabla_{x_\ell, x} z_L \cdot v$, yielding
 a block of rows in in $\nabla_x^2 z_L \cdot v$.
 
 To see that this generates the same operations as applying Equation (\ref{eq:hessian}) to $v$, we'll write the backprop
@@ -749,47 +779,49 @@ the fact that $z_\ell$ depends on $\alpha$ through both $z_{\ell-1}$ and $x_\ell
 backward recursion of for $\frac{\partial z_L}{\partial \alpha}$ into a format that matches Equation
 (\ref{eq:backprop}):
 \begin{align}
-    b'_\ell &\equiv \frac{\partial}{\partial z_\ell} \frac{\partial z_L}{\partial \alpha}
-    = \frac{\partial}{\partial \alpha} \frac{\partial z_L}{\partial z_\ell}
-    = \frac{\partial}{\partial \alpha} b_\ell
-    = \frac{\partial}{\partial \alpha} \left[b_{\ell+1} \cdot \nabla_z f_{\ell+1}\right] \\
-    &= b'_{\ell+1} \cdot \nabla_z f_{\ell+1} + \left[\left(I \otimes b_{\ell+1}\right) \frac{\partial}{\partial \alpha} \text{vec}\left(\nabla_z f_{\ell+1}\right) \right]^\top \\
-    &= b'_{\ell+1} \cdot \nabla_z f_{\ell+1} + \left[\left(I \otimes b_{\ell+1}\right) \left(\nabla_{zz} f_{\ell+1} \cdot \frac{\partial z_\ell}{\partial \alpha} + \nabla_{xz} f_{\ell+1} \cdot v_{\ell+1}\right)\right]^\top.
+  b'_\ell &\equiv \frac{\partial}{\partial z_\ell} \frac{\partial z_L}{\partial \alpha}
+  = \frac{\partial}{\partial \alpha} \frac{\partial z_L}{\partial z_\ell}
+  = \frac{\partial}{\partial \alpha} b_\ell
+  = \frac{\partial}{\partial \alpha} \left[b_{\ell+1} \cdot \nabla_z f_{\ell+1}\right] \\
+  &= b'_{\ell+1} \cdot \nabla_z f_{\ell+1} + \left[\left(I \otimes b_{\ell+1}\right) \frac{\partial}{\partial \alpha} \text{vec}\left(\nabla_z f_{\ell+1}\right) \right]^\top \\
+  &= b'_{\ell+1} \cdot \nabla_z f_{\ell+1} + \left[\left(I \otimes b_{\ell+1}\right) \left(\nabla_{zz} f_{\ell+1} \cdot \frac{\partial z_\ell}{\partial \alpha} + \nabla_{xz} f_{\ell+1} \cdot v_{\ell+1}\right)\right]^\top.
 \end{align}
 During the backward pass, from $b_\ell$ and $b'_\ell$, we compute
 \begin{align}
-    \frac{\partial }{\partial x_\ell} \frac{\partial z_L}{\partial \alpha}
-    &=\left(\nabla_{x_\ell, x} z_L\right) \cdot v
-    = \frac{\partial}{\partial \alpha} \frac{\partial z_L}{\partial x_\ell}
-    = \frac{\partial}{\partial \alpha} \left[\frac{\partial z_L}{\partial z_{\ell}} \frac{\partial z_\ell}{\partial x_\ell}\right]
-    = \frac{\partial}{\partial \alpha} \left[b_\ell \cdot \nabla_x f_\ell\right] \\
-    &= b'_\ell \cdot \nabla_x f_\ell + \left[\left(I\otimes b_\ell\right) \frac{\partial}{\partial \alpha} \text{vec}\left(\nabla_x f_\ell\right)\right]^\top \\
-    &= b'_\ell \cdot \nabla_x f_\ell + \left[\left(I\otimes b_\ell\right) \left(\nabla_{zx} f_\ell \cdot \frac{\partial z_{\ell-1}}{\partial \alpha} + \nabla_{xx} f_\ell \cdot v_\ell\right)\right]^\top.
+  \frac{\partial }{\partial x_\ell} \frac{\partial z_L}{\partial \alpha}
+  &=\left(\nabla_{x_\ell, x} z_L\right) \cdot v
+  = \frac{\partial}{\partial \alpha} \frac{\partial z_L}{\partial x_\ell}
+  = \frac{\partial}{\partial \alpha} \left[\frac{\partial z_L}{\partial z_{\ell}} \frac{\partial z_\ell}{\partial x_\ell}\right]
+  = \frac{\partial}{\partial \alpha} \left[b_\ell \cdot \nabla_x f_\ell\right] \\
+  &= b'_\ell \cdot \nabla_x f_\ell + \left[\left(I\otimes b_\ell\right) \frac{\partial}{\partial \alpha} \text{vec}\left(\nabla_x f_\ell\right)\right]^\top \\
+  &= b'_\ell \cdot \nabla_x f_\ell + \left[\left(I\otimes b_\ell\right) \left(\nabla_{zx} f_\ell \cdot \frac{\partial z_{\ell-1}}{\partial \alpha} + \nabla_{xx} f_\ell \cdot v_\ell\right)\right]^\top.
 \end{align}
-Stacking these backward equations horizontally with $b'\equiv\left[\begin{smallmatrix}
-            b'_1 & \cdots & b'_L
-        \end{smallmatrix}
-        \right]$,
-$g^\alpha_\ell \equiv \frac{\partial z_\ell}{\partial \alpha}$ and $g^\alpha\equiv\left[\begin{smallmatrix}
-            g^\alpha_1 \\ \vdots \\ g^\alpha_L
-        \end{smallmatrix}
-        \right]$, then transposing, gives
+Stacking these backward equations horizontally with $b'\equiv\left[
+  \begin{smallmatrix}
+    b'_1 & \cdots & b'_L
+  \end{smallmatrix}
+\right]$,
+$g^\alpha_\ell \equiv \frac{\partial z_\ell}{\partial \alpha}$ and $g^\alpha\equiv\left[
+  \begin{smallmatrix}
+    g^\alpha_1 \\ \vdots \\ g^\alpha_L
+  \end{smallmatrix}
+\right]$, then transposing, gives
 \begin{align}
-    \label{eq:pearlmutter-2}
-    M^\top \left(b'\right)^\top &= P D_M  \left(D_{zz} g^\alpha + D_{xz} v\right) \nonumber\\
-    \nabla_x^2 z_L \cdot v &= D_x^\top \left(b'\right)^\top + D_D \left(D_{zx} P g^\alpha + D_{xx} v\right).
+  \label{eq:pearlmutter-2}
+  M^\top \left(b'\right)^\top &= P D_M  \left(D_{zz} g^\alpha + D_{xz} v\right) \nonumber\\
+  \nabla_x^2 z_L \cdot v &= D_x^\top \left(b'\right)^\top + D_D \left(D_{zx} P g^\alpha + D_{xx} v\right).
 \end{align}
 
 $g^\alpha_\ell$ can be computed during the forward pass via
 \begin{equation}
-    g^\alpha_\ell \equiv \frac{\partial z_\ell}{\partial \alpha}
-    = \nabla_z f_\ell \cdot \frac{\partial z_{\ell-1}}{\partial \alpha} + \nabla_x f_\ell \cdot v_\ell
-    = \nabla_z f_\ell \cdot g^\alpha_{\ell-1} + \nabla_x f_\ell \cdot v_\ell,
+  g^\alpha_\ell \equiv \frac{\partial z_\ell}{\partial \alpha}
+  = \nabla_z f_\ell \cdot \frac{\partial z_{\ell-1}}{\partial \alpha} + \nabla_x f_\ell \cdot v_\ell
+  = \nabla_z f_\ell \cdot g^\alpha_{\ell-1} + \nabla_x f_\ell \cdot v_\ell,
 \end{equation}
 which when stacked up, gives $M g^\alpha = D_x v$.  Plugging $g^\alpha$ back
 into Equation (\ref{eq:pearlmutter-2}) and solving for $b'$ gives
 \begin{equation}
-    \nabla_x^2 z_L \cdot v = D_x^\top M^{-\top} P D_M  \left(D_{zz} M^{-1} D_x v + D_{xz} v\right) +  D_D \left(D_{zx} P M^{-1} D_x v + D_{xx} v\right).
+  \nabla_x^2 z_L \cdot v = D_x^\top M^{-\top} P D_M  \left(D_{zz} M^{-1} D_x v + D_{xz} v\right) +  D_D \left(D_{zx} P M^{-1} D_x v + D_{xx} v\right).
 \end{equation}
 This coincides with Equation (\ref{eq:hessian}), showing that the two algorithms are equivalent.
 
