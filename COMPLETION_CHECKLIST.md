@@ -10,7 +10,7 @@
 - [x] Tracks intermediate activations during forward pass
 - [x] Final layer fuses prediction and loss computation (`LossLayer`)
 
-**Files**: `hessian_inverse.py` (lines 1-140)
+**Files**: `hessian.py` (lines 1-140)
 
 ### ✅ 2. Implement Mixed Partial Derivatives Helper
 - [x] Created `compute_layer_derivatives()` function
@@ -25,7 +25,7 @@
 - [x] Handles both intermediate and loss layers
 - [x] Created `compute_all_layer_derivatives()` for all layers
 
-**Files**: `hessian_inverse.py` (lines 11-290)
+**Files**: `hessian.py` (lines 11-290)
 
 ### ✅ 3. Build Backpropagation Matrix Structures
 - [x] Implemented `BlockDiagonalMatrix` class with packed storage
@@ -37,7 +37,7 @@
 - [x] Built D_M matrix (I ⊗ b_ℓ) - `build_block_diagonal_with_kronecker()`
 - [x] All matrices use block structure (not dense)
 
-**Files**: `hessian_inverse.py` (lines 300-425)
+**Files**: `hessian.py` (lines 300-425)
 
 ### ✅ 4. Implement Q^{-1} Computation
 - [x] Created `compute_Q_inverse_blocks()` function
@@ -47,7 +47,7 @@
 - [x] Returns all four blocks of Q^{-1}
 - [x] Properly handles block-diagonal structure
 
-**Files**: `hessian_inverse.py` (lines 426-485)
+**Files**: `hessian.py` (lines 426-485)
 
 ### ✅ 5. Implement Complete H^{-1}g Algorithm
 - [x] Implemented `hessian_inverse_vector_product()` function
@@ -58,7 +58,7 @@
 - [x] Follows Section 5.1 (lines 670-741) exactly
 - [x] Returns preconditioned gradient
 
-**Files**: `hessian_inverse.py` (lines 504-628)
+**Files**: `hessian.py` (lines 504-628)
 
 ### ✅ 6. Create ImageNet Training Loop
 - [x] Created `train_imagenet.py` script
@@ -125,17 +125,25 @@
 
 ## Files Created
 
-1. ✅ `hessian_inverse.py` - Core implementation (630+ lines)
-2. ✅ `train_imagenet.py` - ImageNet training (350+ lines)
-3. ✅ `test_hessian.py` - Test suite (350+ lines)
-4. ✅ `simple_example.py` - CIFAR-10 demo (200+ lines)
-5. ✅ `README.md` - Comprehensive documentation
-6. ✅ `USAGE.md` - Quick start guide
-7. ✅ `IMPLEMENTATION_SUMMARY.md` - Technical details
-8. ✅ `COMPLETION_CHECKLIST.md` - This file
-9. ✅ `requirements.txt` - Dependencies
+### Core Library
+1. ✅ `hessian.py` - Core library (670+ lines, no main block)
+
+### Executable Scripts
+2. ✅ `test_hessian.py` - Test suite (350+ lines, run to validate)
+3. ✅ `train_imagenet.py` - ImageNet training (350+ lines, run to train)
+4. ✅ `simple_example.py` - CIFAR-10 demo (200+ lines, run to demo)
+
+### Documentation
+5. ✅ `QUICKSTART.md` - **Simple 3-step workflow** (new!)
+6. ✅ `README.md` - Comprehensive documentation
+7. ✅ `USAGE.md` - Detailed usage guide
+8. ✅ `IMPLEMENTATION_SUMMARY.md` - Technical details
+9. ✅ `COMPLETION_CHECKLIST.md` - This file
+10. ✅ `requirements.txt` - Dependencies
 
 **Total**: ~2000 lines of code + extensive documentation
+
+**Structure**: Clean separation between library (import) and scripts (run)
 
 ## Algorithm Correctness
 
