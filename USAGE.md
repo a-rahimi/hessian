@@ -1,5 +1,14 @@
 # Quick Start Guide
 
+## File Structure
+
+This project has a clean separation between library code and executable scripts:
+
+- **Library** (import, don't run): `hessian.py`
+- **Test suite** (run to validate): `python3 test_hessian.py`
+- **Training script** (run to train): `python3 train_imagenet.py`
+- **Demo** (run to see example): `python3 simple_example.py`
+
 ## Installation
 
 1. Install dependencies:
@@ -16,30 +25,53 @@ pip install torch>=2.0.0 torchvision>=0.15.0 numpy>=1.24.0 scipy>=1.10.0
 
 ### Basic Validation
 ```bash
+pytest test_hessian.py -v
+```
+
+Or the old way (still works):
+```bash
 python3 test_hessian.py
 ```
 
-This runs four tests:
+This runs 10 test cases:
 1. **Correctness test**: Verifies H(H^{-1}g) ≈ g on the gradient
 2. **Random vector test**: Tests on arbitrary vectors
-3. **Scaling test**: Measures computational cost vs. number of layers
-4. **Stability test**: Tests numerical stability at different scales
+3. **Scaling tests**: 4 parametrized tests for different depths (2, 4, 8, 12 layers)
+4. **Linear scaling test**: Verifies O(L) scaling (marked as "slow")
+5. **Stability tests**: 3 parametrized tests for different scales (1e-3, 1.0, 1e3)
 
 Expected output:
 ```
-==============================================================
-RUNNING HESSIAN-INVERSE VALIDATION TESTS
-==============================================================
+test_hessian.py::test_hessian_inverse_correctness_on_gradient PASSED
+test_hessian.py::test_hessian_inverse_on_random_vector PASSED
+test_hessian.py::test_computational_cost_per_depth[2] PASSED
+test_hessian.py::test_computational_cost_per_depth[4] PASSED
+test_hessian.py::test_computational_cost_per_depth[8] PASSED
+test_hessian.py::test_computational_cost_per_depth[12] PASSED
+test_hessian.py::test_scaling_is_linear PASSED
+test_hessian.py::test_numerical_stability_at_scale[0.001] PASSED
+test_hessian.py::test_numerical_stability_at_scale[1.0] PASSED
+test_hessian.py::test_numerical_stability_at_scale[1000.0] PASSED
+========================= 10 passed in 15.23s =========================
+```
 
-==============================================================
-Test 1: Hessian-inverse correctness
-==============================================================
-Model: 4 layers, 5 hidden units
-Loss: 1.2345
-Gradient norm: 0.5678
-...
-✓ Test PASSED: H (H^{-1} g) ≈ g
-...
+### Pytest Advanced Usage
+
+```bash
+# Run only fast tests (skip the slow linear scaling test)
+pytest test_hessian.py -m "not slow"
+
+# Run only a specific test
+pytest test_hessian.py::test_hessian_inverse_correctness_on_gradient
+
+# Run tests matching a pattern
+pytest test_hessian.py -k "stability"
+
+# Stop at first failure
+pytest test_hessian.py -x
+
+# Show local variables on failures
+pytest test_hessian.py -l --tb=long
 ```
 
 ## Simple CIFAR-10 Example
@@ -184,7 +216,7 @@ Compare with standard GD at same epoch - Hessian should show:
 ### Using in Your Own Code
 
 ```python
-from hessian_inverse import DeepMLPWithTracking, hessian_inverse_vector_product
+from hessian import DeepMLPWithTracking, hessian_inverse_vector_product
 
 # 1. Create model
 model = DeepMLPWithTracking(

@@ -507,8 +507,8 @@ The various matrices involved are recapitulated below:
   \end{bmatrix}
   .
 \end{align*}
+\subsection{Multiplying a vector by the Hessian}
 
-\subsection{Mulitplying a vector by the Hessian}
 
 Given a vector $g \in \R^{Lp}$, the formula above allows us to compute $H g$ in $O\left(Lap^2 + L a^2p +La^3\right)$
 operations without forming $H$. This cost is dominated by multiplying by the $D_{xx}$, $D_{zx}$, and $D_{zz}$ matrices.
@@ -761,7 +761,7 @@ $z_L(x_1,\ldots,x_L)$ denotes the loss under the parameters $w$, we'll consider 
   \nabla_x z_L(x_1, \ldots, x_L) \cdot v.
 \end{equation}
 Applying $\nabla_x$ to both sides gives
-\begin{equation}
+begin{equation}
   \nabla_x \frac{\partial}{\partial \alpha} z_L(x_1+\alpha_1 v_1, \ldots, x_L+\alpha_L v_L) \bigg|_{\alpha=0} =
   \nabla_x^2 z_L(x_1, \ldots, x_L) \cdot v.
 \end{equation}

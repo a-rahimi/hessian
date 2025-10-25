@@ -23,15 +23,35 @@ This makes the algorithm particularly efficient for "tall-skinny" networks (many
 
 ## Files
 
-- `hessian_inverse.py`: Core implementation of the algorithm
+### Core Library (Import This)
+- `hessian.py`: **Core implementation** - import as a library
   - `DeepMLPWithTracking`: MLP model with activation tracking
   - `compute_layer_derivatives()`: Computes mixed partial derivatives
   - `hessian_inverse_vector_product()`: Main algorithm (Section 5.1 of paper)
+  - **Usage**: `from hessian import DeepMLPWithTracking, hessian_inverse_vector_product`
 
-- `train_imagenet.py`: Training script for ImageNet with Hessian preconditioning
-- `test_hessian.py`: Validation tests to verify correctness
-- `simple_example.py`: Quick demonstration on CIFAR-10
+### Executable Scripts (Run from Command Line)
+- `test_hessian.py`: **Validation suite** - verify correctness
+  - Run: `python3 test_hessian.py`
+  - Tests: H(H^{-1}g) ≈ g, scaling, numerical stability
+  
+- `train_imagenet.py`: **Production training** - train on ImageNet
+  - Run: `python3 train_imagenet.py --data-dir /path --use-hessian`
+  - Full-featured training with checkpoints and validation
+  
+- `simple_example.py`: **Quick demo** - see algorithm in action
+  - Run: `python3 simple_example.py`
+  - Trains on CIFAR-10 subset, compares standard vs. Hessian GD
+
+### Documentation
+- `QUICKSTART.md`: **Start here!** Simple 3-step workflow
+- `README.md`: Algorithm overview and technical details
+- `USAGE.md`: Detailed usage guide and troubleshooting
 - `requirements.txt`: Python dependencies
+
+## Quick Start
+
+**See [QUICKSTART.md](QUICKSTART.md) for a simple 3-step workflow.**
 
 ## Installation
 
@@ -59,14 +79,24 @@ This trains a small MLP on CIFAR-10 comparing standard gradient descent vs. Hess
 ### Running Tests
 
 ```bash
-python test_hessian.py
+pytest test_hessian.py -v
+```
+
+Or the old way (still works):
+```bash
+python3 test_hessian.py
 ```
 
 Tests verify:
 1. **Correctness**: `H(H^{-1}g) ≈ g`
 2. **Random vectors**: Works on arbitrary vectors, not just gradients
-3. **Computational cost**: Confirms linear scaling with depth
-4. **Numerical stability**: Handles different input scales
+3. **Computational cost**: Confirms linear scaling with depth (parametrized for 2, 4, 8, 12 layers)
+4. **Numerical stability**: Handles different input scales (1e-3, 1.0, 1e3)
+
+The test suite uses **pytest**, giving you features like:
+- Run specific tests: `pytest test_hessian.py::test_hessian_inverse_correctness_on_gradient`
+- Skip slow tests: `pytest test_hessian.py -m "not slow"`
+- Pattern matching: `pytest test_hessian.py -k "stability"`
 
 ### Training on ImageNet
 
@@ -91,7 +121,7 @@ Options:
 ### Using in Your Own Code
 
 ```python
-from hessian_inverse import DeepMLPWithTracking, hessian_inverse_vector_product
+from hessian import DeepMLPWithTracking, hessian_inverse_vector_product
 
 # Create model
 model = DeepMLPWithTracking(
