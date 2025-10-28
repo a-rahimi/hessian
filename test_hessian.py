@@ -1,316 +1,235 @@
 """
-Test suite for Hessian-inverse-vector product implementation using pytest.
-
-Run with:
-    pytest test_hessian.py              # All tests
-    pytest test_hessian.py -v           # Verbose
-    pytest test_hessian.py -k scaling   # Only scaling tests
-    pytest test_hessian.py --tb=short   # Shorter tracebacks
-
-Validates that:
-1. H (H^{-1} g) ≈ g for random vectors
-2. The Hessian-inverse computation is numerically stable
-3. Computational cost scales linearly with depth
+Unit tests for hessian.py
 """
 
-import pytest
 import torch
-import time
-from scipy import stats
-from hessian import (
-    DeepMLPWithTracking,
-    hessian_inverse_vector_product,
-)
+import torch.nn as nn
+from hessian import DenseBlock
 
 
-def compute_hessian_vector_product(
-    model: DeepMLPWithTracking, loss: torch.Tensor, vector: torch.Tensor
-) -> torch.Tensor:
-    """
-    Compute Hessian-vector product H v.
+class TestDenseBlock:
+    """Test BasicBlock derivatives with analytical solutions."""
 
-    First computes the gradient-vector product g v, then computs the gradient of
-    that with respect to the parameters.
-    """
-    # Get model parameters
-    params = list(model.parameters())
+    def test_derivatives_identity_activation(self):
+        """
+        Test BasicBlock.derivatives() with nn.Identity activation.
 
-    # Compute gradient
-    grads = torch.autograd.grad(loss, params, create_graph=True)
+        For f(z; W) = flat(z W') = W z', compute all derivatives analytically and
+        compare against the deriviates returned by the derivatives() method. We
+        use flat() instead of vec() throughout the code.  Unlike the paper,
+        which makes heavy use of vec(), we'll use flat() in this test. The
+        two important properties of flat are:
+          - flat(X) = vec(X').
+          - flat(ABC) = (A ⊗ C') flat(B)
 
-    # Flatten gradient
-    flat_grad = torch.cat([g.flatten() for g in grads])
+        For a tensor-valued function f and a tensor X, ∇_X f(X) is the matrix J
+        such that flat(f(X+dX) - f(X)) = J flat(dX). In particular, for linear
+        functions f(X) = J flat(X), J is the deriviatve of f wrt X.
 
-    # Compute gradient-vector product
-    # TODO: Use @ instead sum(x * y)
-    grad_v_product = torch.sum(flat_grad * vector)
+        First-order:
+        - ∇_W f = ∇_W flat(W z') = ∇_W (I ⊗ z) flat(W) = (I ⊗ z)
+        - ∇_z f = ∇_z W flat(z) = W
 
-    # Compute Hessian-vector product
-    hvp_grads = torch.autograd.grad(grad_v_product, params, retain_graph=True)
+        Second-order partials of v'f = v'Wz', where v is some constant vector:
+        - ∇²_WW v'f = 0
+        - ∇²_zz v'f = 0
+        - ∇²_zW v'f = ∇_z ∇_W flat(v' W z') = ∇_z ∇_W (v' ⊗ z) flat(W) = ∇_z (v' ⊗ z) = (v' ⊗ 1)
+        """
+        batch_size = 1
+        input_dim = 3
+        output_dim = 4
+        num_params = input_dim * output_dim
 
-    # Flatten result
-    hvp = torch.cat([g.flatten() for g in hvp_grads])
+        torch.manual_seed(42)
 
-    return hvp
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
 
+        # Create a random model and populate its internal cache.
+        block = DenseBlock(input_dim, output_dim, nn.Identity())
+        block(z_in)
 
-def test_hessian_inverse_correctness_on_gradient():
-    """
-    Test that H(H^{-1}g) ≈ g on the gradient vector.
+        dloss_dz = torch.randn(batch_size, output_dim)
 
-    This is the fundamental property: applying the Hessian-inverse
-    and then the Hessian should recover the original vector.
-    """
-    # Model parameters
-    input_dim = 10
-    hidden_dim = 5
-    num_classes = 3
-    num_layers = 4
-    batch_size = 2
+        assert block.linear.weight.shape == (output_dim, input_dim)
 
-    # Create model
-    model = DeepMLPWithTracking(
-        input_dim=input_dim,
-        hidden_dim=hidden_dim,
-        num_classes=num_classes,
-        num_hidden_layers=num_layers - 1,
-        activation=torch.tanh,
-    )
+        expected_Dx = torch.kron(torch.eye(output_dim), z_in)
+        expected_Dz = block.linear.weight
+        expected_DD_Dzx = torch.kron(dloss_dz.reshape(-1, 1), torch.eye(input_dim))
+        assert expected_DD_Dzx.shape == (num_params, input_dim)
 
-    # Create dummy data
-    x = torch.randn(batch_size, input_dim, requires_grad=True)
-    targets = torch.randint(0, num_classes, (batch_size,))
+        derivs = block.derivatives(dloss_dz)
 
-    # Forward pass
-    loss = model(x, targets, track_activations=True)
+        assert derivs.Dx.shape == (output_dim, num_params)
+        torch.testing.assert_close(derivs.Dx, expected_Dx)
 
-    # Compute gradient
-    loss.backward(create_graph=True)
-    gradient = torch.cat(
-        [p.grad.flatten() for p in model.parameters() if p.grad is not None]
-    )
+        assert derivs.Dz.shape == (output_dim, input_dim)
+        torch.testing.assert_close(derivs.Dz, expected_Dz)
 
-    # Compute H^{-1} g
-    h_inv_g = hessian_inverse_vector_product(model, loss, gradient)
+        torch.testing.assert_close(derivs.DD_Dxx, torch.zeros_like(derivs.DD_Dxx))
+        torch.testing.assert_close(derivs.DM_Dzz, torch.zeros_like(derivs.DM_Dzz))
 
-    # Compute H (H^{-1} g) using Pearlmutter's trick
-    h_hinv_g = compute_hessian_vector_product(model, loss, h_inv_g)
+        assert derivs.DD_Dzx.shape == (num_params, input_dim)
+        torch.testing.assert_close(derivs.DD_Dzx, expected_DD_Dzx)
 
-    # Check if H (H^{-1} g) ≈ g
-    diff = h_hinv_g - gradient
-    relative_error = (diff.norm() / gradient.norm()).item()
+    def test_derivatives_square_activation(self):
+        """
+        Test BasicBlock.derivatives() with square activation.
 
-    # Assert with informative message
-    assert relative_error < 1e-3, (
-        f"H(H^{{-1}}g) does not match g: "
-        f"relative error = {relative_error:.6f} (threshold: 1e-3)"
-    )
+        For f(z; W) = flat(z W')^2, compute all derivatives
+        analytically and compare against the deriviates returned by the
+        derivatives() method.
 
+        To simplify the derivations, define e = flat(zW') so that
+        f(z; W) = e^2, and v'f = e'diag(v)e. We showed above that
+        de/dW = I ⊗ z, and de/dz = W.
 
-def test_hessian_inverse_on_random_vector():
-    """
-    Test that H(H^{-1}v) ≈ v for a random vector v.
+        First-order:
+        - ∇_W f = ∇_W e^2 = 2 diag(e) de/dW  = 2 diag(e) ⊗ z
+        - ∇_z f = 2 diag(e) ∇_z de/dz =  2 diag(e) W
 
-    This verifies that the Hessian-inverse works on arbitrary vectors,
-    not just gradients. The Hessian-inverse is a linear operator, so
-    it should work correctly on any vector.
-    """
-    # Model parameters
-    input_dim = 10
-    hidden_dim = 5
-    num_classes = 3
-    num_layers = 4
-    batch_size = 2
+        Second-order partials of v'f = v'Wz', where v is some constant vector:
+        - ∇²_WW v'f = ∇²_WW e'diag(v)e = ∇_W flat(2 e'diag(v) de/dW)
+                    = ∇_W flat(2 e'diag(v) (I ⊗ z))
+                    = ∇_W 2 (diag(v) ⊗ z)' e
+                    = 2 (diag(v) ⊗ z') de/dW
+                    = 2 (diag(v) ⊗ z') (I ⊗ z)
+        - ∇²_zz v'f = ∇²_zz e'diag(v)e = ∇_z flat(2 e'diag(v) de/dz)
+                    = ∇_z flat(2 e'diag(v) W)
+                    = 2 W' diag(v) ∇_z e
+                    = 2 W' diag(v) W
 
-    # Create model
-    model = DeepMLPWithTracking(
-        input_dim=input_dim,
-        hidden_dim=hidden_dim,
-        num_classes=num_classes,
-        num_hidden_layers=num_layers - 1,
-        activation=torch.tanh,
-    )
+        """
+        batch_size = 1
+        input_dim = 3
+        output_dim = 4
+        num_params = input_dim * output_dim
 
-    # Create dummy data
-    x = torch.randn(batch_size, input_dim, requires_grad=True)
-    targets = torch.randint(0, num_classes, (batch_size,))
+        torch.manual_seed(42)
 
-    # Forward pass
-    loss = model(x, targets, track_activations=True)
-    loss.backward(create_graph=True)
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
 
-    # Create random vector with same size as parameters
-    total_params = sum(p.numel() for p in model.parameters())
-    random_vector = torch.randn(total_params)
+        # Create a random model and populate its internal cache.
+        block = DenseBlock(input_dim, output_dim, lambda x: x**2)
+        block(z_in)
+        z_linear = block.linear(z_in).flatten()
 
-    # Compute H^{-1} v
-    h_inv_v = hessian_inverse_vector_product(model, loss, random_vector)
+        dloss_dz = torch.randn(batch_size, output_dim)
 
-    # Compute H (H^{-1} v)
-    h_hinv_v = compute_hessian_vector_product(model, loss, h_inv_v)
+        assert block.linear.weight.shape == (output_dim, input_dim)
 
-    # Check if H (H^{-1} v) ≈ v
-    diff = h_hinv_v - random_vector
-    relative_error = (diff.norm() / random_vector.norm()).item()
+        derivs = block.derivatives(dloss_dz)
 
-    # Assert with informative message
-    assert relative_error < 1e-3, (
-        f"H(H^{{-1}}v) does not match v for random vector: "
-        f"relative error = {relative_error:.6f} (threshold: 1e-3)"
-    )
+        expected_Dx = 2 * torch.kron(torch.diag(z_linear), z_in)
+        assert derivs.Dx.shape == (output_dim, num_params)
+        torch.testing.assert_close(derivs.Dx, expected_Dx)
 
+        expected_Dz = 2 * z_linear.reshape(-1, 1) * block.linear.weight
+        assert derivs.Dz.shape == (output_dim, input_dim)
+        torch.testing.assert_close(derivs.Dz, expected_Dz)
 
-@pytest.mark.parametrize("num_layers", [2, 4, 8, 12])
-def test_computational_cost_per_depth(num_layers):
-    """
-    Test that computational cost scales reasonably with number of layers.
+        expected_DD_Dxx = (
+            2
+            * torch.kron(torch.diag(dloss_dz.flatten()), z_in.reshape(-1, 1))
+            @ torch.kron(torch.eye(output_dim), z_in)
+        )
+        assert expected_DD_Dxx.shape == (num_params, num_params)
+        assert derivs.DD_Dxx.shape == (num_params, num_params)
+        torch.testing.assert_close(derivs.DD_Dxx, expected_DD_Dxx)
 
-    This test runs for different network depths to measure the actual cost.
-    A separate test analyzes the overall scaling trend.
-    """
-    input_dim = 20
-    hidden_dim = 10
-    num_classes = 5
-    batch_size = 2
+        expected_DD_Dzz = (
+            2
+            * block.linear.weight.T
+            @ torch.diag(dloss_dz.flatten())
+            @ block.linear.weight
+        )
+        assert expected_DD_Dzz.shape == (input_dim, input_dim)
+        assert derivs.DM_Dzz.shape == (input_dim, input_dim)
+        torch.testing.assert_close(derivs.DM_Dzz, expected_DD_Dzz)
 
-    # Create model
-    model = DeepMLPWithTracking(
-        input_dim=input_dim,
-        hidden_dim=hidden_dim,
-        num_classes=num_classes,
-        num_hidden_layers=num_layers - 1,
-        activation=torch.tanh,
-    )
+    def test_derivatives_linear_activation_numerical(self):
+        batch_size = 1
+        input_dim = 3
+        output_dim = 4
 
-    total_params = sum(p.numel() for p in model.parameters())
+        torch.manual_seed(42)
 
-    # Create dummy data
-    x = torch.randn(batch_size, input_dim, requires_grad=True)
-    targets = torch.randint(0, num_classes, (batch_size,))
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
 
-    # Forward pass
-    loss = model(x, targets, track_activations=True)
-    loss.backward(create_graph=True)
-    gradient = torch.cat(
-        [p.grad.flatten() for p in model.parameters() if p.grad is not None]
-    )
+        # Create a random model and populate its internal cache.
+        block = DenseBlock(input_dim, output_dim, nn.Identity())
+        block(z_in)
 
-    # Time Hessian-inverse computation
-    start = time.time()
-    h_inv_g = hessian_inverse_vector_product(model, loss, gradient)
-    elapsed = time.time() - start
+        dloss_dz = torch.randn(batch_size, output_dim)
 
-    # Just verify it completes in reasonable time (< 10s for small models)
-    assert elapsed < 10.0, (
-        f"Computation took too long: {elapsed:.2f}s for {num_layers} layers "
-        f"({total_params:,} params)"
-    )
+        derivs = block.derivatives(dloss_dz)
 
+        dz = 1e-4 * torch.randn_like(z_in)
 
-@pytest.mark.slow
-def test_scaling_is_linear():
-    """
-    Test that computational cost scales linearly with number of layers.
+        params = dict(block.named_parameters())
+        dparams = {
+            param_name: 1e-4 * torch.randn_like(param)
+            for param_name, param in params.items()
+        }
+        params_perturbed = {
+            param_name: param + dparams[param_name]
+            for param_name, param in params.items()
+        }
+        dx = torch.cat([dparam.flatten() for dparam in dparams.values()])
 
-    This test runs multiple models and fits a linear regression to verify
-    O(L) scaling as claimed in the paper.
-    """
-    input_dim = 20
-    hidden_dim = 10
-    num_classes = 5
-    batch_size = 2
-    layer_counts = [2, 4, 8, 12]
+        def f(x, z):
+            return torch.func.functional_call(block, x, (z,))
 
-    results = []
+        torch.testing.assert_close(
+            derivs.Dx @ dx,
+            (f(params_perturbed, z_in) - f(params, z_in)).flatten(),
+            rtol=1e-6,
+            atol=1e-6,
+        )
+        torch.testing.assert_close(
+            derivs.Dz @ dz.flatten(),
+            (f(params, z_in + dz) - f(params, z_in)).flatten(),
+            rtol=1e-6,
+            atol=1e-6,
+        )
+        assert not torch.allclose(
+            derivs.Dz @ dz.flatten(),
+            (f(params, z_in + 2 * dz) - f(params, z_in)).flatten(),
+            rtol=1e-6,
+            atol=1e-6,
+        ), "Tolerances are not tight enough."
 
-    for num_layers in layer_counts:
-        # Create model
-        model = DeepMLPWithTracking(
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
-            num_classes=num_classes,
-            num_hidden_layers=num_layers - 1,
-            activation=torch.tanh,
+        def dloss_dz_f(x, z):
+            return torch.func.functional_call(block, x, (z,)) @ dloss_dz.T
+
+        assert not torch.allclose(
+            (dx[None, :] @ derivs.DD_Dzx @ dz.T).flatten(),
+            (
+                dloss_dz_f(params_perturbed, z_in + 2 * dz) - dloss_dz_f(params, z_in)
+            ).flatten(),
+            rtol=1e-5,
+            atol=1e-5,
+        ), "Tolerances are not tight enough."
+
+        torch.testing.assert_close(
+            (dx[None, :] @ derivs.DD_Dxx @ dx[:, None]).flatten(),
+            (dloss_dz_f(params_perturbed, z_in) - dloss_dz_f(params, z_in)).flatten(),
+            rtol=1e-4,
+            atol=1e-4,
+        )
+        torch.testing.assert_close(
+            (dx[None, :] @ derivs.DD_Dzx @ dz.T).flatten(),
+            (
+                dloss_dz_f(params_perturbed, z_in + dz) - dloss_dz_f(params, z_in)
+            ).flatten(),
+            rtol=1e-4,
+            atol=1e-4,
         )
 
-        # Create dummy data
-        x = torch.randn(batch_size, input_dim, requires_grad=True)
-        targets = torch.randint(0, num_classes, (batch_size,))
 
-        # Forward pass
-        loss = model(x, targets, track_activations=True)
-        loss.backward(create_graph=True)
-        gradient = torch.cat(
-            [p.grad.flatten() for p in model.parameters() if p.grad is not None]
-        )
-
-        # Time Hessian-inverse computation
-        start = time.time()
-        h_inv_g = hessian_inverse_vector_product(model, loss, gradient)
-        elapsed = time.time() - start
-
-        results.append((num_layers, elapsed))
-
-    # Fit linear model
-    layers = [r[0] for r in results]
-    times = [r[1] for r in results]
-
-    slope, intercept, r_value, p_value, std_err = stats.linregress(layers, times)
-    r_squared = r_value**2
-
-    # Assert that scaling is approximately linear (R² > 0.8)
-    # Not requiring perfect linearity due to small sample and overhead
-    assert r_squared > 0.8, (
-        f"Scaling does not appear linear: R² = {r_squared:.4f} "
-        f"(fit: time = {slope:.4f} * layers + {intercept:.4f})"
-    )
-
-
-@pytest.mark.parametrize("scale", [1e-3, 1.0, 1e3])
-def test_numerical_stability_at_scale(scale):
-    """
-    Test numerical stability across different input scales.
-
-    The implementation should handle inputs at different scales without
-    producing NaN or Inf values.
-    """
-    # Test with different scales
-    input_dim = 10
-    hidden_dim = 5
-    num_classes = 3
-    num_layers = 4
-    batch_size = 2
-
-    # Create model
-    model = DeepMLPWithTracking(
-        input_dim=input_dim,
-        hidden_dim=hidden_dim,
-        num_classes=num_classes,
-        num_hidden_layers=num_layers - 1,
-        activation=torch.tanh,
-    )
-
-    # Create scaled data
-    x = torch.randn(batch_size, input_dim, requires_grad=True) * scale
-    targets = torch.randint(0, num_classes, (batch_size,))
-
-    # Forward pass
-    loss = model(x, targets, track_activations=True)
-    loss.backward(create_graph=True)
-    gradient = torch.cat(
-        [p.grad.flatten() for p in model.parameters() if p.grad is not None]
-    )
-
-    # Compute H^{-1} g
-    h_inv_g = hessian_inverse_vector_product(model, loss, gradient)
-
-    # Check for NaN or Inf
-    assert not torch.isnan(
-        h_inv_g
-    ).any(), f"Found NaN values in H^{{-1}}g at scale {scale}"
-    assert not torch.isinf(
-        h_inv_g
-    ).any(), f"Found Inf values in H^{{-1}}g at scale {scale}"
-
-    # Also verify the result is finite and reasonable
-    assert h_inv_g.norm().isfinite(), f"H^{{-1}}g norm is not finite at scale {scale}"
+if __name__ == "__main__":
+    # Run test directly
+    test = TestDenseBlock()
+    test.test_derivatives_identity_activation()
+    test.test_derivatives_square_activation()
+    test.test_derivatives_numerical()
+    print("✓ All tests passed!")

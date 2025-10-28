@@ -1,0 +1,11 @@
+# Cursor Rules for Hessian Project
+
+## Python Environment
+Always use the virtual environment located at `/Users/ali/hessian/.venv` when running Python code.
+
+- Use the Python interpreter directly: `/Users/ali/hessian/.venv/bin/python`
+- Or activate first: `source /Users/ali/hessian/.venv/bin/activate`
+
+## Running Python Commands
+When executing Python scripts, tests, or any Python code in this project, always use the virtual environment to ensure consistent dependencies and package versions.
+

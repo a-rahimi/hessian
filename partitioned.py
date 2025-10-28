@@ -4,7 +4,15 @@ from typing import Any, Sequence
 import torch
 
 
-class BlockVector:
+class Matrix:
+    """Base class for matrix operations."""
+
+    def __matmul__(self, other: Any) -> Any:
+        """Matrix-vector or matrix-matrix multiplication."""
+        return self.apply(other)
+
+
+class BlockVector(Matrix):
     """Represents a block vector as a list of blocks."""
 
     def __init__(self, blocks: Sequence[torch.Tensor]):
@@ -15,15 +23,6 @@ class BlockVector:
         return torch.cat(self.blocks)
 
 
-class Matrix:
-    """Base class for matrix operations."""
-
-    def __matmul__(self, other: Any) -> Any:
-        """Matrix-vector or matrix-matrix multiplication."""
-        return self.apply(other)
-
-
-# Block-diagonal matrix representation
 class BlockDiagonalMatrix(Matrix):
     """Represents a block-diagonal matrix as a list of blocks."""
 
@@ -44,7 +43,7 @@ class BlockDiagonalMatrix(Matrix):
 
     def invert(self) -> "BlockDiagonalMatrix":
         """Return inverse of block-diagonal matrix."""
-        return BlockDiagonalMatrix([torch.linalg.inv(block) for block in self.blocks])
+        return BlockDiagonalMatrix(list(map(torch.linalg.inv, self.blocks)))
 
     def solve(self, rhs: BlockVector) -> BlockVector:
         """Solve M x = rhs for block-diagonal M."""
@@ -59,7 +58,7 @@ class BlockDiagonalMatrix(Matrix):
         )
 
     @property
-    def T(self) -> "Matrix":
+    def T(self) -> "BlockDiagonalMatrix":
         """Return transpose of this matrix."""
         return BlockDiagonalMatrix([block.T for block in self.blocks])
 
@@ -113,7 +112,7 @@ class IdentityWithLowerBlockDiagonalMatrix(Matrix):
         return BlockVector(result_blocks)
 
     @property
-    def T(self) -> "Matrix":
+    def T(self) -> "IdentityWithUpperBlockDiagonalMatrix":
         """Return transpose of this matrix."""
         return IdentityWithUpperBlockDiagonalMatrix(
             [block.T for block in self.lower_blocks]
@@ -162,7 +161,7 @@ class IdentityWithUpperBlockDiagonalMatrix(Matrix):
         return BlockVector(result_blocks)
 
     @property
-    def T(self) -> "Matrix":
+    def T(self) -> IdentityWithLowerBlockDiagonalMatrix:
         """Return transpose of this matrix."""
         return IdentityWithLowerBlockDiagonalMatrix(
             [block.T for block in self.upper_blocks]
