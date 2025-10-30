@@ -4,7 +4,7 @@ Unit tests for hessian.py
 
 import torch
 import torch.nn as nn
-from hessian import DenseBlock
+from hessian import DenseBlock, LossLayer
 
 
 class TestDenseBlock:
@@ -226,10 +226,231 @@ class TestDenseBlock:
         )
 
 
+class TestLossLayer:
+    """Test LossLayer with num_classes=10."""
+
+    def test_forward_logging(self):
+        """
+        Test that the base class's forward() method properly logs input and output.
+        """
+        batch_size = 1
+        input_dim = 5
+        num_classes = 10
+
+        torch.manual_seed(42)
+
+        # Create input and targets
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
+
+        # Create LossLayer and call forward with targets
+        loss_layer = LossLayer(input_dim, num_classes)
+        output = loss_layer(z_in, torch.tensor([3]))
+
+        # Verify that input and output are logged
+        assert loss_layer.input is not None, "Input should be logged"
+        assert loss_layer.output is not None, "Output should be logged"
+        torch.testing.assert_close(loss_layer.input, z_in)
+        torch.testing.assert_close(loss_layer.output, output)
+
+    def test_forward_returns_scalar(self):
+        """
+        Test that forward() returns a scalar despite num_classes=10.
+        """
+        batch_size = 1
+        input_dim = 5
+        num_classes = 10
+
+        torch.manual_seed(42)
+
+        # Create input and targets
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
+
+        # Create LossLayer
+        loss_layer = LossLayer(input_dim, num_classes)
+
+        # Compute forward pass with targets (computes loss)
+        output = loss_layer(z_in, torch.tensor([7]))
+
+        # Verify output is a scalar
+        assert (
+            output.ndim == 0
+        ), f"Output should be scalar (0-dim), got {output.ndim}-dim"
+        assert (
+            output.numel() == 1
+        ), f"Output should have 1 element, got {output.numel()}"
+
+        # Verify it's a valid loss value (non-negative for cross-entropy)
+        assert output.item() >= 0, "Cross-entropy loss should be non-negative"
+
+    def test_functional_call_forward(self):
+        """
+        Test calling LossLayer.forward() via torch.func.functional_call.
+
+        Verifies that the functional call returns the same scalar loss as the
+        regular call and that input/output logging still occurs on the module.
+        """
+        batch_size = 1
+        input_dim = 5
+        num_classes = 10
+
+        torch.manual_seed(42)
+
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
+        target = torch.tensor([2])
+
+        loss_layer = LossLayer(input_dim, num_classes)
+
+        # Regular forward call
+        out_regular = loss_layer(z_in, target)
+        assert out_regular.ndim == 0 and out_regular.numel() == 1
+
+        # functional_call with current parameters
+        params = dict(loss_layer.named_parameters())
+        out_func = torch.func.functional_call(loss_layer, params, (z_in, target))
+
+        # Outputs should match
+        torch.testing.assert_close(out_func, out_regular)
+
+        # Logging should reflect the latest call (functional_call above)
+        assert loss_layer.input is not None and loss_layer.output is not None
+        torch.testing.assert_close(loss_layer.input, z_in)
+        torch.testing.assert_close(loss_layer.output, out_func)
+
+    def test_backward_grad_shape(self):
+        """
+        Test that gradients can be computed for LossLayer parameters and that
+        weight.grad has the expected shape (num_classes, input_dim).
+        """
+        batch_size = 1
+        input_dim = 5
+        num_classes = 10
+
+        torch.manual_seed(0)
+
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
+        target = torch.tensor([3])
+
+        loss_layer = LossLayer(input_dim, num_classes)
+
+        loss = loss_layer(z_in, target)
+        assert loss.ndim == 0
+        loss.backward()
+
+        assert (
+            loss_layer.linear.weight.grad is not None
+        ), "weight.grad should exist after backward()"
+        assert loss_layer.linear.weight.grad.shape == (
+            num_classes,
+            input_dim,
+        ), f"Expected weight.grad shape ({num_classes}, {input_dim}), got {loss_layer.linear.weight.grad.shape}"
+
+    def test_functional_call_jacrev_linear_weight_shape(self):
+        """
+        Compute jacrev via torch.func.jacrev on a functional_call and confirm
+        that the jacobian for linear.weight has the expected shape.
+        """
+        batch_size = 1
+        input_dim = 5
+        num_classes = 10
+
+        torch.manual_seed(123)
+
+        z_in = torch.randn(batch_size, input_dim)
+        target = torch.tensor([4])
+
+        loss_layer = LossLayer(input_dim, num_classes)
+
+        def loss_fn(p):
+            return torch.func.functional_call(
+                loss_layer, p, (z_in.flatten(), target.squeeze())
+            )
+
+        jac = torch.func.jacrev(loss_fn)(dict(loss_layer.named_parameters()))
+
+        assert "linear.weight" in jac
+        assert jac["linear.weight"].shape == (num_classes, input_dim)
+
+    def test_derivatives_shapes(self):
+        """
+        Test that derivatives() returns derivatives with the correct shapes.
+
+        Note: derivatives() computes derivatives with respect to the logits output
+        (before applying cross-entropy loss), so output_dim = num_classes.
+        """
+        batch_size = 1
+        input_dim = 5
+        num_classes = 10
+        num_params = input_dim * num_classes
+
+        torch.manual_seed(42)
+
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
+
+        loss_layer = LossLayer(input_dim, num_classes)
+        target = torch.tensor([7])
+        loss_layer(z_in, target)
+
+        # Compute derivatives
+        derivs = loss_layer.derivatives(1.0, target)
+
+        # Verify shapes
+        assert derivs.Dx.shape == (
+            num_params,
+        ), f"Dx shape should be ({num_params}), got {derivs.Dx.shape}"
+
+        assert derivs.Dz.shape == (
+            input_dim,
+        ), f"Dz shape should be ({input_dim}), got {derivs.Dz.shape}"
+
+        assert derivs.DD_Dxx.shape == (
+            num_params,
+            num_params,
+        ), f"DD_Dxx shape should be ({num_params}, {num_params}), got {derivs.DD_Dxx.shape}"
+
+        assert derivs.DD_Dzx.shape == (
+            num_params,
+            input_dim,
+        ), f"DD_Dzx shape should be ({num_params}, {input_dim}), got {derivs.DD_Dzx.shape}"
+
+        assert derivs.DM_Dzz.shape == (
+            input_dim,
+            input_dim,
+        ), f"DM_Dzz shape should be ({input_dim}, {input_dim}), got {derivs.DM_Dzz.shape}"
+
+
+class TestMatmulOperatorAssociativity:
+    """Test the order of operations for chained @ operators."""
+
+    def test_matmul_chain_is_left_associative(self):
+        "Test that A @ B @ C is evaluated as (A @ B) @ C (left-to-right)."
+
+        class TrackedMatrix(str):
+            def __matmul__(self, other):
+                return TrackedMatrix(f"({self} @ {other})")
+
+        A = TrackedMatrix("A")
+        B = TrackedMatrix("B")
+        C = TrackedMatrix("C")
+
+        # Some sanity checks on our custom @ operator.
+        assert A @ B == "(A @ B)"
+        assert (A @ B) @ C == "((A @ B) @ C)"
+        assert A @ (B @ C) == "(A @ (B @ C))"
+
+        # The actual test of left-associativity.
+        assert A @ B @ C == "((A @ B) @ C)", "@ is not left-associative"
+
+
 if __name__ == "__main__":
     # Run test directly
     test = TestDenseBlock()
     test.test_derivatives_identity_activation()
     test.test_derivatives_square_activation()
-    test.test_derivatives_numerical()
+    test.test_derivatives_linear_activation_numerical()
+
+    loss_test = TestLossLayer()
+    loss_test.test_forward_logging()
+    loss_test.test_forward_returns_scalar()
+    loss_test.test_derivatives_shapes()
+
     print("✓ All tests passed!")

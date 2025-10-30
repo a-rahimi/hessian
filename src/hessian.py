@@ -63,15 +63,15 @@ class BlockWithMixedDerivatives(nn.Module):
         self.input = None
         self.output = None
 
-    def naked_forward(self, x: torch.Tensor) -> torch.Tensor:
+    def naked_forward(self, *args) -> torch.Tensor:
         raise NotImplementedError
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        self.input = x
-        self.output = self.naked_forward(x)
+    def forward(self, z_in: torch.Tensor, *args) -> torch.Tensor:
+        self.input = z_in
+        self.output = self.naked_forward(z_in, *args)
         return self.output
 
-    def derivatives(self, dloss_dz: torch.Tensor) -> LayerDerivatives:
+    def derivatives(self, dloss_dz: torch.Tensor, *forward_args) -> LayerDerivatives:
         if not (self.input.ndim == 2 and self.input.shape[0] == 1):
             raise ValueError("Input must be a 2D tensor with batch dimension=1")
 
@@ -85,7 +85,10 @@ class BlockWithMixedDerivatives(nn.Module):
         params = dict(self.named_parameters())
 
         def f(x, z):
-            return TF.functional_call(self, x, (z,))
+            return TF.functional_call(self, x, (z, *forward_args))
+
+        def dloss_dz_f(x, z):
+            return dloss_dz.flatten() @ f(x, z).flatten()
 
         return LayerDerivatives(
             Dx=reshape_pytree(
@@ -93,16 +96,14 @@ class BlockWithMixedDerivatives(nn.Module):
                 starting_shape=self.output.shape,
             ),
             Dz=torch.func.jacrev(lambda z: f(params, z))(z_in),
-            DD_Dxx=flatten_2d_pytree(
-                TF.hessian(lambda x: dloss_dz @ f(x, z_in))(params)
-            ),
+            DD_Dxx=flatten_2d_pytree(TF.hessian(lambda x: dloss_dz_f(x, z_in))(params)),
             DD_Dzx=torch.func.jacrev(
                 lambda z_in: reshape_pytree(
-                    TF.jacrev(lambda x: dloss_dz @ f(x, z_in))(params),
+                    TF.jacrev(lambda x: dloss_dz_f(x, z_in))(params),
                     starting_shape=(),
                 ),
             )(z_in),
-            DM_Dzz=TF.hessian(lambda z: dloss_dz @ f(params, z))(z_in),
+            DM_Dzz=TF.hessian(lambda z: dloss_dz_f(params, z))(z_in),
         )
 
 
@@ -117,22 +118,26 @@ class DenseBlock(BlockWithMixedDerivatives):
         self.linear = nn.Linear(input_dim, output_dim, bias=False)
         self.act_fn = activation
 
-    def naked_forward(self, x):
+    def naked_forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.act_fn(self.linear(x))
 
 
-class LossLayer(BlockWithMixedDerivatives):
+class LossLayer(DenseBlock):
     """Final layer that fuses the last linear layer with the loss computation."""
 
     def __init__(self, input_dim: int, num_classes: int):
-        super().__init__()
-        self.layer = DenseBlock(input_dim, num_classes, nn.Identity())
+        super().__init__(input_dim, num_classes, nn.Identity())
 
-    def forward(self, x, targets):
-        return F.cross_entropy(self.layer(x), targets)
+    def naked_forward(self, x: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return F.cross_entropy(super().naked_forward(x), targets)
 
-    def derivatives(self, dloss_dz: torch.Tensor) -> LayerDerivatives:
-        raise NotImplementedError
+    def derivatives(
+        self, dloss_dz: torch.Tensor, targets: torch.Tensor
+    ) -> LayerDerivatives:
+        if targets.numel() != 1 and targets.dtype != torch.int64:
+            raise ValueError("For the loss layer, targets must be an integer tensor")
+        # Ignore dloss_dz. For the loss layer, it's always ∂z_L/∂z_L = 1.
+        return super().derivatives(torch.tensor(1.0), targets.squeeze())
 
 
 class SequenceOfBlocks(nn.Sequential):
