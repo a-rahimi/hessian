@@ -4,12 +4,12 @@ as described in "The Hessian of tall-skinny networks is easy to invert"
 """
 
 from typing import Callable, NamedTuple
-import abc
 import numpy as np
 import torch
 import torch.func as TF
 import torch.nn as nn
 import torch.nn.functional as F
+import contextlib
 
 import partitioned
 
@@ -60,8 +60,17 @@ class LayerDerivatives(NamedTuple):
 class BlockWithMixedDerivatives(nn.Module):
     def __init__(self):
         super().__init__()
+        # Caches for the input and output of the layer
         self.input = None
         self.output = None
+
+    def backward_hook(
+        self,
+        _: nn.Module,
+        grad_input: tuple[torch.Tensor, ...],
+        grad_output: tuple[torch.Tensor, ...],
+    ) -> None:
+        self.dloss_dout = grad_output[0]
 
     def naked_forward(self, *args) -> torch.Tensor:
         raise NotImplementedError
@@ -140,7 +149,16 @@ class LossLayer(DenseBlock):
         return super().derivatives(torch.tensor(1.0), targets.squeeze())
 
 
-class SequenceOfBlocks(nn.Sequential):
+def save_dloss_dout(
+    module: nn.Module,
+    grad_input: tuple[torch.Tensor, ...],
+    grad_output: tuple[torch.Tensor, ...],
+) -> None:
+    # Layer must have exactly one output.
+    (module.dloss_dout,) = grad_output
+
+
+class SequenceOfBlocks(nn.Module):
     def __init__(
         self,
         input_dim: int,
@@ -149,38 +167,48 @@ class SequenceOfBlocks(nn.Sequential):
         num_layers: int = 19,
         activation: Callable[[torch.Tensor], torch.Tensor] = torch.tanh,
     ):
-        super().__init__(
+        super().__init__()
+        self.layers = nn.Sequential(
             *(
                 [DenseBlock(input_dim, hidden_dim, activation)]
                 + [
                     DenseBlock(hidden_dim, hidden_dim, activation)
                     for _ in range(num_layers - 2)
                 ]
-                + [LossLayer(hidden_dim, num_classes)]
             )
         )
-        assert len(self) == num_layers
+        self.loss_layer = LossLayer(hidden_dim, num_classes)
+
+    @contextlib.contextmanager
+    def save_dloss_douts(self):
+        callbacks = [
+            layer.register_full_backward_hook(save_dloss_dout) for layer in self.layers
+        ]
+        callbacks.append(self.loss_layer.register_full_backward_hook(save_dloss_dout))
+
+        yield
+
+        for callback in callbacks:
+            callback.remove()
+
+    def forward(self, x: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return self.loss_layer(self.layers(x), targets)
 
     def hessian_vector_product(
-        self, x: torch.Tensor, targets: torch.Tensor, v: partitioned.Vector
+        self, x: torch.Tensor, target: torch.Tensor, v: partitioned.Vector
     ) -> None:
-        self.zero_grad()
-        loss = self(x, targets)
-        loss.backward()
+        with self.save_dloss_douts():
+            # Populate the input and output caches of the layers and ∂z_L/∂z_ℓ for each layer ℓ.
+            self(x, target).backward()
 
-        # ∂z_L/∂x_ℓ
-        dloss_dx = torch.autograd.grad(
-            loss, self.parameters(), create_graph=True, retain_graph=True
-        )
-
-        # b_ℓ = ∂z_L/∂z_ℓ
-        dloss_dz = [
-            torch.autograd.grad(loss, layer.input, create_graph=True, retain_graph=True)
-            for layer in self
-        ]
-        Dx, Dz, DD_Dxx, DD_Dzx, DM_Dxz, DM_Dzz = map(
-            partitioned.Matrix,
-            zip(*[layer.derivatives(dloss_dz) for layer in self]),
+        Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = map(
+            partitioned.BlockDiagonalMatrix,
+            zip(
+                *(
+                    [layer.derivatives(layer.dloss_dout) for layer in self.layers]
+                    + [self.loss_layer.derivatives(1.0, target)]
+                )
+            ),
         )
         M = partitioned.IdentityWithLowerBlockDiagonalMatrix(-Dz)
 
@@ -188,7 +216,7 @@ class SequenceOfBlocks(nn.Sequential):
         return (
             DD_Dxx @ v
             + DD_Dzx @ partitioned.downshift(M.solve(Dx @ v))
-            + Dx.T @ M.T.solve(partitioned.upshift(DM_Dxz @ v))
+            + Dx.T @ M.T.solve(partitioned.upshift(DD_Dzx.T @ v))
             + Dx.T
             @ M.T.solve(
                 partitioned.upshift(DM_Dzz @ partitioned.downshift(M.solve(Dx @ v)))
