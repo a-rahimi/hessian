@@ -4,7 +4,7 @@ Unit tests for hessian.py
 
 import torch
 import torch.nn as nn
-from hessian import DenseBlock, LossLayer
+from hessian import DenseBlock, LossLayer, SequenceOfBlocks
 
 
 class TestDenseBlock:
@@ -439,6 +439,76 @@ class TestMatmulOperatorAssociativity:
 
         # The actual test of left-associativity.
         assert A @ B @ C == "((A @ B) @ C)", "@ is not left-associative"
+
+
+class TestSequenceOfBlocksForward:
+    """Tests for SequenceOfBlocks.forward behavior."""
+
+    def test_forward_basic(self):
+        torch.manual_seed(7)
+        batch_size = 1
+        input_dim = 4
+        hidden_dim = 5
+        num_classes = 10
+        num_layers = 6
+
+        model = SequenceOfBlocks(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            num_classes=num_classes,
+            num_layers=num_layers,
+        )
+
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
+        target = torch.randint(0, num_classes, (batch_size,))
+
+        loss = model(z_in, target)
+
+        # Output is scalar
+        assert loss.ndim == 0 and loss.numel() == 1
+
+    def test_gradient_of_loss_wrt_layer_outputs(self):
+        """Test that ∂z_L/∂z_ℓ (gradient of loss w.r.t. each layer output) has correct shape."""
+        torch.manual_seed(11)
+        batch_size = 1
+        input_dim = 4
+        hidden_dim = 5
+        num_classes = 6
+        num_layers = 4
+
+        model = SequenceOfBlocks(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            num_classes=num_classes,
+            num_layers=num_layers,
+        )
+
+        x = torch.randn(batch_size, input_dim, requires_grad=True)
+        target = torch.randint(0, num_classes, (batch_size,))
+
+        with model.save_dloss_douts():
+            loss = model(x, target)
+            loss.backward()
+
+        # Check each intermediate layer's hook gradient shape matches its output
+        for layer_idx, layer in enumerate(model.layers):
+            assert hasattr(layer, "dloss_dout"), f"Layer {layer_idx} missing dloss_dout"
+            assert layer.dloss_dout is not None, f"Layer {layer_idx} dloss_dout is None"
+            assert layer.output is not None, f"Layer {layer_idx} output not cached"
+            assert (
+                layer.dloss_dout.shape == layer.output.shape
+            ), f"Layer {layer_idx} dloss_dout shape {layer.dloss_dout.shape} != output shape {layer.output.shape}"
+
+        # Check loss layer as well (scalar loss)
+        assert hasattr(model.loss_layer, "dloss_dout")
+        assert model.loss_layer.dloss_dout is not None
+        # loss is scalar; grad shape should match loss shape
+        assert (
+            model.loss_layer.dloss_dout.shape == loss.shape
+        ), f"Loss layer dloss_dout shape {model.loss_layer.dloss_dout.shape} != loss shape {loss.shape}"
+
+        # It should in fact be 1.
+        assert torch.allclose(model.loss_layer.dloss_dout, torch.ones_like(loss))
 
 
 if __name__ == "__main__":
