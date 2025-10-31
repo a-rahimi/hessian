@@ -121,11 +121,8 @@ def train_epoch_standard(model, train_loader, optimizer, device, epoch):
         # Flatten inputs for MLP
         inputs_flat = inputs.view(inputs.size(0), -1)
 
-        # Forward pass
         optimizer.zero_grad()
         loss = model(inputs_flat, targets, track_activations=False)
-
-        # Backward pass
         loss.backward()
         optimizer.step()
 
@@ -181,7 +178,6 @@ def train_epoch_hessian(model, train_loader, lr, device, epoch, use_hessian_ever
         for param in model.parameters():
             param.grad = None
 
-        # Forward pass with activation tracking
         loss = model(inputs_flat, targets, track_activations=True)
 
         # Backward pass to compute gradients
@@ -190,7 +186,6 @@ def train_epoch_hessian(model, train_loader, lr, device, epoch, use_hessian_ever
         # Get gradient vector
         gradient = flatten_gradients(model)
 
-        # Apply Hessian-inverse to gradient
         if batch_idx % use_hessian_every_n == 0:
             hess_start = time.time()
             try:
@@ -204,10 +199,8 @@ def train_epoch_hessian(model, train_loader, lr, device, epoch, use_hessian_ever
             except Exception as e:
                 print(f"Warning: Hessian computation failed: {e}")
                 print("Falling back to standard gradient descent")
-                # Fall back to standard gradient if Hessian fails
                 unflatten_and_apply_gradients(model, gradient, lr)
         else:
-            # Standard gradient update
             unflatten_and_apply_gradients(model, gradient, lr)
 
         # Statistics
@@ -306,11 +299,9 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Create checkpoint directory
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(exist_ok=True)
 
-    # Load data
     print("Loading ImageNet data...")
     train_loader, val_loader = get_imagenet_loaders(
         args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers
@@ -320,7 +311,6 @@ def main():
     input_dim = 224 * 224 * 3
     num_classes = 1000
 
-    # Create model
     print(f"Creating {args.num_layers}-layer MLP with hidden dim {args.hidden_dim}...")
     model = DeepMLPWithTracking(
         input_dim=input_dim,
@@ -333,14 +323,12 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total parameters: {total_params:,}")
 
-    # Create optimizer (only for standard training)
     if not args.use_hessian:
         optimizer = torch.optim.SGD(
             model.parameters(), lr=args.lr, momentum=0.9, weight_decay=1e-4
         )
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
-    # Training loop
     best_acc = 0.0
 
     for epoch in range(1, args.epochs + 1):
@@ -371,11 +359,9 @@ def main():
             )
             scheduler.step()
 
-        # Validation
         val_loss, val_acc = validate(model, val_loader, device)
         print(f"Validation - Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%")
 
-        # Save checkpoint
         is_best = val_acc > best_acc
         best_acc = max(val_acc, best_acc)
 
