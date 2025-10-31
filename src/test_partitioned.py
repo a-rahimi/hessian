@@ -625,7 +625,3 @@ class TestDownshiftUpshiftComposition:
         assert torch.allclose(result.blocks[0], torch.zeros(2))
         assert torch.allclose(result.blocks[1], torch.tensor([3.0, 4.0]))
         assert torch.allclose(result.blocks[2], torch.tensor([5.0, 6.0]))
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

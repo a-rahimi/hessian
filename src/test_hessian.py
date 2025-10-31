@@ -509,18 +509,3 @@ class TestSequenceOfBlocksForward:
 
         # It should in fact be 1.
         assert torch.allclose(model.loss_layer.dloss_dout, torch.ones_like(loss))
-
-
-if __name__ == "__main__":
-    # Run test directly
-    test = TestDenseBlock()
-    test.test_derivatives_identity_activation()
-    test.test_derivatives_square_activation()
-    test.test_derivatives_linear_activation_numerical()
-
-    loss_test = TestLossLayer()
-    loss_test.test_forward_logging()
-    loss_test.test_forward_returns_scalar()
-    loss_test.test_derivatives_shapes()
-
-    print("✓ All tests passed!")

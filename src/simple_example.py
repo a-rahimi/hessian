@@ -53,20 +53,13 @@ def train_with_standard_gd(model, train_loader, lr, num_epochs, device):
             inputs, targets = inputs.to(device), targets.to(device)
             inputs_flat = inputs.view(inputs.size(0), -1)
 
-            # Zero gradients
             for param in model.parameters():
                 param.grad = None
 
-            # Forward pass
             loss = model(inputs_flat, targets, track_activations=False)
-
-            # Backward pass
             loss.backward()
 
-            # Get gradient
             gradient = flatten_gradients(model)
-
-            # Apply gradient
             unflatten_and_apply_gradients(model, gradient, lr)
 
             # Statistics
@@ -105,17 +98,14 @@ def train_with_hessian_gd(model, train_loader, lr, num_epochs, device):
             inputs, targets = inputs.to(device), targets.to(device)
             inputs_flat = inputs.view(inputs.size(0), -1)
 
-            # Zero gradients
             for param in model.parameters():
                 param.grad = None
 
-            # Forward pass with tracking
             loss = model(inputs_flat, targets, track_activations=True)
 
-            # Backward pass (need create_graph for second derivatives)
+            # Need create_graph for second derivatives
             loss.backward(create_graph=True)
 
-            # Get gradient
             gradient = flatten_gradients(model)
 
             # Apply Hessian-inverse
@@ -152,11 +142,9 @@ def train_with_hessian_gd(model, train_loader, lr, num_epochs, device):
 
 
 def main():
-    # Settings
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # CIFAR-10 dataset
     print("\nLoading CIFAR-10 dataset...")
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
@@ -172,7 +160,6 @@ def main():
 
     train_loader = DataLoader(trainset, batch_size=32, shuffle=True, num_workers=2)
 
-    # Model parameters
     input_dim = 32 * 32 * 3  # CIFAR-10 images
     hidden_dim = 64
     num_classes = 10
@@ -182,7 +169,6 @@ def main():
 
     print(f"\nModel: {num_layers} layers, {hidden_dim} hidden units")
 
-    # Test 1: Standard GD
     print("\n" + "=" * 60)
     print("EXPERIMENT 1: Standard Gradient Descent")
     print("=" * 60)
@@ -197,7 +183,6 @@ def main():
 
     train_with_standard_gd(model1, train_loader, lr, num_epochs, device)
 
-    # Test 2: Hessian-preconditioned GD
     print("\n" + "=" * 60)
     print("EXPERIMENT 2: Hessian-Preconditioned Gradient Descent")
     print("=" * 60)
