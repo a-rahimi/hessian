@@ -3,7 +3,7 @@ Implementation of the Hessian-inverse-vector product algorithm
 as described in "The Hessian of tall-skinny networks is easy to invert"
 """
 
-from typing import Callable, NamedTuple
+from typing import Callable, Iterator, NamedTuple
 import numpy as np
 import torch
 import torch.func as TF
@@ -63,14 +63,6 @@ class BlockWithMixedDerivatives(nn.Module):
         # Caches for the input and output of the layer
         self.input = None
         self.output = None
-
-    def backward_hook(
-        self,
-        _: nn.Module,
-        grad_input: tuple[torch.Tensor, ...],
-        grad_output: tuple[torch.Tensor, ...],
-    ) -> None:
-        self.dloss_dout = grad_output[0]
 
     def naked_forward(self, *args) -> torch.Tensor:
         raise NotImplementedError
@@ -145,8 +137,30 @@ class LossLayer(DenseBlock):
     ) -> LayerDerivatives:
         if targets.numel() != 1 and targets.dtype != torch.int64:
             raise ValueError("For the loss layer, targets must be an integer tensor")
+
         # Ignore dloss_dz. For the loss layer, it's always ∂z_L/∂z_L = 1.
-        return super().derivatives(torch.tensor(1.0), targets.squeeze())
+        derivs = super().derivatives(torch.tensor(1.0), targets.squeeze())
+
+        # Sanity check the shapes of the derivatives.
+        dim_out = self.output.numel()
+        dim_in = self.input.numel()
+        dim_params = sum(p.numel() for p in self.parameters())
+        assert dim_out == 1
+        assert derivs.Dx.shape == (dim_params,)
+        assert derivs.Dz.shape == (dim_in,)
+        assert derivs.DD_Dxx.shape == (dim_params, dim_params)
+        assert derivs.DD_Dzx.shape == (dim_params, dim_in)
+        assert derivs.DM_Dzz.shape == (dim_in, dim_in)
+
+        # Fixup the shape of the derivatives. Some of these are 1D tensors
+        # because the loss is scalar. But we need them all to be 2D tensors.
+        return LayerDerivatives(
+            Dx=derivs.Dx.reshape(1, -1),
+            Dz=derivs.Dz.reshape(1, -1),
+            DD_Dxx=derivs.DD_Dxx,
+            DD_Dzx=derivs.DD_Dzx,
+            DM_Dzz=derivs.DM_Dzz,
+        )
 
 
 def save_dloss_dout(
@@ -179,8 +193,14 @@ class SequenceOfBlocks(nn.Module):
         )
         self.loss_layer = LossLayer(hidden_dim, num_classes)
 
+    def __iter__(self) -> Iterator[nn.Module]:
+        yield from self.layers
+        yield self.loss_layer
+
     @contextlib.contextmanager
     def save_dloss_douts(self):
+        # Add a hook to every layer of the pipeline that records the derivative of the loss with respect to the
+        # output of the layer.
         callbacks = [
             layer.register_full_backward_hook(save_dloss_dout) for layer in self.layers
         ]
@@ -195,30 +215,31 @@ class SequenceOfBlocks(nn.Module):
         return self.loss_layer(self.layers(x), targets)
 
     def hessian_vector_product(
-        self, x: torch.Tensor, target: torch.Tensor, v: partitioned.Vector
-    ) -> None:
+        self, z_in: torch.Tensor, target: torch.Tensor, v: partitioned.BlockVector
+    ) -> partitioned.BlockVector:
         with self.save_dloss_douts():
             # Populate the input and output caches of the layers and ∂z_L/∂z_ℓ for each layer ℓ.
-            self(x, target).backward()
+            self(z_in, target).backward()
 
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = map(
             partitioned.BlockDiagonalMatrix,
             zip(
                 *(
                     [layer.derivatives(layer.dloss_dout) for layer in self.layers]
-                    + [self.loss_layer.derivatives(1.0, target)]
+                    + [self.loss_layer.derivatives(None, target)]
                 )
             ),
         )
-        M = partitioned.IdentityWithLowerBlockDiagonalMatrix(-Dz)
+        M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
 
-        # Compute equation \ref{eq:hessian} from hessian.tex
+        # Compute equation \ref{eq:hessian} from hessian.tex:
+        # H v = D_D D_xx v + D_D D_zx P M⁻¹ Dₓ v
+        #         + Dₓᵀ M⁻ᵀ Pᵀ D_M D_xz v
+        #         + Dₓᵀ M⁻ᵀ Pᵀ D_M D_zz P M⁻¹ Dₓ v
+        t1 = partitioned.downshift(M.solve(Dx @ v), z_in.numel())
         return (
             DD_Dxx @ v
-            + DD_Dzx @ partitioned.downshift(M.solve(Dx @ v))
-            + Dx.T @ M.T.solve(partitioned.upshift(DD_Dzx.T @ v))
-            + Dx.T
-            @ M.T.solve(
-                partitioned.upshift(DM_Dzz @ partitioned.downshift(M.solve(Dx @ v)))
-            )
+            + DD_Dzx @ t1
+            + Dx.T @ M.T.solve(partitioned.upshift(DD_Dzx.T @ v, 1))
+            + Dx.T @ M.T.solve(partitioned.upshift(DM_Dzz @ t1, 1))
         )
