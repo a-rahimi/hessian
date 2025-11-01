@@ -4,7 +4,10 @@ Unit tests for hessian.py
 
 import torch
 import torch.nn as nn
+
+import hessian
 from hessian import DenseBlock, LossLayer, SequenceOfBlocks
+import partitioned
 
 
 class TestDenseBlock:
@@ -391,16 +394,18 @@ class TestLossLayer:
         loss_layer(z_in, target)
 
         # Compute derivatives
-        derivs = loss_layer.derivatives(1.0, target)
+        derivs = loss_layer.derivatives(torch.tensor([1.0]), target)
 
         # Verify shapes
         assert derivs.Dx.shape == (
+            1,
             num_params,
-        ), f"Dx shape should be ({num_params}), got {derivs.Dx.shape}"
+        ), f"Dx shape should be (1, {num_params}), got {derivs.Dx.shape}"
 
         assert derivs.Dz.shape == (
+            1,
             input_dim,
-        ), f"Dz shape should be ({input_dim}), got {derivs.Dz.shape}"
+        ), f"Dz shape should be (1, {input_dim}), got {derivs.Dz.shape}"
 
         assert derivs.DD_Dxx.shape == (
             num_params,
@@ -509,3 +514,116 @@ class TestSequenceOfBlocksForward:
 
         # It should in fact be 1.
         assert torch.allclose(model.loss_layer.dloss_dout, torch.ones_like(loss))
+
+
+class TestSequenceOfBlocksGradient:
+    """Test SequenceOfBlocks.gradient_wrt_parameters method."""
+
+    def test_gradient_wrt_parameters_vs_torch_func(self):
+        """
+        Test gradient_wrt_parameters by comparing it to torch.func.grad.
+
+        Compares:
+        1. Result from gradient_wrt_parameters()
+        2. Result from torch.func.grad()
+        """
+        torch.manual_seed(42)
+        batch_size = 1
+        input_dim = 3
+        hidden_dim = 4
+        num_classes = 6
+        num_layers = 5
+
+        model = SequenceOfBlocks(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            num_classes=num_classes,
+            num_layers=num_layers,
+            activation=torch.tanh,
+        )
+
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
+        target = torch.randint(0, num_classes, (batch_size,))
+
+        with model.save_dloss_douts():
+            model(z_in, target).backward()
+
+        # Method 1: Compute dloss_dx as e_L M^{-1} D_x.
+        Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = map(
+            partitioned.BlockDiagonalMatrix,
+            zip(
+                *(
+                    [layer.derivatives(layer.dloss_dout) for layer in model.layers]
+                    + [model.loss_layer.derivatives(None, target)]
+                )
+            ),
+        )
+        M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
+        e_L = partitioned.BlockVector(
+            [torch.zeros(layer.output.numel()) for layer in model]
+        )
+        assert e_L.blocks[-1].numel() == 1
+        e_L.blocks[-1][:] = 1.0
+        dloss_dx = Dx.T @ M.T.solve(e_L)
+        grad_flat = dloss_dx.to_tensor()
+
+        # Method 2: Use loss.backward
+        grad_torch_flat = torch.cat([p.grad.flatten() for p in model.parameters()])
+
+        # Compare the two methods
+        assert grad_flat.shape == grad_torch_flat.shape
+        torch.testing.assert_close(grad_flat, grad_torch_flat)
+
+
+class TestSequenceOfBlocksHessianVectorProduct:
+    """Test SequenceOfBlocks.hessian_vector_product method."""
+
+    def test_hessian_vector_product_vs_torch_func(self):
+        """
+        Test hessian_vector_product by comparing it to torch.func.hessian.
+
+        Creates a random partitioned vector v with blocks matching the parameter
+        count of each layer, then compares:
+        1. Result from hessian_vector_product(v)
+        2. Result from torch.func.hessian(...) @ v.flatten()
+        """
+        torch.manual_seed(13)
+        batch_size = 1
+        input_dim = 3
+        hidden_dim = 4
+        num_classes = 10
+        num_layers = 5
+
+        model = SequenceOfBlocks(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            num_classes=num_classes,
+            num_layers=num_layers,
+            activation=torch.tanh,
+        )
+
+        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
+        target = torch.randint(0, num_classes, (batch_size,))
+
+        # A random partitioned vector  each of which has as many elements as the
+        # corresponding layer has parameters.
+        v = partitioned.BlockVector(
+            [
+                torch.randn(sum(p.numel() for p in layer.parameters()))
+                for layer in list(model.layers) + [model.loss_layer]
+            ]
+        )
+
+        # Method 1: Use hessian_vector_product
+        hvp_result = model.hessian_vector_product(z_in, target, v)
+        hvp_flat = hvp_result.to_tensor()
+
+        # Method 2: Use torch.func.hessian
+        def loss_fn(x):
+            return torch.func.functional_call(model, x, (z_in, target))
+
+        hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
+        hvp_torch = hessian.flatten_2d_pytree(hessian_dict) @ v.to_tensor()
+
+        # Compare the two methods
+        torch.testing.assert_close(hvp_flat, hvp_torch, rtol=1e-4, atol=1e-5)

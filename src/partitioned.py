@@ -16,7 +16,20 @@ class BlockVector(Matrix):
     """Represents a block vector as a list of blocks."""
 
     def __init__(self, blocks: Sequence[torch.Tensor]):
+        if not all(block.ndim == 1 for block in blocks):
+            raise ValueError("All blocks must be a 1D tensors")
+
         self.blocks = blocks
+
+    def __add__(self, other: "BlockVector") -> "BlockVector":
+        if len(self.blocks) != len(other.blocks):
+            raise ValueError("Number of blocks in vectors must match")
+        return BlockVector(
+            [
+                block + other_block
+                for block, other_block in zip(self.blocks, other.blocks)
+            ]
+        )
 
     def to_tensor(self) -> torch.Tensor:
         """Convert block vector to a single concatenated tensor."""
@@ -27,6 +40,9 @@ class BlockDiagonalMatrix(Matrix):
     """Represents a block-diagonal matrix as a list of blocks."""
 
     def __init__(self, blocks: Sequence[torch.Tensor]):
+        if not all(block.ndim == 2 for block in blocks):
+            raise ValueError("All blocks must be a 2D tensors")
+
         self.blocks = blocks
 
     def __neg__(self) -> "BlockDiagonalMatrix":
@@ -81,6 +97,9 @@ class IdentityWithLowerBlockDiagonalMatrix(Matrix):
             lower_blocks: lower diagonal blocks (L blocks, where first is typically zero/None)
                          These are the -∇_z f_ℓ terms. Can be a list of tensors or a BlockDiagonalMatrix.
         """
+        if not all(block.ndim == 2 for block in lower_blocks):
+            raise ValueError("All blocks must be a 2D tensors")
+
         self.lower_blocks = lower_blocks
 
     def apply(self, v: BlockVector) -> BlockVector:
@@ -130,6 +149,9 @@ class IdentityWithUpperBlockDiagonalMatrix(Matrix):
     """
 
     def __init__(self, upper_blocks: Sequence[torch.Tensor]):
+        if not all(block.ndim == 2 for block in upper_blocks):
+            raise ValueError("All blocks must be a 2D tensors")
+
         self.upper_blocks = upper_blocks
 
     def apply(self, v: BlockVector) -> BlockVector:
@@ -153,6 +175,9 @@ class IdentityWithUpperBlockDiagonalMatrix(Matrix):
         # So
         #   x[i] = rhs[i] - upper_blocks[i] @ x[i+1]
 
+        if len(rhs.blocks) != len(self.upper_blocks) + 1:
+            raise ValueError("Number of blocks in vector and matrix must match")
+
         result_blocks = [rhs.blocks[-1]]
         for i in range(len(self.upper_blocks) - 1, -1, -1):
             result_blocks.insert(
@@ -168,29 +193,18 @@ class IdentityWithUpperBlockDiagonalMatrix(Matrix):
         )
 
 
-def downshift(v: BlockVector) -> torch.Tensor:
+def downshift(v: BlockVector, empty_block_size: int) -> torch.Tensor:
     """
     Apply the downshifting matrix P to a vector.
 
     P shifts blocks down by one position, inserting zeros at the top:
     P @ [v_0, v_1, v_2, ..., v_{L-1}] = [0, v_0, v_1, ..., v_{L-2}]
-
-    Args:
-        v: input vector (concatenated blocks, BlockVector, or PartitionedVector)
-        block_sizes: sizes of each block (list), or single size for uniform blocks
-        num_blocks: number of blocks (required if block_sizes is a single int)
-
-    Returns:
-        P @ v (downshifted vector)
     """
-    return BlockVector([torch.zeros_like(v.blocks[0])] + v.blocks[:-1])
+    return BlockVector([torch.zeros(empty_block_size)] + v.blocks[:-1])
 
 
-def upshift(v: BlockVector) -> BlockVector:
+def upshift(v: BlockVector, empty_block_size: int) -> BlockVector:
     """
-    Apply the upshifting matrix Q to a vector.
-
-    Q shifts blocks up by one position, removing the top block:
-    Q @ [v_0, v_1, v_2, ..., v_{L-1}] = [v_1, v_2, ..., v_{L-1}, 0]
+    Apply the transpose of the downshifting matrix P to a vector.
     """
-    return BlockVector(v.blocks[1:] + [torch.zeros_like(v.blocks[-1])])
+    return BlockVector(v.blocks[1:] + [torch.zeros(empty_block_size)])

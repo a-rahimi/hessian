@@ -7,9 +7,52 @@ from partitioned import (
     BlockDiagonalMatrix,
     IdentityWithLowerBlockDiagonalMatrix,
     IdentityWithUpperBlockDiagonalMatrix,
-    downshift,
-    upshift,
 )
+
+
+class TestBlockVector:
+    """Tests for BlockVector class."""
+
+    def test_add_basic(self):
+        """Test adding two block vectors with matching blocks."""
+        v1_blocks = [torch.tensor([1.0, 2.0]), torch.tensor([3.0, 4.0, 5.0])]
+        v2_blocks = [torch.tensor([10.0, 20.0]), torch.tensor([30.0, 40.0, 50.0])]
+
+        v1 = BlockVector(v1_blocks)
+        v2 = BlockVector(v2_blocks)
+
+        result = v1 + v2
+
+        assert torch.allclose(result.blocks[0], torch.tensor([11.0, 22.0]))
+        assert torch.allclose(result.blocks[1], torch.tensor([33.0, 44.0, 55.0]))
+
+    def test_add_single_block(self):
+        """Test adding two block vectors with a single block each."""
+        v1 = BlockVector([torch.tensor([1.0, 2.0, 3.0])])
+        v2 = BlockVector([torch.tensor([4.0, 5.0, 6.0])])
+
+        result = v1 + v2
+
+        assert torch.allclose(result.blocks[0], torch.tensor([5.0, 7.0, 9.0]))
+
+    def test_add_mismatched_block_count_raises(self):
+        """Test that adding vectors with different block counts raises ValueError."""
+        v1 = BlockVector([torch.tensor([1.0, 2.0])])
+        v2 = BlockVector([torch.tensor([3.0, 4.0]), torch.tensor([5.0, 6.0])])
+
+        with pytest.raises(ValueError, match="Number of blocks in vectors must match"):
+            v1 + v2
+
+    def test_add_mismatched_block_shape_raises(self):
+        """Test that adding vectors with mismatched block shapes raises RuntimeError."""
+        v1 = BlockVector([torch.tensor([1.0, 2.0]), torch.tensor([3.0, 4.0])])
+        v2 = BlockVector([torch.tensor([10.0, 20.0, 30.0]), torch.tensor([40.0, 50.0])])
+
+        with pytest.raises(
+            RuntimeError,
+            match="The size of tensor a .* must match the size of tensor b",
+        ):
+            v1 + v2
 
 
 class TestBlockDiagonalMatrix:
@@ -455,173 +498,3 @@ class TestTransposeRelationship:
 
         # This should be consistent with the transpose operation
         assert isinstance(m_lower, IdentityWithLowerBlockDiagonalMatrix)
-
-
-class TestDownshift:
-    """Tests for downshift function."""
-
-    def test_downshift_basic(self):
-        """Test basic downshift operation."""
-        v_blocks = [
-            torch.tensor([1.0, 2.0]),
-            torch.tensor([3.0, 4.0]),
-            torch.tensor([5.0, 6.0]),
-        ]
-        v = BlockVector(v_blocks)
-
-        result = downshift(v)
-
-        # Result should be [zeros, v[0], v[1]]
-        assert torch.allclose(result.blocks[0], torch.zeros(2))
-        assert torch.allclose(result.blocks[1], torch.tensor([1.0, 2.0]))
-        assert torch.allclose(result.blocks[2], torch.tensor([3.0, 4.0]))
-
-    def test_downshift_single_block(self):
-        """Test downshift with single block."""
-        v_blocks = [torch.tensor([1.0, 2.0, 3.0])]
-        v = BlockVector(v_blocks)
-
-        result = downshift(v)
-
-        # Result should be [zeros] (last block dropped)
-        assert torch.allclose(result.blocks[0], torch.zeros(3))
-
-    def test_downshift_different_sizes(self):
-        """Test downshift with different block sizes."""
-        v_blocks = [
-            torch.tensor([1.0]),
-            torch.tensor([2.0, 3.0]),
-            torch.tensor([4.0, 5.0, 6.0]),
-        ]
-        v = BlockVector(v_blocks)
-
-        result = downshift(v)
-
-        assert result.blocks[0].shape == torch.Size([1])
-        assert result.blocks[1].shape == torch.Size([1])
-        assert result.blocks[2].shape == torch.Size([2])
-        assert torch.allclose(result.blocks[0], torch.zeros(1))
-        assert torch.allclose(result.blocks[1], torch.tensor([1.0]))
-        assert torch.allclose(result.blocks[2], torch.tensor([2.0, 3.0]))
-
-    def test_downshift_preserves_dtype(self):
-        """Test that downshift preserves dtype."""
-        v_blocks = [torch.tensor([1, 2], dtype=torch.int32)]
-        v = BlockVector(v_blocks)
-
-        result = downshift(v)
-
-        assert result.blocks[0].dtype == torch.int32
-
-    def test_downshift_preserves_device(self):
-        """Test that downshift preserves device."""
-        v_blocks = [torch.tensor([1.0, 2.0])]
-        v = BlockVector(v_blocks)
-
-        result = downshift(v)
-
-        assert result.blocks[0].device == v.blocks[0].device
-
-
-class TestUpshift:
-    """Tests for upshift function."""
-
-    def test_upshift_basic(self):
-        """Test basic upshift operation."""
-        v_blocks = [
-            torch.tensor([1.0, 2.0]),
-            torch.tensor([3.0, 4.0]),
-            torch.tensor([5.0, 6.0]),
-        ]
-        v = BlockVector(v_blocks)
-
-        result = upshift(v)
-
-        # Result should be [v[1], v[2], zeros]
-        assert torch.allclose(result.blocks[0], torch.tensor([3.0, 4.0]))
-        assert torch.allclose(result.blocks[1], torch.tensor([5.0, 6.0]))
-        assert torch.allclose(result.blocks[2], torch.zeros(2))
-
-    def test_upshift_single_block(self):
-        """Test upshift with single block."""
-        v_blocks = [torch.tensor([1.0, 2.0, 3.0])]
-        v = BlockVector(v_blocks)
-
-        result = upshift(v)
-
-        # Result should be [zeros] (first block dropped)
-        assert torch.allclose(result.blocks[0], torch.zeros(3))
-
-    def test_upshift_different_sizes(self):
-        """Test upshift with different block sizes."""
-        v_blocks = [
-            torch.tensor([1.0]),
-            torch.tensor([2.0, 3.0]),
-            torch.tensor([4.0, 5.0, 6.0]),
-        ]
-        v = BlockVector(v_blocks)
-
-        result = upshift(v)
-
-        assert result.blocks[0].shape == torch.Size([2])
-        assert result.blocks[1].shape == torch.Size([3])
-        assert result.blocks[2].shape == torch.Size([3])
-        assert torch.allclose(result.blocks[0], torch.tensor([2.0, 3.0]))
-        assert torch.allclose(result.blocks[1], torch.tensor([4.0, 5.0, 6.0]))
-        assert torch.allclose(result.blocks[2], torch.zeros(3))
-
-    def test_upshift_preserves_dtype(self):
-        """Test that upshift preserves dtype."""
-        v_blocks = [torch.tensor([1, 2], dtype=torch.int32)]
-        v = BlockVector(v_blocks)
-
-        result = upshift(v)
-
-        assert result.blocks[0].dtype == torch.int32
-
-    def test_upshift_preserves_device(self):
-        """Test that upshift preserves device."""
-        v_blocks = [torch.tensor([1.0, 2.0])]
-        v = BlockVector(v_blocks)
-
-        result = upshift(v)
-
-        assert result.blocks[0].device == v.blocks[0].device
-
-
-class TestDownshiftUpshiftComposition:
-    """Tests for composition of downshift and upshift."""
-
-    def test_downshift_upshift_cancellation(self):
-        """Test that upshift(downshift(v)) behaves as expected."""
-        v_blocks = [
-            torch.tensor([1.0, 2.0]),
-            torch.tensor([3.0, 4.0]),
-            torch.tensor([5.0, 6.0]),
-        ]
-        v = BlockVector(v_blocks)
-
-        # downshift: [0, v[0], v[1]]
-        # upshift of that: [v[0], v[1], 0]
-        result = upshift(downshift(v))
-
-        assert torch.allclose(result.blocks[0], torch.tensor([1.0, 2.0]))
-        assert torch.allclose(result.blocks[1], torch.tensor([3.0, 4.0]))
-        assert torch.allclose(result.blocks[2], torch.zeros(2))
-
-    def test_upshift_downshift_cancellation(self):
-        """Test that downshift(upshift(v)) behaves as expected."""
-        v_blocks = [
-            torch.tensor([1.0, 2.0]),
-            torch.tensor([3.0, 4.0]),
-            torch.tensor([5.0, 6.0]),
-        ]
-        v = BlockVector(v_blocks)
-
-        # upshift: [v[1], v[2], 0]
-        # downshift of that: [0, v[1], v[2]]
-        result = downshift(upshift(v))
-
-        assert torch.allclose(result.blocks[0], torch.zeros(2))
-        assert torch.allclose(result.blocks[1], torch.tensor([3.0, 4.0]))
-        assert torch.allclose(result.blocks[2], torch.tensor([5.0, 6.0]))
