@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 import hessian
-from hessian import DenseBlock, LossLayer, SequenceOfBlocks
+from hessian import DenseBlock, LossLayer, SequenceOfDenseBlocks
 import partitioned
 
 
@@ -457,7 +457,7 @@ class TestSequenceOfBlocksForward:
         num_classes = 10
         num_layers = 6
 
-        model = SequenceOfBlocks(
+        model = SequenceOfDenseBlocks(
             input_dim=input_dim,
             hidden_dim=hidden_dim,
             num_classes=num_classes,
@@ -481,7 +481,7 @@ class TestSequenceOfBlocksForward:
         num_classes = 6
         num_layers = 4
 
-        model = SequenceOfBlocks(
+        model = SequenceOfDenseBlocks(
             input_dim=input_dim,
             hidden_dim=hidden_dim,
             num_classes=num_classes,
@@ -534,7 +534,7 @@ class TestSequenceOfBlocksGradient:
         num_classes = 6
         num_layers = 5
 
-        model = SequenceOfBlocks(
+        model = SequenceOfDenseBlocks(
             input_dim=input_dim,
             hidden_dim=hidden_dim,
             num_classes=num_classes,
@@ -594,7 +594,7 @@ class TestSequenceOfBlocksHessianVectorProduct:
         num_classes = 10
         num_layers = 5
 
-        model = SequenceOfBlocks(
+        model = SequenceOfDenseBlocks(
             input_dim=input_dim,
             hidden_dim=hidden_dim,
             num_classes=num_classes,

@@ -3,7 +3,7 @@ Implementation of the Hessian-inverse-vector product algorithm
 as described in "The Hessian of tall-skinny networks is easy to invert"
 """
 
-from typing import Callable, Iterator, NamedTuple
+from typing import Callable, Iterator, NamedTuple, Sequence
 import numpy as np
 import torch
 import torch.func as TF
@@ -173,25 +173,10 @@ def save_dloss_dout(
 
 
 class SequenceOfBlocks(nn.Module):
-    def __init__(
-        self,
-        input_dim: int,
-        hidden_dim: int,
-        num_classes: int,
-        num_layers: int = 19,
-        activation: Callable[[torch.Tensor], torch.Tensor] = torch.tanh,
-    ):
+    def __init__(self, layers: Sequence[nn.Module], loss_layer: nn.Module):
         super().__init__()
-        self.layers = nn.Sequential(
-            *(
-                [DenseBlock(input_dim, hidden_dim, activation)]
-                + [
-                    DenseBlock(hidden_dim, hidden_dim, activation)
-                    for _ in range(num_layers - 2)
-                ]
-            )
-        )
-        self.loss_layer = LossLayer(hidden_dim, num_classes)
+        self.layers = nn.Sequential(*layers)
+        self.loss_layer = loss_layer
 
     def __iter__(self) -> Iterator[nn.Module]:
         yield from self.layers
@@ -232,6 +217,9 @@ class SequenceOfBlocks(nn.Module):
         )
         M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
 
+        # The loss is always a scalar.
+        dim_loss = 1
+
         # Compute equation \ref{eq:hessian} from hessian.tex:
         # H v = D_D D_xx v + D_D D_zx P M⁻¹ Dₓ v
         #         + Dₓᵀ M⁻ᵀ Pᵀ D_M D_xz v
@@ -240,6 +228,25 @@ class SequenceOfBlocks(nn.Module):
         return (
             DD_Dxx @ v
             + DD_Dzx @ t1
-            + Dx.T @ M.T.solve(partitioned.upshift(DD_Dzx.T @ v, 1))
-            + Dx.T @ M.T.solve(partitioned.upshift(DM_Dzz @ t1, 1))
+            + Dx.T @ M.T.solve(partitioned.upshift(DD_Dzx.T @ v, dim_loss))
+            + Dx.T @ M.T.solve(partitioned.upshift(DM_Dzz @ t1, dim_loss))
+        )
+
+
+class SequenceOfDenseBlocks(SequenceOfBlocks):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        num_classes: int,
+        num_layers: int = 19,
+        activation: Callable[[torch.Tensor], torch.Tensor] = torch.tanh,
+    ):
+        super().__init__(
+            [DenseBlock(input_dim, hidden_dim, activation)]
+            + [
+                DenseBlock(hidden_dim, hidden_dim, activation)
+                for _ in range(num_layers - 2)
+            ],
+            LossLayer(hidden_dim, num_classes),
         )
