@@ -316,6 +316,7 @@ We can solve for the vector $
 \end{bmatrix}
 = M^{-1} D_x dx$ and use the downshifting matrix
 \begin{equation}
+  \label{eq:P}
   P \equiv
   \begin{bmatrix}
     0 \\ I & 0 \\ &\ddots \\ &I&0
@@ -606,9 +607,10 @@ The Woodbury formula gives
   .
 \end{align}
 
-Both inverses in the above can be either computed or applied efficiently. The matrix $Q^{-1}$ can be computed
-explicitly using the partitioned matrix inverse formula. Define the Schur complement $S = Q_{11} - Q_{12} Q_{22}^{-1}
-Q_{21}$, where $Q_{ij}$ denote the $i,j$th block of $Q$ as defined above. Then
+Both inverses in the above can be either computed or applied efficiently.  We'll
+treat $Q$ as a 2x2 block matrix and define the Schur complement $S \equiv Q_{11} -
+Q_{12} Q_{22}^{-1} Q_{21}$, where $Q_{ij}$ denote the $i,j$th block of $Q$ as
+defined above.  By the partitioned matrix inverse formula,
 \begin{equation}
   Q^{-1} =
   \begin{bmatrix}
@@ -618,20 +620,23 @@ Q_{21}$, where $Q_{ij}$ denote the $i,j$th block of $Q$ as defined above. Then
   .
 \end{equation}
 
-The matrices $Q_{11}$, $Q_{12}$, $Q_{21}$, and $Q_{22}$ are all block-diagonal. $S$ is also block diagonal because
-$Q_{11}$ and $Q_{12} Q_{22}^{-1} Q_{21}$ are block-diagonal. So the four blocks four blocks of $Q^{-1}$ are also
-block-diagonal and computing them only requires operatins on block-diagonal matrices.
+The matrices $Q_{11}$ and $Q_{22}$ are block-diagonal, and $Q_{12}$, $Q_{21}$,
+are upper and lower-diagonal respectively. This means  $S$ is also block
+diagonal because $Q_{11}$ and $Q_{12} Q_{22}^{-1} Q_{21}$ are block-diagonal. So
+the four blocks of $Q^{-1}$ are either lower, upper, or block diagonal.
 
 The inverse of $A\equiv \hat{M} Q^{-1} \hat{M}^\top +
 \begin{bmatrix}
   D_x D_x^\top & D_x \\ D_x^\top & I
 \end{bmatrix}
-$ can be applied efficiently. Instead of applying the Woodbury formula again, we compute its $UDU^\top$ decomposition and apply the inverse of that decomposition.
+$ can be applied efficiently. Instead of applying the partitioned matrix inverse
+formula again, we compute its $UDU^\top$ decomposition and apply the inverse of
+that decomposition.
 With the blocks
 \begin{align}
-  A_{11} & = M \left[Q^{-1}\right]_{11} M^\top +D_x D_x^\top \nonumber \\
-  A_{12} & = M\left[Q^{-1}\right]_{12} + D_x \nonumber                 \\
-  A_{22} & = \left[Q^{-1}\right]_{22} + I,
+  A_{11} & \equiv M \left[Q^{-1}\right]_{11} M^\top +D_x D_x^\top \nonumber \\
+  A_{12} & \equiv M\left[Q^{-1}\right]_{12} + D_x \nonumber                 \\
+  A_{22} & \equiv \left[Q^{-1}\right]_{22} + I,
 \end{align}
 the $UDU^\top$ decomposition of $A$ is
 \begin{equation}
