@@ -626,14 +626,14 @@ The inverse of $A\equiv \hat{M} Q^{-1} \hat{M}^\top +
 \begin{bmatrix}
   D_x D_x^\top & D_x \\ D_x^\top & I
 \end{bmatrix}
-$ can be applied efficiently. Instead of applying the Woodbury formula again, we compute its $LDL^\top$ decomposition and apply the inverse of that decomposition.
+$ can be applied efficiently. Instead of applying the Woodbury formula again, we compute its $UDU^\top$ decomposition and apply the inverse of that decomposition.
 With the blocks
 \begin{align}
   A_{11} & = M \left[Q^{-1}\right]_{11} M^\top +D_x D_x^\top \nonumber \\
   A_{12} & = M\left[Q^{-1}\right]_{12} + D_x \nonumber                 \\
   A_{22} & = \left[Q^{-1}\right]_{22} + I,
 \end{align}
-the $LDL^\top$ decomposition of $A$ is
+the $UDU^\top$ decomposition of $A$ is
 \begin{equation}
   A       =
   \begin{bmatrix}
