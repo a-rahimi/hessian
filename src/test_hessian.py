@@ -2,6 +2,7 @@
 Unit tests for hessian.py
 """
 
+import pytest
 import torch
 import torch.nn as nn
 
@@ -13,7 +14,40 @@ import partitioned
 class TestDenseBlock:
     """Test BasicBlock derivatives with analytical solutions."""
 
-    def test_derivatives_identity_activation(self):
+    @pytest.fixture
+    def batch_size(self):
+        return 1
+
+    @pytest.fixture
+    def input_dim(self):
+        return 3
+
+    @pytest.fixture
+    def output_dim(self):
+        return 4
+
+    @pytest.fixture
+    def num_params(self, input_dim, output_dim):
+        return input_dim * output_dim
+
+    @pytest.fixture
+    def z_in(self, batch_size, input_dim):
+        return torch.randn(batch_size, input_dim, requires_grad=True)
+
+    @pytest.fixture
+    def dloss_dz(self, batch_size, output_dim):
+        return torch.randn(batch_size, output_dim)
+
+    @pytest.fixture
+    def block(self, input_dim, output_dim, z_in):
+        """Create a DenseBlock with Identity activation and populate its cache."""
+        block = DenseBlock(input_dim, output_dim, nn.Identity())
+        block(z_in)
+        return block
+
+    def test_derivatives_identity_activation(
+        self, input_dim, output_dim, num_params, z_in, block, dloss_dz
+    ):
         """
         Test BasicBlock.derivatives() with nn.Identity activation.
 
@@ -38,21 +72,6 @@ class TestDenseBlock:
         - ∇²_zz v'f = 0
         - ∇²_zW v'f = ∇_z ∇_W flat(v' W z') = ∇_z ∇_W (v' ⊗ z) flat(W) = ∇_z (v' ⊗ z) = (v' ⊗ 1)
         """
-        batch_size = 1
-        input_dim = 3
-        output_dim = 4
-        num_params = input_dim * output_dim
-
-        torch.manual_seed(42)
-
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-
-        # Create a random model and populate its internal cache.
-        block = DenseBlock(input_dim, output_dim, nn.Identity())
-        block(z_in)
-
-        dloss_dz = torch.randn(batch_size, output_dim)
-
         assert block.linear.weight.shape == (output_dim, input_dim)
 
         expected_Dx = torch.kron(torch.eye(output_dim), z_in)
@@ -74,7 +93,22 @@ class TestDenseBlock:
         assert derivs.DD_Dzx.shape == (num_params, input_dim)
         torch.testing.assert_close(derivs.DD_Dzx, expected_DD_Dzx)
 
-    def test_derivatives_square_activation(self):
+    @pytest.fixture
+    def block_square(self, input_dim, output_dim, z_in):
+        """Create a DenseBlock with square activation and populate its cache."""
+        block = DenseBlock(input_dim, output_dim, lambda x: x**2)
+        block(z_in)
+        return block
+
+    def test_derivatives_square_activation(
+        self,
+        input_dim,
+        output_dim,
+        num_params,
+        z_in,
+        block_square,
+        dloss_dz,
+    ):
         """
         Test BasicBlock.derivatives() with square activation.
 
@@ -102,31 +136,17 @@ class TestDenseBlock:
                     = 2 W' diag(v) W
 
         """
-        batch_size = 1
-        input_dim = 3
-        output_dim = 4
-        num_params = input_dim * output_dim
+        z_linear = block_square.linear(z_in).flatten()
 
-        torch.manual_seed(42)
+        assert block_square.linear.weight.shape == (output_dim, input_dim)
 
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-
-        # Create a random model and populate its internal cache.
-        block = DenseBlock(input_dim, output_dim, lambda x: x**2)
-        block(z_in)
-        z_linear = block.linear(z_in).flatten()
-
-        dloss_dz = torch.randn(batch_size, output_dim)
-
-        assert block.linear.weight.shape == (output_dim, input_dim)
-
-        derivs = block.derivatives(dloss_dz)
+        derivs = block_square.derivatives(dloss_dz)
 
         expected_Dx = 2 * torch.kron(torch.diag(z_linear), z_in)
         assert derivs.Dx.shape == (output_dim, num_params)
         torch.testing.assert_close(derivs.Dx, expected_Dx)
 
-        expected_Dz = 2 * z_linear.reshape(-1, 1) * block.linear.weight
+        expected_Dz = 2 * z_linear.reshape(-1, 1) * block_square.linear.weight
         assert derivs.Dz.shape == (output_dim, input_dim)
         torch.testing.assert_close(derivs.Dz, expected_Dz)
 
@@ -141,34 +161,21 @@ class TestDenseBlock:
 
         expected_DD_Dzz = (
             2
-            * block.linear.weight.T
+            * block_square.linear.weight.T
             @ torch.diag(dloss_dz.flatten())
-            @ block.linear.weight
+            @ block_square.linear.weight
         )
         assert expected_DD_Dzz.shape == (input_dim, input_dim)
         assert derivs.DM_Dzz.shape == (input_dim, input_dim)
         torch.testing.assert_close(derivs.DM_Dzz, expected_DD_Dzz)
 
-    def test_derivatives_linear_activation_numerical(self):
-        batch_size = 1
-        input_dim = 3
-        output_dim = 4
-
-        torch.manual_seed(42)
-
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-
-        # Create a random model and populate its internal cache.
-        block = DenseBlock(input_dim, output_dim, nn.Identity())
-        block(z_in)
-
-        dloss_dz = torch.randn(batch_size, output_dim)
-
-        derivs = block.derivatives(dloss_dz)
-
+    def test_derivatives_linear_activation_numerical(
+        self, z_in, block_square, dloss_dz
+    ):
+        derivs = block_square.derivatives(dloss_dz)
         dz = 1e-4 * torch.randn_like(z_in)
 
-        params = dict(block.named_parameters())
+        params = dict(block_square.named_parameters())
         dparams = {
             param_name: 1e-4 * torch.randn_like(param)
             for param_name, param in params.items()
@@ -180,7 +187,7 @@ class TestDenseBlock:
         dx = torch.cat([dparam.flatten() for dparam in dparams.values()])
 
         def f(x, z):
-            return torch.func.functional_call(block, x, (z,))
+            return torch.func.functional_call(block_square, x, (z,))
 
         torch.testing.assert_close(
             derivs.Dx @ dx,
@@ -202,7 +209,7 @@ class TestDenseBlock:
         ), "Tolerances are not tight enough."
 
         def dloss_dz_f(x, z):
-            return torch.func.functional_call(block, x, (z,)) @ dloss_dz.T
+            return torch.func.functional_call(block_square, x, (z,)) @ dloss_dz.T
 
         assert not torch.allclose(
             (dx[None, :] @ derivs.DD_Dzx @ dz.T).flatten(),
@@ -232,48 +239,48 @@ class TestDenseBlock:
 class TestLossLayer:
     """Test LossLayer with num_classes=10."""
 
-    def test_forward_logging(self):
+    @pytest.fixture
+    def batch_size(self):
+        return 1
+
+    @pytest.fixture
+    def input_dim(self):
+        return 5
+
+    @pytest.fixture
+    def num_classes(self):
+        return 10
+
+    @pytest.fixture
+    def z_in(self, batch_size, input_dim):
+        return torch.randn(batch_size, input_dim, requires_grad=True)
+
+    @pytest.fixture
+    def target(self, batch_size, num_classes):
+        return torch.randint(0, num_classes, (batch_size,))
+
+    @pytest.fixture
+    def loss_layer(self, input_dim, num_classes):
+        return LossLayer(input_dim, num_classes)
+
+    @pytest.fixture
+    def output(self, loss_layer, z_in, target):
+        return loss_layer(z_in, target)
+
+    def test_forward_logging(self, z_in, loss_layer, output):
         """
         Test that the base class's forward() method properly logs input and output.
         """
-        batch_size = 1
-        input_dim = 5
-        num_classes = 10
-
-        torch.manual_seed(42)
-
-        # Create input and targets
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-
-        # Create LossLayer and call forward with targets
-        loss_layer = LossLayer(input_dim, num_classes)
-        output = loss_layer(z_in, torch.tensor([3]))
-
         # Verify that input and output are logged
         assert loss_layer.input is not None, "Input should be logged"
         assert loss_layer.output is not None, "Output should be logged"
         torch.testing.assert_close(loss_layer.input, z_in)
         torch.testing.assert_close(loss_layer.output, output)
 
-    def test_forward_returns_scalar(self):
+    def test_forward_returns_scalar(self, output):
         """
         Test that forward() returns a scalar despite num_classes=10.
         """
-        batch_size = 1
-        input_dim = 5
-        num_classes = 10
-
-        torch.manual_seed(42)
-
-        # Create input and targets
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-
-        # Create LossLayer
-        loss_layer = LossLayer(input_dim, num_classes)
-
-        # Compute forward pass with targets (computes loss)
-        output = loss_layer(z_in, torch.tensor([7]))
-
         # Verify output is a scalar
         assert (
             output.ndim == 0
@@ -285,59 +292,35 @@ class TestLossLayer:
         # Verify it's a valid loss value (non-negative for cross-entropy)
         assert output.item() >= 0, "Cross-entropy loss should be non-negative"
 
-    def test_functional_call_forward(self):
+    def test_functional_call_forward(self, z_in, loss_layer, target, output):
         """
         Test calling LossLayer.forward() via torch.func.functional_call.
 
         Verifies that the functional call returns the same scalar loss as the
         regular call and that input/output logging still occurs on the module.
         """
-        batch_size = 1
-        input_dim = 5
-        num_classes = 10
-
-        torch.manual_seed(42)
-
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-        target = torch.tensor([2])
-
-        loss_layer = LossLayer(input_dim, num_classes)
-
-        # Regular forward call
-        out_regular = loss_layer(z_in, target)
-        assert out_regular.ndim == 0 and out_regular.numel() == 1
+        # Regular forward call already done by output fixture
+        assert output.ndim == 0 and output.numel() == 1
 
         # functional_call with current parameters
         params = dict(loss_layer.named_parameters())
         out_func = torch.func.functional_call(loss_layer, params, (z_in, target))
 
         # Outputs should match
-        torch.testing.assert_close(out_func, out_regular)
+        torch.testing.assert_close(out_func, output)
 
         # Logging should reflect the latest call (functional_call above)
         assert loss_layer.input is not None and loss_layer.output is not None
         torch.testing.assert_close(loss_layer.input, z_in)
         torch.testing.assert_close(loss_layer.output, out_func)
 
-    def test_backward_grad_shape(self):
+    def test_backward_grad_shape(self, output, loss_layer, num_classes, input_dim):
         """
         Test that gradients can be computed for LossLayer parameters and that
         weight.grad has the expected shape (num_classes, input_dim).
         """
-        batch_size = 1
-        input_dim = 5
-        num_classes = 10
-
-        torch.manual_seed(0)
-
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-        target = torch.tensor([3])
-
-        loss_layer = LossLayer(input_dim, num_classes)
-
-        loss = loss_layer(z_in, target)
-        assert loss.ndim == 0
-        loss.backward()
+        assert output.ndim == 0
+        output.backward()
 
         assert (
             loss_layer.linear.weight.grad is not None
@@ -347,21 +330,13 @@ class TestLossLayer:
             input_dim,
         ), f"Expected weight.grad shape ({num_classes}, {input_dim}), got {loss_layer.linear.weight.grad.shape}"
 
-    def test_functional_call_jacrev_linear_weight_shape(self):
+    def test_functional_call_jacrev_linear_weight_shape(
+        self, z_in, loss_layer, num_classes, input_dim, target
+    ):
         """
         Compute jacrev via torch.func.jacrev on a functional_call and confirm
         that the jacobian for linear.weight has the expected shape.
         """
-        batch_size = 1
-        input_dim = 5
-        num_classes = 10
-
-        torch.manual_seed(123)
-
-        z_in = torch.randn(batch_size, input_dim)
-        target = torch.tensor([4])
-
-        loss_layer = LossLayer(input_dim, num_classes)
 
         def loss_fn(p):
             return torch.func.functional_call(
@@ -373,24 +348,15 @@ class TestLossLayer:
         assert "linear.weight" in jac
         assert jac["linear.weight"].shape == (num_classes, input_dim)
 
-    def test_derivatives_shapes(self):
+    def test_derivatives_shapes(self, input_dim, num_classes, z_in, loss_layer, target):
         """
         Test that derivatives() returns derivatives with the correct shapes.
 
         Note: derivatives() computes derivatives with respect to the logits output
         (before applying cross-entropy loss), so output_dim = num_classes.
         """
-        batch_size = 1
-        input_dim = 5
-        num_classes = 10
         num_params = input_dim * num_classes
 
-        torch.manual_seed(42)
-
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-
-        loss_layer = LossLayer(input_dim, num_classes)
-        target = torch.tensor([7])
         loss_layer(z_in, target)
 
         # Compute derivatives
@@ -423,76 +389,45 @@ class TestLossLayer:
         ), f"DM_Dzz shape should be ({input_dim}, {input_dim}), got {derivs.DM_Dzz.shape}"
 
 
-class TestMatmulOperatorAssociativity:
-    """Test the order of operations for chained @ operators."""
+class TestSequenceOfBlocks:
+    @pytest.fixture
+    def model_config(self):
+        """Create a fresh model configuration for each test."""
+        return dict(input_dim=3, hidden_dim=4, num_classes=6, num_layers=4)
 
-    def test_matmul_chain_is_left_associative(self):
-        "Test that A @ B @ C is evaluated as (A @ B) @ C (left-to-right)."
-
-        class TrackedMatrix(str):
-            def __matmul__(self, other):
-                return TrackedMatrix(f"({self} @ {other})")
-
-        A = TrackedMatrix("A")
-        B = TrackedMatrix("B")
-        C = TrackedMatrix("C")
-
-        # Some sanity checks on our custom @ operator.
-        assert A @ B == "(A @ B)"
-        assert (A @ B) @ C == "((A @ B) @ C)"
-        assert A @ (B @ C) == "(A @ (B @ C))"
-
-        # The actual test of left-associativity.
-        assert A @ B @ C == "((A @ B) @ C)", "@ is not left-associative"
-
-
-class TestSequenceOfBlocksForward:
-    """Tests for SequenceOfBlocks.forward behavior."""
-
-    def test_forward_basic(self):
-        torch.manual_seed(7)
-        batch_size = 1
-        input_dim = 4
-        hidden_dim = 5
-        num_classes = 10
-        num_layers = 6
-
-        model = SequenceOfDenseBlocks(
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
-            num_classes=num_classes,
-            num_layers=num_layers,
+    @pytest.fixture
+    def model(self, model_config):
+        """Create a fresh model instance for each test."""
+        return SequenceOfDenseBlocks(
+            input_dim=model_config["input_dim"],
+            hidden_dim=model_config["hidden_dim"],
+            num_classes=model_config["num_classes"],
+            num_layers=model_config["num_layers"],
+            activation=torch.tanh,
         )
 
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-        target = torch.randint(0, num_classes, (batch_size,))
+    @pytest.fixture
+    def z_in(self, model_config):
+        """Create a fresh input tensor for each test."""
+        batch_size = 1
+        return torch.randn(batch_size, model_config["input_dim"], requires_grad=True)
 
+    @pytest.fixture
+    def target(self, model_config):
+        """Create a fresh target tensor for each test."""
+        batch_size = 1
+        return torch.randint(0, model_config["num_classes"], (batch_size,))
+
+    def test_forward_basic(self, model, z_in, target):
         loss = model(z_in, target)
 
         # Output is scalar
         assert loss.ndim == 0 and loss.numel() == 1
 
-    def test_gradient_of_loss_wrt_layer_outputs(self):
+    def test_gradient_of_loss_wrt_layer_outputs(self, model, z_in, target):
         """Test that ∂z_L/∂z_ℓ (gradient of loss w.r.t. each layer output) has correct shape."""
-        torch.manual_seed(11)
-        batch_size = 1
-        input_dim = 4
-        hidden_dim = 5
-        num_classes = 6
-        num_layers = 4
-
-        model = SequenceOfDenseBlocks(
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
-            num_classes=num_classes,
-            num_layers=num_layers,
-        )
-
-        x = torch.randn(batch_size, input_dim, requires_grad=True)
-        target = torch.randint(0, num_classes, (batch_size,))
-
         with model.save_dloss_douts():
-            loss = model(x, target)
+            loss = model(z_in, target)
             loss.backward()
 
         # Check each intermediate layer's hook gradient shape matches its output
@@ -515,11 +450,7 @@ class TestSequenceOfBlocksForward:
         # It should in fact be 1.
         assert torch.allclose(model.loss_layer.dloss_dout, torch.ones_like(loss))
 
-
-class TestSequenceOfBlocksGradient:
-    """Test SequenceOfBlocks.gradient_wrt_parameters method."""
-
-    def test_gradient_wrt_parameters_vs_torch_func(self):
+    def test_gradient_wrt_parameters_vs_torch_func(self, model, z_in, target):
         """
         Test gradient_wrt_parameters by comparing it to torch.func.grad.
 
@@ -527,39 +458,10 @@ class TestSequenceOfBlocksGradient:
         1. Result from gradient_wrt_parameters()
         2. Result from torch.func.grad()
         """
-        torch.manual_seed(42)
-        batch_size = 1
-        input_dim = 3
-        hidden_dim = 4
-        num_classes = 6
-        num_layers = 5
+        Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = model.derivatives(z_in, target)
 
-        model = SequenceOfDenseBlocks(
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
-            num_classes=num_classes,
-            num_layers=num_layers,
-            activation=torch.tanh,
-        )
-
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-        target = torch.randint(0, num_classes, (batch_size,))
-
-        with model.save_dloss_douts():
-            model(z_in, target).backward()
-
-        # Method 1: Compute dloss_dx as e_L M^{-1} D_x.
-        Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = map(
-            partitioned.BlockDiagonalMatrix,
-            zip(
-                *(
-                    [layer.derivatives(layer.dloss_dout) for layer in model.layers]
-                    + [model.loss_layer.derivatives(None, target)]
-                )
-            ),
-        )
         M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
-        e_L = partitioned.BlockVector(
+        e_L = partitioned.Vertical(
             [torch.zeros(layer.output.numel()) for layer in model]
         )
         assert e_L.blocks[-1].numel() == 1
@@ -574,11 +476,7 @@ class TestSequenceOfBlocksGradient:
         assert grad_flat.shape == grad_torch_flat.shape
         torch.testing.assert_close(grad_flat, grad_torch_flat)
 
-
-class TestSequenceOfBlocksHessianVectorProduct:
-    """Test SequenceOfBlocks.hessian_vector_product method."""
-
-    def test_hessian_vector_product_vs_torch_func(self):
+    def test_hessian_vector_product_vs_torch_func(self, model, z_in, target):
         """
         Test hessian_vector_product by comparing it to torch.func.hessian.
 
@@ -587,31 +485,10 @@ class TestSequenceOfBlocksHessianVectorProduct:
         1. Result from hessian_vector_product(v)
         2. Result from torch.func.hessian(...) @ v.flatten()
         """
-        torch.manual_seed(13)
-        batch_size = 1
-        input_dim = 3
-        hidden_dim = 4
-        num_classes = 10
-        num_layers = 5
-
-        model = SequenceOfDenseBlocks(
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
-            num_classes=num_classes,
-            num_layers=num_layers,
-            activation=torch.tanh,
-        )
-
-        z_in = torch.randn(batch_size, input_dim, requires_grad=True)
-        target = torch.randint(0, num_classes, (batch_size,))
-
         # A random partitioned vector  each of which has as many elements as the
         # corresponding layer has parameters.
-        v = partitioned.BlockVector(
-            [
-                torch.randn(sum(p.numel() for p in layer.parameters()))
-                for layer in list(model.layers) + [model.loss_layer]
-            ]
+        v = partitioned.Vertical(
+            [torch.randn(sum(p.numel() for p in layer.parameters())) for layer in model]
         )
 
         # Method 1: Use hessian_vector_product

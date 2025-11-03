@@ -11,26 +11,33 @@ When executing Python scripts, tests, or any Python code in this project, always
 
 ## Code Generation Guidelines
 
-* Comments: Comments that preceed a code block andexplain several lines of code
-  are instructive and should be kept. But avoid comments that literally repeat in Englishthe
-  code that follows. We comments that say things that are not obvious from a cursory reading of the code.
-  For example, these are all redundant comments:
+### Comments
 
-	```
-	# Assign b to a
-	a = b
-	# Call a's callback.
-	a.call_callback()
-	```
+Comments that preceed a code block andexplain several lines of code are
+instructive and should be kept. But avoid comments that literally repeat in
+Englishthe code that follows. We comments that say things that are not obvious
+from a cursory reading of the code.  For example, these are all redundant
+comments:
 
-  The following comments are useful because theyadd some context:
-	```
-	# Save b. We're going to modify it and would like to keep it around.
-	a = b
-	# The above subtly changes the state of a. Notify its clients of that
-	# change.
-	a.call_callback()
-	```
+```
+# Assign b to a
+a = b
+# Call a's callback.
+a.call_callback()
+```
 
-* Tests: Test files don't need a main driver. They'll always be called through
-  pytest. They'll never be called as standalone programs.
+The following comments are useful because theyadd some context:
+
+```
+# Save b. We're going to modify it and would like to keep it around.
+a = b
+# The above subtly changes the state of a. Notify its clients of that
+# change.
+a.call_callback()
+```
+
+### Tests
+
+* Test files don't need a main driver. They'll always be called through pytest. They'll never be called as standalone programs.
+
+* When many tests share the same local variables and objects, refactor these redundancies into pytest fixtures
