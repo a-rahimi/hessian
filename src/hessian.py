@@ -3,7 +3,7 @@ Implementation of the Hessian-inverse-vector product algorithm
 as described in "The Hessian of tall-skinny networks is easy to invert"
 """
 
-from typing import Callable, Iterator, NamedTuple, Sequence
+from typing import Callable, Iterator, Iterable, NamedTuple, Sequence
 import numpy as np
 import torch
 import torch.func as TF
@@ -196,18 +196,15 @@ class SequenceOfBlocks(nn.Module):
         for callback in callbacks:
             callback.remove()
 
-    def forward(self, x: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        return self.loss_layer(self.layers(x), targets)
-
-    def hessian_vector_product(
-        self, z_in: torch.Tensor, target: torch.Tensor, v: partitioned.BlockVector
-    ) -> partitioned.BlockVector:
+    def derivatives(
+        self, z_in: torch.Tensor, target: torch.Tensor
+    ) -> Iterable[partitioned.Diagonal]:
         with self.save_dloss_douts():
             # Populate the input and output caches of the layers and ∂z_L/∂z_ℓ for each layer ℓ.
             self(z_in, target).backward()
 
-        Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = map(
-            partitioned.BlockDiagonalMatrix,
+        return map(
+            partitioned.Diagonal,
             zip(
                 *(
                     [layer.derivatives(layer.dloss_dout) for layer in self.layers]
@@ -215,6 +212,19 @@ class SequenceOfBlocks(nn.Module):
                 )
             ),
         )
+
+    def forward(self, x: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return self.loss_layer(self.layers(x), targets)
+
+    def hessian_vector_product(
+        self, z_in: torch.Tensor, target: torch.Tensor, v: partitioned.Vertical
+    ) -> partitioned.Vertical:
+        """An implementation of Plearlmutter's algortihm using matrix operations instead of backprop operations.
+
+        Implements equation \ref{eq:hessian} from hessian.tex.
+        """
+        Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
+
         M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
 
         # The loss is always a scalar.
@@ -230,6 +240,58 @@ class SequenceOfBlocks(nn.Module):
             + DD_Dzx @ t1
             + Dx.T @ M.T.solve(partitioned.upshift(DD_Dzx.T @ v, dim_loss))
             + Dx.T @ M.T.solve(partitioned.upshift(DM_Dzz @ t1, dim_loss))
+        )
+
+    def hessian_inverse_product(
+        self, z_in: torch.Tensor, target: torch.Tensor, g: partitioned.Vertical
+    ) -> partitioned.Vertical:
+        """Compute H^{-1} @ g using the algorithm from lines 673-741 of hessian.tex."""
+        Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
+
+        M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
+        dim_loss = 1
+
+        # Step 1: Compute g_prime = [D_x; I] @ g = [D_x @ g; g]
+        g_prime = partitioned.Vertical((Dx @ g).blocks + g.blocks)
+
+        # Step 2: Compute the blocks of Q and invert Q.
+        # Q = [[P^T D_M D_zz P,  P^T D_M D_xz],
+        #      [D_D D_zx P,      D_D D_xx - I]]
+        Q_inv = partitioned.SymmetricBlock2x2Matrix(
+            # Q11 = P^T @ DM_Dzz @ P
+            block11=partitioned.upshift(DM_Dzz, (x, y)),
+            # Q12 = P^T @ DD_Dzx^T
+            block12=partitioned.upshift(DD_Dzx.T, (x, y)),
+            # Q22 = DD_Dxx - I
+            block22=partitioned.Diagonal(
+                [block - torch.eye(block.shape[0]) for block in DD_Dxx.blocks]
+            ),
+        ).invert()
+
+        # Step 3: Form A
+        A = partitioned.SymmetricBlock2x2Matrix(
+            # A11 = M @ Q_inv_11 @ M^T + D_x @ D_x^T
+            block11=M @ Q_inv.block11 @ M.T + Dx @ Dx.T,
+            # A12 = M @ Q_inv_12 + D_x
+            block12=M @ Q_inv.block12 + Dx,
+            # A22 = Q_inv_22 + I
+            block22=partitioned.Diagonal(
+                [block + torch.eye(block.shape[0]) for block in Q_inv.block22.blocks]
+            ),
+        )
+
+        # Step 4: Solve A @ g_double_prime = g_prime. Do this by computing the
+        # UDU^T decomposition of A and applying the inverse of that
+        # decomposition to g_prime.
+        U, D = A.UDU_decomposition()
+        g_double_prime = U.T.solve(D.solve(U.solve(g_prime)))
+
+        # Step 4: Return g - [D_x; I]^T @ g_double_prime
+        return partitioned.Vertical(
+            g
+            - partitioned.Vertical(
+                (Dx.T @ g_double_prime).blocks + g_double_prime.blocks
+            )
         )
 
 

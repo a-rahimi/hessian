@@ -280,7 +280,7 @@ class SymmetricBlock2x2Matrix(Matrix):
         return U, D
 
 
-def downshift(v: Vertical, empty_block_size: int) -> Vertical:
+def downshift(v: Vertical, empty_block_size: torch.Size) -> Vertical:
     """
     Apply the downshifting matrix P to a vector.
 
@@ -290,7 +290,7 @@ def downshift(v: Vertical, empty_block_size: int) -> Vertical:
     return Vertical([torch.zeros(empty_block_size)] + v.blocks[:-1])
 
 
-def upshift(v: Vertical, empty_block_size: int) -> Vertical:
+def upshift(v: Vertical, empty_block_size: torch.Size) -> Vertical:
     """
     Apply the transpose of the downshifting matrix P to a vector.
     """

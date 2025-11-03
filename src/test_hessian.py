@@ -504,3 +504,54 @@ class TestSequenceOfBlocks:
 
         # Compare the two methods
         torch.testing.assert_close(hvp_flat, hvp_torch, rtol=1e-4, atol=1e-5)
+
+    def test_hessian_inverse_is_inverse_of_hessian(self, model, z_in, target):
+        """
+        Test that H^{-1} is actually the inverse of H by verifying H @ H^{-1} @ g = g.
+
+        Generate a random vector g, compute h_inv_g = H^{-1} @ g using hessian_inverse_product,
+        then compute h_h_inv_g = H @ h_inv_g using hessian_vector_product,
+        and verify that h_h_inv_g ≈ g.
+        """
+        # Create a random vector g matching the parameter structure
+        g = partitioned.Vertical(
+            [torch.randn(sum(p.numel() for p in layer.parameters())) for layer in model]
+        )
+
+        # Compute H^{-1} @ g
+        h_inv_g = model.hessian_inverse_product(z_in, target, g)
+
+        # Compute H @ (H^{-1} @ g)
+        h_h_inv_g = model.hessian_vector_product(z_in, target, h_inv_g)
+
+        # Verify that H @ H^{-1} @ g = g
+        torch.testing.assert_close(
+            h_h_inv_g.to_tensor(), g.to_tensor(), rtol=1e-3, atol=1e-4
+        )
+
+    def test_hessian_inverse_product_vs_torch_func(self, model, z_in, target):
+        """
+        Test hessian_inverse_product by comparing it to torch.func.hessian.
+
+        Computes H^{-1} explicitly using torch.linalg.inv(torch.func.hessian(...))
+        and compares the result of hessian_inverse_product(g) against H^{-1} @ g.
+        """
+        # Create a random vector g
+        g = partitioned.Vertical(
+            [torch.randn(sum(p.numel() for p in layer.parameters())) for layer in model]
+        )
+
+        # Method 1: Use hessian_inverse_product
+        hinv_g_result = model.hessian_inverse_product(z_in, target, g)
+        hinv_g_flat = hinv_g_result.to_tensor()
+
+        # Method 2: Use torch.func.hessian and explicit inversion
+        def loss_fn(x):
+            return torch.func.functional_call(model, x, (z_in, target))
+
+        hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
+        H = hessian.flatten_2d_pytree(hessian_dict)
+        hinv_g_torch = torch.linalg.solve(H, g.to_tensor())
+
+        # Compare the two methods
+        torch.testing.assert_close(hinv_g_flat, hinv_g_torch, rtol=1e-3, atol=1e-4)
