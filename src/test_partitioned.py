@@ -502,6 +502,16 @@ class TestDownshift:
         for br, brr in zip(r.blocks, rr.blocks):
             torch.testing.assert_close(br, brr)
 
+    def test_PTDP(self):
+        P = downshifting_matrix(2, [3, 4, 5])
+        D = Diagonal([torch.randn(2, 2), torch.randn(3, 3), torch.randn(4, 4)])
+
+        r = P.T @ (D @ P)
+        rr = (P.T @ D) @ P
+        assert len(r.blocks) == len(rr.blocks)
+        for br, brr in zip(r.blocks, rr.blocks):
+            torch.testing.assert_close(br, brr)
+
 
 class TestTransposeRelationship:
     """Tests for transpose relationship between Lower and Upper block diagonal matrices."""

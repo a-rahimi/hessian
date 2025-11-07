@@ -23,6 +23,7 @@ x = b with x = A.solve(b), or recover the inverse of A with A.invert().
 
 import dataclasses as dc
 from functools import singledispatchmethod
+from math import sin
 from typing import Sequence
 import torch
 
@@ -53,6 +54,10 @@ class TorchMatrix(torch.Tensor, Matrix):
 
     def to_tensor(self) -> torch.Tensor:
         return self
+
+    @singledispatchmethod
+    def __matmul__(self, other: Matrix) -> Matrix:
+        return torch.Tensor.__matmul__(self, other)
 
     @property
     def width(self) -> int:
@@ -100,6 +105,11 @@ class Identity(Matrix):
     @property
     def height(self) -> int:
         return self.dimension
+
+
+@TorchMatrix.__matmul__.register
+def _(self, _: Identity) -> TorchMatrix:
+    return self
 
 
 @dc.dataclass(frozen=True)
@@ -614,7 +624,7 @@ class UpperBlockDiagonal(OffDiagonal):
         if len(other.blocks) != len(self.blocks):
             raise ValueError("Number of blocks in the operands must match")
         return Diagonal(
-            [b @ other_block for b, other_block in zip(self.blocks, other.blocks)]
+            [b @ other_b for b, other_b in zip(self.blocks, other.blocks)]
             + [torch.zeros(self.height_trailing_zeros, other.width_trailing_zeros)]
         )
 

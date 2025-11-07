@@ -518,7 +518,10 @@ class TestSequenceOfBlocks:
         """
         # Create a random vector g matching the parameter structure
         g = partitioned.Vertical(
-            [torch.randn(sum(p.numel() for p in layer.parameters())) for layer in model]
+            [
+                torch.randn(sum(p.numel() for p in layer.parameters()), 1)
+                for layer in model
+            ]
         )
 
         # Compute H^{-1} @ g

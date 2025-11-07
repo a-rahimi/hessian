@@ -267,7 +267,9 @@ class SequenceOfBlocks(nn.Module):
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
 
         M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
-        dim_loss = 1
+        P = partitioned.downshifting_matrix(
+            z_in.numel(), [b.shape[0] for b in Dx.blocks]
+        )
 
         # Step 1: Compute g_prime = [D_x; I] @ g = [D_x @ g; g]
         # TODO: Introduce a Vertical.concatenate method.
@@ -278,13 +280,11 @@ class SequenceOfBlocks(nn.Module):
         #      [D_D D_zx P,     D_D D_xx - I]]
         Q_inv = partitioned.SymmetricBlock2x2Matrix(
             # Q11 = P' DM_Dzz  P
-            block11=DM_Dzz.down_then_upshift(shape_trailing_zeros=(dim_loss, dim_loss)),
+            block11=P.T @ DM_Dzz @ P,
             # Q12 = P' D_M D_xz = P' DD_Dzx'
-            block12=DD_Dzx.T.upshift((dim_loss, dim_loss)),
+            block12=P.T @ DD_Dzx.T,
             # Q22 = DD_Dxx - I
-            block22=partitioned.Diagonal(
-                [b - torch.eye(b.shape[0]) for b in DD_Dxx.blocks]
-            ),  # TODO: use partitioned.Identity() here.
+            block22=DD_Dxx - partitioned.Identity(),
         ).invert()
 
         # Step 3: Form A
