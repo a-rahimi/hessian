@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import contextlib
 
-import partitioned
+import block_partitioned_matrices as bpm
 
 
 def reshape_starting(v: torch.Tensor, starting_shape: tuple[int, ...]):
@@ -58,6 +58,8 @@ class LayerDerivatives(NamedTuple):
 
 
 class BlockWithMixedDerivatives(nn.Module):
+    "An abstract layer for which various partial derivatives can be computed."
+
     def __init__(self):
         super().__init__()
         # Caches for the input and output of the layer
@@ -113,6 +115,8 @@ class BlockWithMixedDerivatives(nn.Module):
 
 
 class DenseBlock(BlockWithMixedDerivatives):
+    "A linear layer."
+
     def __init__(
         self,
         input_dim: int,
@@ -167,16 +171,12 @@ class LossLayer(DenseBlock):
         )
 
 
-def save_dloss_dout(
-    module: nn.Module,
-    grad_input: tuple[torch.Tensor, ...],
-    grad_output: tuple[torch.Tensor, ...],
-) -> None:
-    (module.dloss_dout,) = grad_output  # Ensure layer has exactly one output.
-
-
 class SequenceOfBlocks(nn.Module):
-    def __init__(self, layers: Sequence[nn.Module], loss_layer: nn.Module):
+    "A sequence of blocks for which mixed derivatives can be computed."
+
+    def __init__(
+        self, layers: Sequence[BlockWithMixedDerivatives], loss_layer: LossLayer
+    ):
         super().__init__()
         self.layers = nn.Sequential(*layers)
         self.loss_layer = loss_layer
@@ -187,12 +187,21 @@ class SequenceOfBlocks(nn.Module):
 
     @contextlib.contextmanager
     def save_dloss_douts(self):
-        # Add a hook to every layer of the pipeline that records the derivative of the loss with respect to the
-        # output of the layer.
-        callbacks = [
-            layer.register_full_backward_hook(save_dloss_dout) for layer in self.layers
-        ]
-        callbacks.append(self.loss_layer.register_full_backward_hook(save_dloss_dout))
+        """Record the derivative of the loss wrt the output of each layer.
+
+        For each layer, the derivative of the pipeline's loss wrt to the layer's output is recorded
+        in the layer's dloss_dout field.
+        """
+
+        def hook(
+            module: nn.Module,
+            grad_input: tuple[torch.Tensor, ...],
+            grad_output: tuple[torch.Tensor, ...],
+        ) -> None:
+            (module.dloss_dout,) = grad_output  # Ensure layer has exactly one output.
+
+        callbacks = [layer.register_full_backward_hook(hook) for layer in self.layers]
+        callbacks.append(self.loss_layer.register_full_backward_hook(hook))
 
         yield
 
@@ -201,7 +210,7 @@ class SequenceOfBlocks(nn.Module):
 
     def derivatives(
         self, z_in: torch.Tensor, target: torch.Tensor
-    ) -> Iterable[partitioned.Diagonal]:
+    ) -> Iterable[bpm.Diagonal]:
         """
         Compute the derivatives of the loss with respect to the inputs and parameters of the layers.
 
@@ -219,7 +228,7 @@ class SequenceOfBlocks(nn.Module):
             self(z_in, target).backward()
 
         return map(
-            partitioned.Diagonal,
+            bpm.Diagonal,
             zip(
                 *(
                     [layer.derivatives(layer.dloss_dout) for layer in self.layers]
@@ -232,18 +241,18 @@ class SequenceOfBlocks(nn.Module):
         return self.loss_layer(self.layers(x), targets)
 
     def hessian_vector_product(
-        self, z_in: torch.Tensor, target: torch.Tensor, v: partitioned.Vertical
-    ) -> partitioned.Vertical:
-        """An implementation of Plearlmutter's algortihm using matrix operations instead of backprop operations.
+        self, z_in: torch.Tensor, target: torch.Tensor, v: bpm.Vertical
+    ) -> bpm.Vertical:
+        """Multiply the pipeline's Hessian by a given vector.
 
-        Implements equation \ref{eq:hessian} from hessian.tex.
+        Implements equation \ref{eq:hessian} from hessian.tex.  Turns out to be
+        equivalent to writing Plearlmutter's algortihm using explicit matrix
+        operations instead of backprop operations.
         """
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
 
-        M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
-        P = partitioned.downshifting_matrix(
-            z_in.numel(), [b.shape[0] for b in Dx.blocks]
-        )
+        M = bpm.IdentityWithLowerDiagonal((-Dz).blocks[1:])
+        P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.blocks])
 
         # Compute equation \ref{eq:hessian} from hessian.tex:
         # H v = D_D D_xx v + D_D D_zx P M⁻¹ Dₓ v
@@ -258,40 +267,39 @@ class SequenceOfBlocks(nn.Module):
         )
 
     def hessian_inverse_product(
-        self, z_in: torch.Tensor, target: torch.Tensor, g: partitioned.Vertical
-    ) -> partitioned.Vertical:
-        """Compute H^{-1} @ g using the algorithm from lines 673-741 of hessian.tex."""
+        self, z_in: torch.Tensor, target: torch.Tensor, g: bpm.Vertical
+    ) -> bpm.Vertical:
+        "Compute H^{-1} @ g using the algorithm the algorithm in hessian.tex."
+
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
 
-        M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
-        P = partitioned.downshifting_matrix(
-            z_in.numel(), [b.shape[0] for b in Dx.blocks]
-        )
+        M = bpm.IdentityWithLowerDiagonal((-Dz).blocks[1:])
+        P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.blocks])
 
         # Step 1: Compute g_prime = [D_x; I] @ g = [D_x @ g; g]
         # TODO: Introduce a Vertical.concatenate method.
-        g_prime = partitioned.Vertical((Dx @ g).blocks + g.blocks)
+        g_prime = bpm.Vertical((Dx @ g).blocks + g.blocks)
 
         # Step 2: Compute the blocks of Q and invert Q.
         # Q = [[P' D_M D_zz P,  P' D_M D_xz],
         #      [D_D D_zx P,     D_D D_xx - I]]
-        Q_inv = partitioned.SymmetricBlock2x2Matrix(
+        Q_inv = bpm.Symmetric2x2(
             # Q11 = P' DM_Dzz  P
             block11=P.T @ DM_Dzz @ P,
             # Q12 = P' D_M D_xz = P' DD_Dzx'
             block12=P.T @ DD_Dzx.T,
             # Q22 = DD_Dxx - I
-            block22=DD_Dxx - partitioned.Identity(),
+            block22=DD_Dxx - bpm.Identity(),
         ).invert()
 
         # Step 3: Form A
-        A = partitioned.SymmetricBlock2x2Matrix(
+        A = bpm.Symmetric2x2(
             # A11 = M @ Q_inv_11 @ M^T + D_x @ D_x^T
             block11=M @ Q_inv.block11 @ M.T + Dx @ Dx.T,
             # A12 = M @ Q_inv_12 + D_x
             block12=M @ Q_inv.block12 + Dx,
             # A22 = Q_inv_22 + I
-            block22=partitioned.Diagonal(
+            block22=bpm.Diagonal(
                 [block + torch.eye(block.shape[0]) for block in Q_inv.block22.blocks]
             ),
         )
@@ -303,11 +311,8 @@ class SequenceOfBlocks(nn.Module):
         g_double_prime = U.T.solve(D.solve(U.solve(g_prime)))
 
         # Step 4: Return g - [D_x; I]^T @ g_double_prime
-        return partitioned.Vertical(
-            g
-            - partitioned.Vertical(
-                (Dx.T @ g_double_prime).blocks + g_double_prime.blocks
-            )
+        return bpm.Vertical(
+            g - bpm.Vertical((Dx.T @ g_double_prime).blocks + g_double_prime.blocks)
         )
 
 

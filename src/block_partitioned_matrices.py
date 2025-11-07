@@ -5,14 +5,24 @@ canbe torch tensors. This way, it becomes easy to express linear algebra
 operations like matrix multiplication, inversion, and solving linear systems
 with matrices that have hierarchical structure.
 
+The package offers a few different kinds of structures:
+* Vertically stacked matrices (`Vertical`)
+* Block diagonal matrices (`Diagonal`)
+* Upper and lower block diagonal matrices (`UpperBiDiagonal` and `LowerBiDiagonal`)
+* Bi-diagonal matrices (`UpperBiDiagonal` and `LowerBiDiagonal`)
+* Symmetric block 2x2 matrices (`Symmetric2x2`)
+
+It also provides place holder matrices for Zero and Identity that don't take up
+any space in memory or compute other than for their metadata.
+
 For example, if a matrix A has a 2x2 block structre and each of these blocks are in turn block diagonal matrices,
 one can define
 
-A = SymmetricBlock2x2Matrix(
+A = Symmetri2x2(
     # A11 is a block diagona matrix with two blocks.
-    block11=BlockDiagonalMatrix([torch.randn(3, 3), torch.randn(2, 2)]),
+    block11=Diagonal([torch.randn(3, 3), torch.randn(2, 2)]),
     # A12 is a blockdiagonal matrix with two blocks.
-    block12=BlockDiagonalMatrix([torch.randn(3, 2), torch.randn(2, 2)]),
+    block12=Diagonal([torch.randn(3, 2), torch.randn(2, 2)]),
     A A22 is just a dense matrix
     block22=torch.randn(2, 2)
 )
@@ -23,7 +33,6 @@ x = b with x = A.solve(b), or recover the inverse of A with A.invert().
 
 import dataclasses as dc
 from functools import singledispatchmethod
-from math import sin
 from typing import Sequence
 import torch
 
@@ -49,13 +58,13 @@ class Matrix:
         raise NotImplementedError
 
 
-class TorchMatrix(torch.Tensor, Matrix):
+class Tensor(torch.Tensor, Matrix):
     "Endows torch.Tensor with invert() and solve() methods."
 
-    def invert(self) -> "TorchMatrix":
-        return TorchMatrix(torch.linalg.inv(self))
+    def invert(self) -> "Tensor":
+        return Tensor(torch.linalg.inv(self))
 
-    def solve(self, rhs: "TorchMatrix") -> "TorchMatrix":
+    def solve(self, rhs: "Tensor") -> "Tensor":
         return torch.linalg.solve(self, rhs)
 
     def to_tensor(self) -> torch.Tensor:
@@ -74,13 +83,13 @@ class TorchMatrix(torch.Tensor, Matrix):
         return self.shape[0]
 
     @staticmethod
-    def wrap(tensor: torch.Tensor | Matrix) -> "TorchMatrix":
+    def wrap(tensor: torch.Tensor | Matrix) -> "Tensor":
         if isinstance(tensor, Matrix):
             return tensor
         elif isinstance(tensor, torch.Tensor):
             if tensor.ndim != 2:
                 raise ValueError("Tensor must be a 2D tensor")
-            return TorchMatrix(tensor)
+            return Tensor(tensor)
         raise ValueError("Tensor must be a torch.Tensor or Matrix")
 
 
@@ -113,8 +122,8 @@ class Identity(Matrix):
         return self.dimension
 
 
-@TorchMatrix.__matmul__.register
-def _(self, _: Identity) -> TorchMatrix:
+@Tensor.__matmul__.register
+def _(self, _: Identity) -> Tensor:
     return self
 
 
@@ -129,7 +138,7 @@ class Zero(Matrix):
                     f"Shape mismatch {self} vs {other.height} x {other.width}"
                 )
             return torch.zeros(self.shape[0], other.width)
-        return TorchMatrix(torch.tensor([[0.0]]))
+        return Tensor(torch.tensor([[0.0]]))
 
     def to_tensor(self) -> torch.Tensor:
         return torch.zeros(*self.shape)
@@ -151,7 +160,7 @@ class Stacked(Matrix):
     "Abstract base class of blocks stacked either veritcally, horizontally, or diagonally."
 
     def __init__(self, blocks: Sequence[Matrix]):
-        self.blocks = list(map(TorchMatrix.wrap, blocks))
+        self.blocks = list(map(Tensor.wrap, blocks))
 
     def __neg__(self) -> "Stacked":
         """Return negation of the matrix."""
@@ -214,7 +223,6 @@ class Diagonal(Stacked):
         return Diagonal([b.invert() for b in self.blocks])
 
     def solve(self, rhs: Stacked) -> Stacked:
-        """Solve M x = rhs for block-diagonal M."""
         if len(self.blocks) != len(rhs.blocks):
             raise ValueError("Number of blocks in matrix and vector must match")
 
@@ -238,7 +246,6 @@ class Diagonal(Stacked):
 
     @property
     def T(self) -> "Diagonal":
-        """Return transpose of this matrix."""
         return Diagonal([block.T for block in self.blocks])
 
     @property
@@ -284,7 +291,7 @@ def _(self, other: Identity) -> Diagonal:
     return Diagonal([b - torch.eye(b.shape[0]) for b in self.blocks])
 
 
-class LowerBlockBiDiagonal(Matrix):
+class LowerBiDiagonal(Matrix):
     """Represents a block bi-diagonal matrix.
 
     [D_0    0
@@ -301,8 +308,8 @@ class LowerBlockBiDiagonal(Matrix):
             raise ValueError(
                 "Number of lower blocks must be one less than the number of diagonal blocks"
             )
-        self.lower_blocks = list(map(TorchMatrix.wrap, lower_blocks))
-        self.diagonal_blocks = list(map(TorchMatrix.wrap, diagonal_blocks))
+        self.lower_blocks = list(map(Tensor.wrap, lower_blocks))
+        self.diagonal_blocks = list(map(Tensor.wrap, diagonal_blocks))
 
     @singledispatchmethod
     def __matmul__(self, v: Matrix) -> Matrix:
@@ -346,21 +353,21 @@ class LowerBlockBiDiagonal(Matrix):
         return Vertical(result_blocks)
 
     @property
-    def T(self) -> "UpperBlockBiDiagonal":
-        return UpperBlockBiDiagonal(
+    def T(self) -> "UpperBiDiagonal":
+        return UpperBiDiagonal(
             upper_blocks=[b.T for b in self.lower_blocks],
             diagonal_blocks=[b.T for b in self.diagonal_blocks],
         )
 
 
-def IdentityWithLowerBlockDiagonalMatrix(lower_blocks: Sequence[Matrix]):
-    return LowerBlockBiDiagonal(
-        lower_blocks=list(map(TorchMatrix.wrap, lower_blocks)),
+def IdentityWithLowerDiagonal(lower_blocks: Sequence[Matrix]):
+    return LowerBiDiagonal(
+        lower_blocks=list(map(Tensor.wrap, lower_blocks)),
         diagonal_blocks=[Identity()] * (len(lower_blocks) + 1),
     )
 
 
-class UpperBlockBiDiagonal(Matrix):
+class UpperBiDiagonal(Matrix):
     """Represents a block bi-diagonal matrix
 
     M = [D_0         U_1           0        ...              0
@@ -380,8 +387,8 @@ class UpperBlockBiDiagonal(Matrix):
             raise ValueError(
                 "Number of upper blocks must be one less than the number of diagonal blocks"
             )
-        self.upper_blocks = list(map(TorchMatrix.wrap, upper_blocks))
-        self.diagonal_blocks = list(map(TorchMatrix.wrap, diagonal_blocks))
+        self.upper_blocks = list(map(Tensor.wrap, upper_blocks))
+        self.diagonal_blocks = list(map(Tensor.wrap, diagonal_blocks))
 
     @singledispatchmethod
     def __matmul__(self, v: Matrix) -> Matrix:
@@ -426,27 +433,27 @@ class UpperBlockBiDiagonal(Matrix):
         return Vertical(result_blocks)
 
     @property
-    def T(self) -> LowerBlockBiDiagonal:
-        return LowerBlockBiDiagonal(
+    def T(self) -> LowerBiDiagonal:
+        return LowerBiDiagonal(
             lower_blocks=[b.T for b in self.upper_blocks],
             diagonal_blocks=[b.T for b in self.diagonal_blocks],
         )
 
 
-def IdentityWithUpperBlockDiagonalMatrix(upper_blocks: Sequence[Matrix]):
-    return UpperBlockBiDiagonal(
-        upper_blocks=list(map(TorchMatrix.wrap, upper_blocks)),
+def IdentityWithUpperDiagonal(upper_blocks: Sequence[Matrix]):
+    return UpperBiDiagonal(
+        upper_blocks=list(map(Tensor.wrap, upper_blocks)),
         diagonal_blocks=[Identity()] * (len(upper_blocks) + 1),
     )
 
 
-class SymmetricBlock2x2Matrix(Matrix):
-    """Represents a symmetric 2x2block matrix whose blocks are in turn Matrices."""
+class Symmetric2x2(Matrix):
+    """Represents a symmetric 2x2 block matrix whose blocks are in turn Matrices."""
 
     def __init__(self, block11: Matrix, block12: Matrix, block22: Matrix):
-        self.block11 = TorchMatrix.wrap(block11)
-        self.block12 = TorchMatrix.wrap(block12)
-        self.block22 = TorchMatrix.wrap(block22)
+        self.block11 = Tensor.wrap(block11)
+        self.block12 = Tensor.wrap(block12)
+        self.block22 = Tensor.wrap(block22)
 
     @singledispatchmethod
     def __matmul__(self, v: Matrix) -> Matrix:
@@ -463,13 +470,13 @@ class SymmetricBlock2x2Matrix(Matrix):
             ]
         )
 
-    def invert(self) -> "SymmetricBlock2x2Matrix":
+    def invert(self) -> "Symmetric2x2":
         # The Schur complement S = Q11 - Q12 @ Q22^{-1} @ Q21, and its inverse.
         block22_inv = self.block22.invert()
         S = self.block11 - self.block12 @ block22_inv @ self.block12.T
         S_inv = S.invert()
 
-        return SymmetricBlock2x2Matrix(
+        return Symmetric2x2(
             # Q_inv_11 = S^{-1}
             block11=S_inv,
             # Q_inv_12 = -S^{-1} @ Q12 @ Q22^{-1}
@@ -489,16 +496,16 @@ class SymmetricBlock2x2Matrix(Matrix):
 
     def UDU_decomposition(
         self,
-    ) -> tuple[IdentityWithUpperBlockDiagonalMatrix, Diagonal]:
+    ) -> tuple[IdentityWithUpperDiagonal, Diagonal]:
         b22_inv = self.block22.invert()
-        U = IdentityWithUpperBlockDiagonalMatrix([self.block12 @ b22_inv])
+        U = IdentityWithUpperDiagonal([self.block12 @ b22_inv])
         D = Diagonal(
             [self.block11 - self.block12 @ b22_inv @ self.block12.T, self.block22]
         )
         return U, D
 
 
-class LowerBlockDiagonal(Stacked):
+class LowerDiagonal(Stacked):
     def __init__(
         self,
         height_leading_zeros: int,
@@ -514,11 +521,11 @@ class LowerBlockDiagonal(Stacked):
         raise NotImplementedError
 
     @__matmul__.register
-    def _(self, other: Diagonal) -> "LowerBlockDiagonal":
+    def _(self, other: Diagonal) -> "LowerDiagonal":
         if len(other.blocks) != len(self.blocks) + 1:
             raise ValueError("Number of blocks in the operands must match")
 
-        return LowerBlockDiagonal(
+        return LowerDiagonal(
             height_leading_zeros=self.height_leading_zeros,
             lower_blocks=[
                 b @ other_block
@@ -560,8 +567,8 @@ class LowerBlockDiagonal(Stacked):
         return sum(b.width for b in self.blocks) + self.width_trailing_zeros
 
     @property
-    def T(self) -> "UpperBlockDiagonal":
-        return UpperBlockDiagonal(
+    def T(self) -> "UpperDiagonal":
+        return UpperDiagonal(
             width_leading_zeros=self.height_leading_zeros,
             upper_blocks=[b.T for b in self.blocks],
             height_trailing_zeros=self.width_trailing_zeros,
@@ -569,10 +576,10 @@ class LowerBlockDiagonal(Stacked):
 
 
 @Diagonal.__matmul__.register
-def _(self, other: LowerBlockDiagonal) -> Diagonal:
+def _(self, other: LowerDiagonal) -> Diagonal:
     if len(self.blocks) != len(other.blocks) + 1:
         raise ValueError("Number of blocks in the operands must match")
-    return LowerBlockDiagonal(
+    return LowerDiagonal(
         height_leading_zeros=self.blocks[0].height,
         lower_blocks=[
             b @ other_block for b, other_block in zip(self.blocks[1:], other.blocks)
@@ -583,15 +590,15 @@ def _(self, other: LowerBlockDiagonal) -> Diagonal:
 
 def downshifting_matrix(
     height_leading_zeros, v_heights: Sequence[int]
-) -> LowerBlockDiagonal:
-    return LowerBlockDiagonal(
+) -> LowerDiagonal:
+    return LowerDiagonal(
         height_leading_zeros=height_leading_zeros,
         lower_blocks=list(map(Identity, v_heights[:-1])),
         width_trailing_zeros=v_heights[-1],
     )
 
 
-class UpperBlockDiagonal(Stacked):
+class UpperDiagonal(Stacked):
     def __init__(
         self,
         width_leading_zeros: int,
@@ -610,7 +617,7 @@ class UpperBlockDiagonal(Stacked):
     def _(self, other: Diagonal) -> Matrix:
         if len(other.blocks) != len(self.blocks) + 1:
             raise ValueError("Number of blocks in the operands must match")
-        return UpperBlockDiagonal(
+        return UpperDiagonal(
             width_leading_zeros=other.blocks[0].shape[1],
             upper_blocks=[
                 b @ other_block for b, other_block in zip(self.blocks, other.blocks[1:])
@@ -628,7 +635,7 @@ class UpperBlockDiagonal(Stacked):
         )
 
     @__matmul__.register
-    def _(self, other: LowerBlockDiagonal) -> Diagonal:
+    def _(self, other: LowerDiagonal) -> Diagonal:
         if len(other.blocks) != len(self.blocks):
             raise ValueError("Number of blocks in the operands must match")
         return Diagonal(
@@ -654,8 +661,8 @@ class UpperBlockDiagonal(Stacked):
         return self.width_leading_zeros + sum(b.width for b in self.blocks)
 
     @property
-    def T(self) -> LowerBlockDiagonal:
-        return LowerBlockDiagonal(
+    def T(self) -> LowerDiagonal:
+        return LowerDiagonal(
             height_leading_zeros=self.width_leading_zeros,
             lower_blocks=[b.T for b in self.blocks],
             width_trailing_zeros=self.height_trailing_zeros,
@@ -663,10 +670,10 @@ class UpperBlockDiagonal(Stacked):
 
 
 @Diagonal.__matmul__.register
-def _(self, other: UpperBlockDiagonal) -> Diagonal:
+def _(self, other: UpperDiagonal) -> Diagonal:
     if len(self.blocks) != len(other.blocks) + 1:
         raise ValueError("Number of blocks in the operands must match")
-    return UpperBlockDiagonal(
+    return UpperDiagonal(
         width_leading_zeros=other.width_leading_zeros,
         upper_blocks=[
             b @ other_b for b, other_b in zip(self.blocks[:-1], other.blocks)
@@ -675,8 +682,8 @@ def _(self, other: UpperBlockDiagonal) -> Diagonal:
     )
 
 
-@LowerBlockDiagonal.__matmul__.register
-def _(self, other: UpperBlockDiagonal) -> Diagonal:
+@LowerDiagonal.__matmul__.register
+def _(self, other: UpperDiagonal) -> Diagonal:
     if len(other.blocks) != len(self.blocks):
         raise ValueError("Number of blocks in the operands must match")
     return Diagonal(
