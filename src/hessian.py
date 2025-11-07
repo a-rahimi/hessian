@@ -245,9 +245,6 @@ class SequenceOfBlocks(nn.Module):
             z_in.numel(), [b.shape[0] for b in Dx.blocks]
         )
 
-        # The loss is always a scalar.
-        dim_loss = 1
-
         # Compute equation \ref{eq:hessian} from hessian.tex:
         # H v = D_D D_xx v + D_D D_zx P M⁻¹ Dₓ v
         #         + Dₓᵀ M⁻ᵀ Pᵀ D_M D_xz v

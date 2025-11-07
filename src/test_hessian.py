@@ -562,7 +562,10 @@ class TestSequenceOfBlocks:
         """
         # Create a random vector g
         g = partitioned.Vertical(
-            [torch.randn(sum(p.numel() for p in layer.parameters())) for layer in model]
+            [
+                torch.randn(sum(p.numel() for p in layer.parameters()), 1)
+                for layer in model
+            ]
         )
 
         # Method 1: Use hessian_inverse_product

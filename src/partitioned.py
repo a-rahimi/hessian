@@ -34,6 +34,12 @@ class Matrix:
     def to_tensor(self) -> torch.Tensor:
         raise NotImplementedError
 
+    def invert(self) -> "Matrix":
+        raise NotImplementedError
+
+    def solve(self, rhs: "Matrix") -> "Matrix":
+        raise NotImplementedError
+
     @property
     def width(self) -> int:
         raise NotImplementedError
@@ -128,6 +134,12 @@ class Zero(Matrix):
     def to_tensor(self) -> torch.Tensor:
         return torch.zeros(*self.shape)
 
+    def invert(self) -> "Zero":
+        raise ValueError("Zero matrix is not invertible")
+
+    def solve(self, rhs: "Matrix") -> "Matrix":
+        raise ValueError("Zero matrix is not invertible")
+
     @property
     def T(self) -> "Zero":
         if not self.shape:
@@ -135,15 +147,19 @@ class Zero(Matrix):
         return Zero(shape=(self.shape[1], self.shape[0]))
 
 
-class Vertical(Matrix):
-    """Represents a block vector as a list of blocks."""
+class Stacked(Matrix):
+    "Abstract base class of blocks stacked either veritcally, horizontally, or diagonally."
 
     def __init__(self, blocks: Sequence[Matrix]):
         self.blocks = list(map(TorchMatrix.wrap, blocks))
 
-    def __neg__(self) -> "Vertical":
+    def __neg__(self) -> "Stacked":
         """Return negation of the matrix."""
         return self.__class__([-block for block in self.blocks])
+
+    @singledispatchmethod
+    def __matmul__(self, other: Matrix) -> Matrix:
+        raise NotImplementedError
 
     @singledispatchmethod
     def __add__(self, other: Matrix) -> Matrix:
@@ -152,6 +168,28 @@ class Vertical(Matrix):
     @singledispatchmethod
     def __sub__(self, other: Matrix) -> Matrix:
         raise NotImplementedError
+
+
+@Stacked.__add__.register
+def _(self, other: Stacked) -> Stacked:
+    if len(self.blocks) != len(other.blocks):
+        raise ValueError("Number of blocks must match")
+    return self.__class__(
+        [b + other_b for b, other_b in zip(self.blocks, other.blocks)]
+    )
+
+
+@Stacked.__sub__.register
+def _(self, other: Stacked) -> Stacked:
+    if len(self.blocks) != len(other.blocks):
+        raise ValueError("Number of blocks in matrices must match")
+    return self.__class__(
+        [block - other_block for block, other_block in zip(self.blocks, other.blocks)]
+    )
+
+
+class Vertical(Stacked):
+    """Blocked stacked vertically."""
 
     def to_tensor(self) -> torch.Tensor:
         return torch.cat([b.to_tensor() for b in self.blocks], dim=0)
@@ -169,46 +207,13 @@ class Vertical(Matrix):
         return sum(b.height for b in self.blocks)
 
 
-@Vertical.__add__.register
-def _(self, other: Vertical) -> Vertical:
-    if len(self.blocks) != len(other.blocks):
-        raise ValueError("Number of blocks must match")
-    return self.__class__(
-        [b + other_b for b, other_b in zip(self.blocks, other.blocks)]
-    )
-
-
-@Vertical.__sub__.register
-def _(self, other: Vertical) -> Vertical:
-    if len(self.blocks) != len(other.blocks):
-        raise ValueError("Number of blocks in matrices must match")
-    return self.__class__(
-        [block - other_block for block, other_block in zip(self.blocks, other.blocks)]
-    )
-
-
-class Diagonal(Vertical):
+class Diagonal(Stacked):
     """Represents a block-diagonal matrix as a list of blocks."""
-
-    def __init__(self, blocks: Sequence[Matrix]):
-        self.blocks = list(map(TorchMatrix.wrap, blocks))
-
-    @singledispatchmethod
-    def __matmul__(self, other: Matrix) -> Matrix:
-        raise NotImplementedError
-
-    @singledispatchmethod
-    def __add__(self, other: Matrix) -> Matrix:
-        raise NotImplementedError
-
-    @singledispatchmethod
-    def __sub__(self, other: Matrix) -> Matrix:
-        raise NotImplementedError
 
     def invert(self) -> "Diagonal":
         return Diagonal([b.invert() for b in self.blocks])
 
-    def solve(self, rhs: Vertical) -> Vertical:
+    def solve(self, rhs: Stacked) -> Stacked:
         """Solve M x = rhs for block-diagonal M."""
         if len(self.blocks) != len(rhs.blocks):
             raise ValueError("Number of blocks in matrix and vector must match")
@@ -222,6 +227,14 @@ class Diagonal(Vertical):
 
     def to_tensor(self) -> torch.Tensor:
         return torch.block_diag(*[b.to_tensor() for b in self.blocks])
+
+    @singledispatchmethod
+    def __add__(self, other: Matrix) -> Matrix:
+        raise NotImplementedError
+
+    @singledispatchmethod
+    def __sub__(self, other: Matrix) -> Matrix:
+        raise NotImplementedError
 
     @property
     def T(self) -> "Diagonal":
@@ -238,7 +251,7 @@ class Diagonal(Vertical):
 
 
 @Diagonal.__matmul__.register
-def _(self, other: Vertical) -> Vertical:
+def _(self, other: Stacked) -> Stacked:
     if len(self.blocks) != len(other.blocks):
         raise ValueError("Number of blocks must match")
 
@@ -250,7 +263,7 @@ def _(self, other: Vertical) -> Vertical:
 @Diagonal.__add__.register
 def _(self, other: Diagonal) -> Diagonal:
     "Diagonal + Diagonal is the same code as Vertical + Vertical."
-    return Vertical.__add__(other, self)
+    return Stacked.__add__(other, self)
 
 
 @Diagonal.__add__.register
@@ -262,7 +275,7 @@ def _(self, other: Identity) -> Diagonal:
 @Diagonal.__sub__.register
 def _(self, other: Diagonal) -> Diagonal:
     "Diagonal - Diagonal is the same code as Vertical - Vertical."
-    return Vertical.__sub__(self, other)
+    return Stacked.__sub__(self, other)
 
 
 @Diagonal.__sub__.register
@@ -360,7 +373,7 @@ class UpperBlockBiDiagonal(Matrix):
 
     def __init__(
         self,
-        upper_blocks: Sequence[torch.Tensor],
+        upper_blocks: Sequence[Matrix],
         diagonal_blocks: Sequence[Matrix],
     ):
         if len(upper_blocks) != len(diagonal_blocks) - 1:
@@ -485,12 +498,7 @@ class SymmetricBlock2x2Matrix(Matrix):
         return U, D
 
 
-class OffDiagonal(Vertical):
-    def __init__(self, blocks: Sequence[Matrix]):
-        self.blocks = list(map(TorchMatrix.wrap, blocks))
-
-
-class LowerBlockDiagonal(OffDiagonal):
+class LowerBlockDiagonal(Stacked):
     def __init__(
         self,
         height_leading_zeros: int,
@@ -583,7 +591,7 @@ def downshifting_matrix(
     )
 
 
-class UpperBlockDiagonal(OffDiagonal):
+class UpperBlockDiagonal(Stacked):
     def __init__(
         self,
         width_leading_zeros: int,
