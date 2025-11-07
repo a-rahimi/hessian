@@ -65,9 +65,13 @@ class BlockWithMixedDerivatives(nn.Module):
         self.output = None
 
     def naked_forward(self, *args) -> torch.Tensor:
+        """Forward without caching the input and output.
+
+        Must be implemented by subclasses."""
         raise NotImplementedError
 
     def forward(self, z_in: torch.Tensor, *args) -> torch.Tensor:
+        # Cache the input and output for use in derivatives().
         self.input = z_in
         self.output = self.naked_forward(z_in, *args)
         return self.output
@@ -117,10 +121,10 @@ class DenseBlock(BlockWithMixedDerivatives):
     ):
         super().__init__()
         self.linear = nn.Linear(input_dim, output_dim, bias=False)
-        self.act_fn = activation
+        self.activation = activation
 
     def naked_forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.act_fn(self.linear(x))
+        return self.activation(self.linear(x))
 
 
 class LossLayer(DenseBlock):
@@ -168,8 +172,7 @@ def save_dloss_dout(
     grad_input: tuple[torch.Tensor, ...],
     grad_output: tuple[torch.Tensor, ...],
 ) -> None:
-    # Layer must have exactly one output.
-    (module.dloss_dout,) = grad_output
+    (module.dloss_dout,) = grad_output  # Ensure layer has exactly one output.
 
 
 class SequenceOfBlocks(nn.Module):
@@ -199,6 +202,18 @@ class SequenceOfBlocks(nn.Module):
     def derivatives(
         self, z_in: torch.Tensor, target: torch.Tensor
     ) -> Iterable[partitioned.Diagonal]:
+        """
+        Compute the derivatives of the loss with respect to the inputs and parameters of the layers.
+
+        Since the model is a chain, all these derivatives has a block-diagonal structure.
+
+        Args:
+            z_in: The input to the model.
+            target: The target output of the model. Used to compute the loss.
+
+        Returns a Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz, all block-diagonal matrices,
+        one blockper layer in the network.
+        """
         with self.save_dloss_douts():
             # Populate the input and output caches of the layers and ∂z_L/∂z_ℓ for each layer ℓ.
             self(z_in, target).backward()
@@ -226,6 +241,9 @@ class SequenceOfBlocks(nn.Module):
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
 
         M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
+        P = partitioned.downshifting_matrix(
+            z_in.numel(), [b.shape[0] for b in Dx.blocks]
+        )
 
         # The loss is always a scalar.
         dim_loss = 1
@@ -234,12 +252,12 @@ class SequenceOfBlocks(nn.Module):
         # H v = D_D D_xx v + D_D D_zx P M⁻¹ Dₓ v
         #         + Dₓᵀ M⁻ᵀ Pᵀ D_M D_xz v
         #         + Dₓᵀ M⁻ᵀ Pᵀ D_M D_zz P M⁻¹ Dₓ v
-        t1 = partitioned.downshift(M.solve(Dx @ v), z_in.numel())
+        t1 = P @ M.solve(Dx @ v)
         return (
             DD_Dxx @ v
             + DD_Dzx @ t1
-            + Dx.T @ M.T.solve(partitioned.upshift(DD_Dzx.T @ v, dim_loss))
-            + Dx.T @ M.T.solve(partitioned.upshift(DM_Dzz @ t1, dim_loss))
+            + Dx.T @ M.T.solve((P.T @ (DD_Dzx.T @ v)))
+            + Dx.T @ M.T.solve((P.T @ (DM_Dzz @ t1)))
         )
 
     def hessian_inverse_product(
@@ -252,20 +270,21 @@ class SequenceOfBlocks(nn.Module):
         dim_loss = 1
 
         # Step 1: Compute g_prime = [D_x; I] @ g = [D_x @ g; g]
+        # TODO: Introduce a Vertical.concatenate method.
         g_prime = partitioned.Vertical((Dx @ g).blocks + g.blocks)
 
         # Step 2: Compute the blocks of Q and invert Q.
-        # Q = [[P^T D_M D_zz P,  P^T D_M D_xz],
-        #      [D_D D_zx P,      D_D D_xx - I]]
+        # Q = [[P' D_M D_zz P,  P' D_M D_xz],
+        #      [D_D D_zx P,     D_D D_xx - I]]
         Q_inv = partitioned.SymmetricBlock2x2Matrix(
-            # Q11 = P^T @ DM_Dzz @ P
-            block11=partitioned.upshift(DM_Dzz, (x, y)),
-            # Q12 = P^T @ DD_Dzx^T
-            block12=partitioned.upshift(DD_Dzx.T, (x, y)),
+            # Q11 = P' DM_Dzz  P
+            block11=DM_Dzz.down_then_upshift(shape_trailing_zeros=(dim_loss, dim_loss)),
+            # Q12 = P' D_M D_xz = P' DD_Dzx'
+            block12=DD_Dzx.T.upshift((dim_loss, dim_loss)),
             # Q22 = DD_Dxx - I
             block22=partitioned.Diagonal(
-                [block - torch.eye(block.shape[0]) for block in DD_Dxx.blocks]
-            ),
+                [b - torch.eye(b.shape[0]) for b in DD_Dxx.blocks]
+            ),  # TODO: use partitioned.Identity() here.
         ).invert()
 
         # Step 3: Form A

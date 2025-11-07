@@ -462,12 +462,12 @@ class TestSequenceOfBlocks:
 
         M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
         e_L = partitioned.Vertical(
-            [torch.zeros(layer.output.numel()) for layer in model]
+            [torch.zeros(layer.output.numel(), 1) for layer in model]
         )
         assert e_L.blocks[-1].numel() == 1
         e_L.blocks[-1][:] = 1.0
         dloss_dx = Dx.T @ M.T.solve(e_L)
-        grad_flat = dloss_dx.to_tensor()
+        grad_flat = dloss_dx.to_tensor().flatten()
 
         # Method 2: Use loss.backward
         grad_torch_flat = torch.cat([p.grad.flatten() for p in model.parameters()])
@@ -488,7 +488,10 @@ class TestSequenceOfBlocks:
         # A random partitioned vector  each of which has as many elements as the
         # corresponding layer has parameters.
         v = partitioned.Vertical(
-            [torch.randn(sum(p.numel() for p in layer.parameters())) for layer in model]
+            [
+                torch.randn(sum(p.numel() for p in layer.parameters()), 1)
+                for layer in model
+            ]
         )
 
         # Method 1: Use hessian_vector_product
