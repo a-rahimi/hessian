@@ -2,15 +2,15 @@
 
 import pytest
 import torch
-from partitioned import (
+from block_partitioned_matrices import (
     Vertical,
     Diagonal,
-    IdentityWithLowerBlockDiagonalMatrix,
-    IdentityWithUpperBlockDiagonalMatrix,
-    SymmetricBlock2x2Matrix,
-    UpperBlockBiDiagonal,
-    UpperBlockDiagonal,
-    LowerBlockBiDiagonal,
+    IdentityWithLowerDiagonal,
+    IdentityWithUpperDiagonal,
+    Symmetric2x2,
+    UpperBiDiagonal,
+    UpperDiagonal,
+    LowerBiDiagonal,
     Identity,
     downshifting_matrix,
 )
@@ -77,11 +77,11 @@ class TestBlockVector:
         assert torch.allclose(v.to_tensor(), col(1.0, 2.0, 3.0, 4.0, 5.0))
 
 
-class TestBlockDiagonalMatrix:
-    """Tests for BlockDiagonalMatrix class."""
+class TestBlockDiagonal:
+    """Tests for BlockDiagonal class."""
 
     def test_init(self):
-        """Test BlockDiagonalMatrix initialization."""
+        """Test BlockDiagonal initialization."""
         blocks = [torch.eye(2), torch.eye(3)]
         bdm = Diagonal(blocks)
         assert len(bdm.blocks) == 2
@@ -205,13 +205,13 @@ class TestBlockDiagonalMatrix:
         assert torch.allclose(M_symmetric_tensor, M_symmetric_tensor.T)
 
 
-class TestIdentityWithLowerBlockDiagonalMatrix:
-    """Tests for IdentityWithLowerBlockDiagonalMatrix class."""
+class TestIdentityWithLowerBlockDiagonal:
+    """Tests for IdentityWithLowerDiagonal class."""
 
     def test_init(self):
         """Test initialization."""
         lower_blocks = [torch.eye(2), torch.eye(2)]
-        m = IdentityWithLowerBlockDiagonalMatrix(lower_blocks)
+        m = IdentityWithLowerDiagonal(lower_blocks)
         assert len(m.lower_blocks) == 2
 
     def test_apply(self):
@@ -220,7 +220,7 @@ class TestIdentityWithLowerBlockDiagonalMatrix:
         #      A     I    0
         #      0     B    I]
         # where A and B are 2x2 matrices (lower_blocks already contains the values to use)
-        M = IdentityWithLowerBlockDiagonalMatrix(
+        M = IdentityWithLowerDiagonal(
             [
                 torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
                 torch.tensor([[2.0, 0.0], [0.0, 2.0]]),
@@ -240,7 +240,7 @@ class TestIdentityWithLowerBlockDiagonalMatrix:
 
     def test_apply_mismatched_blocks_raises(self):
         """Test that apply with mismatched blocks raises ValueError."""
-        M = IdentityWithLowerBlockDiagonalMatrix([torch.eye(2), torch.eye(2)])
+        M = IdentityWithLowerDiagonal([torch.eye(2), torch.eye(2)])
 
         v = Vertical([col(1.0, 1.0)])  # Only 1 block, need 3
 
@@ -253,7 +253,7 @@ class TestIdentityWithLowerBlockDiagonalMatrix:
         # x[0] = rhs[0]
         # x[i+1] = rhs[i+1] - lower_blocks[i] @ x[i]
 
-        M = IdentityWithLowerBlockDiagonalMatrix(
+        M = IdentityWithLowerDiagonal(
             [
                 torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
                 torch.tensor([[2.0, 0.0], [0.0, 2.0]]),
@@ -272,7 +272,7 @@ class TestIdentityWithLowerBlockDiagonalMatrix:
         """Test that solve produces a valid solution."""
         torch.manual_seed(42)
 
-        M = IdentityWithLowerBlockDiagonalMatrix([torch.randn(3, 3), torch.randn(3, 3)])
+        M = IdentityWithLowerDiagonal([torch.randn(3, 3), torch.randn(3, 3)])
 
         rhs = Vertical([torch.randn(3, 1), torch.randn(3, 1), torch.randn(3, 1)])
 
@@ -287,7 +287,7 @@ class TestIdentityWithLowerBlockDiagonalMatrix:
     def test_solve_with_zero_blocks(self):
         """Test solving when some lower blocks are zero."""
         # This is common for the first block
-        M = IdentityWithLowerBlockDiagonalMatrix(
+        M = IdentityWithLowerDiagonal(
             [torch.zeros(2, 2), torch.tensor([[1.0, 0.0], [0.0, 1.0]])]
         )
 
@@ -304,25 +304,25 @@ class TestIdentityWithLowerBlockDiagonalMatrix:
         assert torch.allclose(solution.blocks[2], col(2.0, 2.0))
 
     def test_transpose(self):
-        """Test that transpose returns IdentityWithUpperBlockDiagonalMatrix."""
+        """Test that transpose returns IdentityWithUpperDiagonal."""
         A = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         B = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
-        M = IdentityWithLowerBlockDiagonalMatrix([A, B])
+        M = IdentityWithLowerDiagonal([A, B])
 
         M_T = M.T
 
-        assert isinstance(M_T, UpperBlockBiDiagonal)
+        assert isinstance(M_T, UpperBiDiagonal)
         assert len(M_T.upper_blocks) == 2
         assert torch.allclose(M_T.upper_blocks[0], A.T)
         assert torch.allclose(M_T.upper_blocks[1], B.T)
 
 
-class TestIdentityWithUpperBlockDiagonalMatrix:
-    """Tests for IdentityWithUpperBlockDiagonalMatrix class."""
+class TestIdentityWithUpperBlockDiagonal:
+    """Tests for IdentityWithUpperBlockDiagonal class."""
 
     def test_init(self):
         """Test initialization."""
-        M = IdentityWithUpperBlockDiagonalMatrix([torch.eye(2), torch.eye(2)])
+        M = IdentityWithUpperDiagonal([torch.eye(2), torch.eye(2)])
         assert len(M.upper_blocks) == 2
 
     def test_apply(self):
@@ -331,7 +331,7 @@ class TestIdentityWithUpperBlockDiagonalMatrix:
         #        0      I    B
         #        0      0    I]
         # where A and B are 2x2 matrices
-        M = IdentityWithUpperBlockDiagonalMatrix(
+        M = IdentityWithUpperDiagonal(
             [
                 torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
                 torch.tensor([[2.0, 0.0], [0.0, 2.0]]),
@@ -352,7 +352,7 @@ class TestIdentityWithUpperBlockDiagonalMatrix:
 
     def test_apply_mismatched_blocks_raises(self):
         """Test that apply with mismatched blocks raises ValueError."""
-        M = IdentityWithUpperBlockDiagonalMatrix([torch.eye(2), torch.eye(2)])
+        M = IdentityWithUpperDiagonal([torch.eye(2), torch.eye(2)])
 
         v = Vertical([col(1.0, 1.0)])  # Only 1 block, need 3
 
@@ -365,7 +365,7 @@ class TestIdentityWithUpperBlockDiagonalMatrix:
         # x[L] = rhs[L]
         # x[i] = rhs[i] - upper_blocks[i] @ x[i+1]
 
-        M = IdentityWithUpperBlockDiagonalMatrix(
+        M = IdentityWithUpperDiagonal(
             [
                 torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
                 torch.tensor([[2.0, 0.0], [0.0, 2.0]]),
@@ -388,7 +388,7 @@ class TestIdentityWithUpperBlockDiagonalMatrix:
         """Test that solve produces a valid solution."""
         torch.manual_seed(42)
 
-        M = IdentityWithUpperBlockDiagonalMatrix([torch.randn(3, 3), torch.randn(3, 3)])
+        M = IdentityWithUpperDiagonal([torch.randn(3, 3), torch.randn(3, 3)])
 
         rhs = Vertical([torch.randn(3, 1), torch.randn(3, 1), torch.randn(3, 1)])
 
@@ -403,7 +403,7 @@ class TestIdentityWithUpperBlockDiagonalMatrix:
     def test_solve_with_zero_blocks(self):
         """Test solving when some upper blocks are zero."""
 
-        M = IdentityWithUpperBlockDiagonalMatrix(
+        M = IdentityWithUpperDiagonal(
             [torch.tensor([[1.0, 0.0], [0.0, 1.0]]), torch.zeros(2, 2)]
         )
 
@@ -420,14 +420,14 @@ class TestIdentityWithUpperBlockDiagonalMatrix:
         assert torch.allclose(solution.blocks[2], col(7.0, 8.0))
 
     def test_transpose(self):
-        """Test that transpose returns IdentityWithLowerBlockDiagonalMatrix."""
+        """Test that transpose returns IdentityWithLowerBlockDiagonal."""
         A = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         B = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
-        M = IdentityWithUpperBlockDiagonalMatrix([A, B])
+        M = IdentityWithUpperDiagonal([A, B])
 
         M_T = M.T
 
-        assert isinstance(M_T, LowerBlockBiDiagonal)
+        assert isinstance(M_T, LowerBiDiagonal)
         assert len(M_T.lower_blocks) == 2
         assert torch.allclose(M_T.lower_blocks[0], A.T)
         assert torch.allclose(M_T.lower_blocks[1], B.T)
@@ -435,7 +435,7 @@ class TestIdentityWithUpperBlockDiagonalMatrix:
     def test_transpose_involution(self):
         """Test that (M.T).T = M (transpose is an involution)."""
         torch.manual_seed(42)
-        m = IdentityWithUpperBlockDiagonalMatrix([torch.randn(3, 3), torch.randn(3, 3)])
+        m = IdentityWithUpperDiagonal([torch.randn(3, 3), torch.randn(3, 3)])
 
         v = Vertical([torch.randn(3, 1), torch.randn(3, 1), torch.randn(3, 1)])
 
@@ -453,7 +453,7 @@ class TestIdentityWithUpperBlockDiagonalMatrix:
 
 class TestUpperBlockDiagonal:
     def test_to_tensor(self):
-        U = UpperBlockDiagonal(2, [torch.randn(2, 3), torch.randn(3, 3)], 3)
+        U = UpperDiagonal(2, [torch.randn(2, 3), torch.randn(3, 3)], 3)
         assert torch.allclose(U.T.to_tensor(), U.to_tensor().T)
 
 
@@ -520,36 +520,32 @@ class TestTransposeRelationship:
         """Test that M.T @ v = M^T @ v mathematically."""
         torch.manual_seed(42)
 
-        m_lower = IdentityWithLowerBlockDiagonalMatrix(
-            [torch.randn(3, 3), torch.randn(3, 3)]
-        )
+        m_lower = IdentityWithLowerDiagonal([torch.randn(3, 3), torch.randn(3, 3)])
         m_upper = m_lower.T
 
         # This should be consistent with the transpose operation
-        assert isinstance(m_upper, UpperBlockBiDiagonal)
+        assert isinstance(m_upper, UpperBiDiagonal)
 
     def test_upper_lower_transpose_consistency(self):
         """Test that (M^T).T @ v = M @ v."""
         torch.manual_seed(42)
 
-        m_upper = IdentityWithUpperBlockDiagonalMatrix(
-            [torch.randn(3, 3), torch.randn(3, 3)]
-        )
+        m_upper = IdentityWithUpperDiagonal([torch.randn(3, 3), torch.randn(3, 3)])
         m_lower = m_upper.T
 
         # This should be consistent with the transpose operation
-        assert isinstance(m_lower, LowerBlockBiDiagonal)
+        assert isinstance(m_lower, LowerBiDiagonal)
 
 
-class TestSymmetricBlock2x2Matrix:
-    """Tests for SymmetricBlock2x2Matrix class."""
+class TestSymmetricBlock2x2:
+    """Tests for SymmetricBlock2x2 class."""
 
     def test_apply(self):
-        """Test matrix-vector multiplication with a 2-block BlockVector."""
+        """Test matrix-vector multiplication with a 2-block Vertical."""
         # Create a simple symmetric block 2x2 matrix
         # Q = [[Q11, Q12],
         #      [Q12^T, Q22]]
-        matrix = SymmetricBlock2x2Matrix(
+        matrix = Symmetric2x2(
             block11=torch.tensor([[2.0, 0.0], [0.0, 3.0]]),
             block12=col(1.0, 1.0),
             block22=torch.tensor([[4.0]]),
@@ -567,7 +563,7 @@ class TestSymmetricBlock2x2Matrix:
 
     def test_apply_mismatched_blocks_raises(self):
         """Test that apply with wrong number of blocks raises ValueError."""
-        matrix = SymmetricBlock2x2Matrix(
+        matrix = Symmetric2x2(
             torch.tensor([[2.0, 0.0], [0.0, 3.0]]),
             col(1.0, 1.0),
             torch.tensor([[4.0]]),
@@ -585,7 +581,7 @@ class TestSymmetricBlock2x2Matrix:
         block11 = torch.randn(3, 3)
         block22 = torch.randn(2, 2)
 
-        matrix2x2 = SymmetricBlock2x2Matrix(
+        matrix2x2 = Symmetric2x2(
             block11 @ block11.T + torch.eye(3),
             torch.randn(3, 2),
             block22 @ block22.T + torch.eye(2),
@@ -602,10 +598,10 @@ class TestSymmetricBlock2x2Matrix:
         assert torch.allclose(result.blocks[1], v.blocks[1])
 
     def test_matmul_with_upper_diagonal_blocks_using_to_tensor(self):
-        """Test inverting SymmetricBlock2x2Matrix with upper diagonal blocks."""
-        matrix2x2 = SymmetricBlock2x2Matrix(
+        """Test inverting SymmetricBlock2x2 with upper diagonal blocks."""
+        matrix2x2 = Symmetric2x2(
             block11=Diagonal([torch.ones(2, 2), torch.ones(3, 3)]),
-            block12=UpperBlockDiagonal(2, [torch.ones(2, 3)], 3),
+            block12=UpperDiagonal(2, [torch.ones(2, 3)], 3),
             block22=Diagonal([torch.ones(2, 2), torch.ones(3, 3)]) + Identity(),
         )
         v = Vertical([Vertical([torch.ones(2, 1), torch.ones(3, 1)])] * 2)
@@ -614,10 +610,10 @@ class TestSymmetricBlock2x2Matrix:
         torch.testing.assert_close(r.to_tensor(), rr)
 
     def test_matmul_with_upper_diagonal_blocks(self):
-        """Test inverting SymmetricBlock2x2Matrix with upper diagonal blocks."""
-        matrix2x2 = SymmetricBlock2x2Matrix(
+        """Test inverting SymmetricBlock2x2 with upper diagonal blocks."""
+        matrix2x2 = Symmetric2x2(
             block11=Diagonal([torch.ones(2, 2), torch.ones(3, 3)]),
-            block12=UpperBlockDiagonal(2, [torch.ones(2, 3)], 3),
+            block12=UpperDiagonal(2, [torch.ones(2, 3)], 3),
             block22=Diagonal([torch.ones(2, 2), torch.ones(3, 3)]) + Identity(),
         )
 
@@ -631,12 +627,12 @@ class TestSymmetricBlock2x2Matrix:
         torch.testing.assert_close(r.blocks[1].blocks[1], 6 * torch.ones(3, 1))
 
     def test_invert_with_upper_diagonal_blocks_using_to_tensor(self):
-        """Test inverting SymmetricBlock2x2Matrix with upper diagonal blocks."""
+        """Test inverting SymmetricBlock2x2 with upper diagonal blocks."""
         block11 = Diagonal([torch.randn(2, 2), torch.randn(3, 3)])
         block22 = Diagonal([torch.randn(2, 2), torch.randn(3, 3)])
-        M = SymmetricBlock2x2Matrix(
+        M = Symmetric2x2(
             block11=block11 @ block11.T,
-            block12=UpperBlockDiagonal(2, [torch.randn(2, 3)], 3),
+            block12=UpperDiagonal(2, [torch.randn(2, 3)], 3),
             block22=block22 @ block22.T + Identity(),
         )
         M_inv = M.invert()
@@ -646,13 +642,13 @@ class TestSymmetricBlock2x2Matrix:
         torch.testing.assert_close(M_inv_tensor, M_inv_tensor_torch)
 
     def test_invert_with_upper_diagonal_blocks(self):
-        """Test inverting SymmetricBlock2x2Matrix with upper diagonal blocks."""
+        """Test inverting SymmetricBlock2x2 with upper diagonal blocks."""
 
         block11 = Diagonal([torch.randn(2, 2), torch.randn(3, 3)])
         block22 = Diagonal([torch.randn(2, 2), torch.randn(3, 3)])
-        M = SymmetricBlock2x2Matrix(
+        M = Symmetric2x2(
             block11=block11 @ block11.T,
-            block12=UpperBlockDiagonal(2, [torch.randn(2, 3)], 3),
+            block12=UpperDiagonal(2, [torch.randn(2, 3)], 3),
             block22=block22 @ block22.T + Identity(),
         )
         M_inv = M.invert()
@@ -675,14 +671,14 @@ class TestSymmetricBlock2x2Matrix:
         block11 = torch.randn(3, 3)
         block22 = torch.randn(2, 2)
 
-        matrix2x2 = SymmetricBlock2x2Matrix(
+        matrix2x2 = Symmetric2x2(
             block11 @ block11.T + torch.eye(3),
             torch.randn(3, 2),
             block22 @ block22.T + torch.eye(2),
         )
         U, D = matrix2x2.UDU_decomposition()
 
-        assert isinstance(U, UpperBlockBiDiagonal)
+        assert isinstance(U, UpperBiDiagonal)
         assert isinstance(D, Diagonal)
 
         # Generate a random vector
@@ -696,12 +692,12 @@ class TestSymmetricBlock2x2Matrix:
         torch.testing.assert_close(UDUv.blocks[1], Av.blocks[1])
 
     def test_invert_via_UDU_decomposition(self):
-        """Test inverting SymmetricBlock2x2Matrix using LDL decomposition."""
+        """Test inverting SymmetricBlock2x2 using LDL decomposition."""
         # Create positive definite blocks to ensure invertibility
         block11 = torch.randn(3, 3)
         block22 = torch.randn(2, 2)
 
-        matrix2x2 = SymmetricBlock2x2Matrix(
+        matrix2x2 = Symmetric2x2(
             block11 @ block11.T + torch.eye(3),
             torch.randn(3, 2),
             block22 @ block22.T + torch.eye(2),

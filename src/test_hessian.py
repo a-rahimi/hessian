@@ -8,7 +8,7 @@ import torch.nn as nn
 
 import hessian
 from hessian import DenseBlock, LossLayer, SequenceOfDenseBlocks
-import partitioned
+import block_partitioned_matrices as bpm
 
 
 class TestDenseBlock:
@@ -460,10 +460,8 @@ class TestSequenceOfBlocks:
         """
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = model.derivatives(z_in, target)
 
-        M = partitioned.IdentityWithLowerBlockDiagonalMatrix((-Dz).blocks[1:])
-        e_L = partitioned.Vertical(
-            [torch.zeros(layer.output.numel(), 1) for layer in model]
-        )
+        M = bpm.IdentityWithLowerDiagonal((-Dz).blocks[1:])
+        e_L = bpm.Vertical([torch.zeros(layer.output.numel(), 1) for layer in model])
         assert e_L.blocks[-1].numel() == 1
         e_L.blocks[-1][:] = 1.0
         dloss_dx = Dx.T @ M.T.solve(e_L)
@@ -487,7 +485,7 @@ class TestSequenceOfBlocks:
         """
         # A random partitioned vector  each of which has as many elements as the
         # corresponding layer has parameters.
-        v = partitioned.Vertical(
+        v = bpm.Vertical(
             [
                 torch.randn(sum(p.numel() for p in layer.parameters()), 1)
                 for layer in model
@@ -535,7 +533,7 @@ class TestSequenceOfBlocks:
         and verify that h_h_inv_g ≈ g.
         """
         # Create a random vector g matching the parameter structure
-        g = partitioned.Vertical(
+        g = bpm.Vertical(
             [
                 torch.randn(sum(p.numel() for p in layer.parameters()), 1)
                 for layer in model
@@ -561,7 +559,7 @@ class TestSequenceOfBlocks:
         and compares the result of hessian_inverse_product(g) against H^{-1} @ g.
         """
         # Create a random vector g
-        g = partitioned.Vertical(
+        g = bpm.Vertical(
             [
                 torch.randn(sum(p.numel() for p in layer.parameters()), 1)
                 for layer in model
