@@ -510,7 +510,6 @@ The various matrices involved are recapitulated below:
 \end{align*}
 \subsection{Multiplying a vector by the Hessian}
 
-
 Given a vector $g \in \R^{Lp}$, the formula above allows us to compute $H g$ in $O\left(Lap^2 + L a^2p +La^3\right)$
 operations without forming $H$. This cost is dominated by multiplying by the $D_{xx}$, $D_{zx}$, and $D_{zz}$ matrices.
 Appendix \ref{sec:pearlmutter} shows that these operations are exactly the operations involved in Pearlmutter's trick
@@ -529,220 +528,167 @@ inverse is easy to compute:
 \begin{align}
   H & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x \\
   & =
-  \begin{bmatrix}
-    M^{-1}D_x \\ I
-  \end{bmatrix}
+  \underbrace{
+    \begin{bmatrix}
+      M^{-1}D_x \\ I
+    \end{bmatrix}
+  }_{U^\top}
   ^\top
   \begin{bmatrix}
     P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
     D_D D_{zx} P        & D_D D_{xx}
   \end{bmatrix}
-  \begin{bmatrix}
-    M^{-1}D_x \\ I
-  \end{bmatrix}
-  \\
-  & = I +
-  \begin{bmatrix}
-    D_x \\ I
-  \end{bmatrix}
-  ^\top
   \underbrace{
     \begin{bmatrix}
-      M^{-\top} & \\ & I
+      M^{-1}D_x \\ I
     \end{bmatrix}
-  }_{\hat{M}^{-\top}}
+  }_{\equiv U}
+  \\
+  & =
+  \underbrace{D_x^\top M^{-\top} M^{-1} D_x}_{\equiv A} +
+  \underbrace{
+    \begin{bmatrix} M^{-1}D_x \\ I
+    \end{bmatrix}^\top
+  }_{U^\top}
   \underbrace{
     \begin{bmatrix}
-      P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
-      D_D D_{zx} P        & D_D D_{xx}-I
+      P^\top D_M D_{zz} P - I & P^\top D_M D_{xz} \\
+      D_D D_{zx} P        & D_D D_{xx}
     \end{bmatrix}
   }_{\equiv Q}
   \underbrace{
-    \begin{bmatrix}
-      M^{-1} & \\ & I
-    \end{bmatrix}
-  }_{\hat{M}^{-1}}
-  \begin{bmatrix}
-    D_x \\ I
-  \end{bmatrix}
-  .
+    \begin{bmatrix} M^{-1}D_x \\ I
+    \end{bmatrix}.
+  }_{\equiv U}
 \end{align}
 
-The Woodbury formula gives
+By the Woodbury formula,
 \begin{align}
-  H^{-1} & = I -
-  \begin{bmatrix}
-    D_x \\ I
-  \end{bmatrix}
-  ^\top
-  \left( \left(\hat{M}^{-\top} Q \hat{M}^{-1}\right)^{-1} +
-    \begin{bmatrix}
-      D_x \\ I
-    \end{bmatrix}
-    \begin{bmatrix}
-      D_x \\ I
-    \end{bmatrix}
-    ^\top
-  \right)^{-1}
-  \begin{bmatrix}
-    D_x \\ I
-  \end{bmatrix}
-  \nonumber      \\
-  & = I -
-  \begin{bmatrix}
-    D_x \\ I
-  \end{bmatrix}
-  ^\top
-  \left(\underbrace{
-      \hat{M} Q^{-1} \hat{M}^\top
-      +
-      \begin{bmatrix}
-        D_x D_x^\top & D_x \\
-        D_x^\top     & I
-      \end{bmatrix}
-  }_{\equiv A}\right)^{-1}
-  \begin{bmatrix}
-    D_x \\ I
-  \end{bmatrix}
-  .
+  H^{-1} &= \left(A+U^\top Q U\right)^{-1} = A^{-1} - A^{-1} U^\top \left(Q^{-1} + U A^{-1} U^\top\right)^{-1} U A^{-1}.
 \end{align}
+This matrix can be efficiently applied to a vector without first forming it.
+First, aince $A^{-1} = D_x^{-1} MM^\top D_x^{-\top}$, multiplying a vector by $A^{-1}$
+is straightforward.  Applying the matrix $U$ is also straightforward since it
+requires scaling the vector by $D_x$, then using back-substitution to apply
+$M^{-1}$.
 
-Both inverses in the above can be either computed or applied efficiently.  We'll
-treat $Q$ as a 2x2 block matrix and define the Schur complement $S \equiv Q_{11} -
-Q_{12} Q_{22}^{-1} Q_{21}$, where $Q_{ij}$ denote the $i,j$th block of $Q$ as
-defined above.  By the partitioned matrix inverse formula,
-\begin{equation}
-  Q^{-1} =
-  \begin{bmatrix}
-    S^{-1}                      & -S^{-1} Q_{12} Q_{22}^{-1}                                 \\
-    - Q_{22}^{-1} Q_{21} S^{-1} & Q_{22}^{-1} + Q_{22}^{-1} Q_{21} S^{-1} Q_{12} Q_{22}^{-1}
-  \end{bmatrix}
-  .
-\end{equation}
-
-The matrices $Q_{11}$ and $Q_{22}$ are block-diagonal, and $Q_{12}$, $Q_{21}$,
-are upper and lower-diagonal respectively. This means  $S$ is also block
-diagonal because $Q_{11}$ and $Q_{12} Q_{22}^{-1} Q_{21}$ are block-diagonal. So
-the four blocks of $Q^{-1}$ are either lower, upper, or block diagonal.
-
-The inverse of $A\equiv \hat{M} Q^{-1} \hat{M}^\top +
-\begin{bmatrix}
-  D_x D_x^\top & D_x \\ D_x^\top & I
-\end{bmatrix}
-$ can be applied efficiently. Instead of applying the partitioned matrix inverse
-formula again, we compute its $UDU^\top$ decomposition and apply the inverse of
-that decomposition.
-With the blocks
+The complication arises from computing the inverse of $S_H \equiv Q^{-1} + UA^{-1}U^\top$.
+We'll first need to compute and store the inverse of $Q$.  Denoting the blocks
+of $Q$ by $Q_{11}, Q_{12}, Q_{21}, Q_{22}$, its inverse is
 \begin{align}
-  A_{11} & \equiv M \left[Q^{-1}\right]_{11} M^\top +D_x D_x^\top \nonumber \\
-  A_{12} & \equiv M\left[Q^{-1}\right]_{12} + D_x \nonumber                 \\
-  A_{22} & \equiv \left[Q^{-1}\right]_{22} + I,
+  \label{eq:Q-inverse}
+  Q^{-1} &\equiv
+  \begin{bmatrix}
+    \tilde{Q}_{11} & \tilde{Q}_{12} \\
+    \tilde{Q}_{21} & \tilde{Q}_{22}
+  \end{bmatrix} =
+  \begin{bmatrix}
+    S_q^{-1} & -S_q^{-1} Q_{12} Q_{22}^{-1} \\
+    -Q_{22}^{-1} Q_{21} S_q^{-1} & Q_{22}^{-1} + Q_{22}^{-1} Q_{21} S_q^{-1} Q_{12} Q_{22}^{-1}
+  \end{bmatrix},
 \end{align}
-the $UDU^\top$ decomposition of $A$ is
-\begin{equation}
-  A       =
-  \begin{bmatrix}
-    I & A_{12} A_{22}^{-1} \\ 0 & I
-  \end{bmatrix}
-  \begin{bmatrix}
-    A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
-    0                                       & A_{22}
-  \end{bmatrix}
-  \begin{bmatrix}
-    I & A_{12} A_{22}^{-1} \\ 0 & I
-  \end{bmatrix}
-  ^\top,
-\end{equation}
-so
+where
 \begin{align}
-  A^{-1} & =
-  \begin{bmatrix}
-    I & -A_{12} A_{22}^{-1} \\ 0 & I
-  \end{bmatrix}
-  ^\top
-  \begin{bmatrix}
-    A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
-    0                                       & A_{22}
-  \end{bmatrix}
-  ^{-1}
-  \begin{bmatrix}
-    I & -A_{12} A_{22}^{-1} \\ 0 & I
-  \end{bmatrix}
+  \label{eq:Q-blocks-11}
+  Q_{11} &= P^\top D_M D_{zz} P - I, \\
+  \label{eq:Q-blocks-12}
+  Q_{12} &= P^\top D_M D_{xz}, \\
+  \label{eq:Q-blocks-21}
+  Q_{21} &= D_D D_{zx} P, \\
+  \label{eq:Q-blocks-22}
+  Q_{22} &= D_D D_{xx}, \\
+  S_q &= Q_{11} - Q_{12} Q_{22}^{-1} Q_{21}.
 \end{align}
-Since $A_{11}$ is block tri-diagonal, $A_{12}$ is block-bidiagonal, and $A_{22}$ is block-diagonal, applying $A^{-1}$ to a vector is fast.
+Each of these blocks can be computed and stored efficiently. $Q_{12}$ is
+upper-block-diagonal, $Q_{21}$ is lower-block-diagonal, and $Q_{11}$ and
+$Q_{22}$ are block-diagonal. This implies in turn that $S_q$ is block-diagonal.
+So $\tilde{Q}_{11}$ and $\tilde{Q}_{22}$ are block-diagonal, and
+$\tilde{Q}_{12}$ and $\tilde{Q}_{21}$ are upper-block-diagonal and
+lower-block-diagonal, respectively.
+
+This gives
+\begin{align}
+  S_H &\equiv Q^{-1} + UA^{-1}U^\top \\
+  &= -Q^{-1} - U D_x^{-1}M M^\top D_x^{-\top} U^\top \\
+  &=  -Q^{-1} -
+  \begin{bmatrix}I & M^\top D_x^{-\top} \\ D_x^{-1}M & D_x^{-1}MM^\top D_x^{-\top}
+  \end{bmatrix}  \\
+  &= -
+  \begin{bmatrix}
+    \tilde{Q}_{11}  + I & \tilde{Q}_{12} + M^\top D_x^{-\top} \\
+    \tilde{Q}_{21} + D_x^{-1}M & \tilde{Q}_{22} + D_x^{-1}MM^\top D_x^{-\top} \\
+  \end{bmatrix} \\
+  &\equiv
+  \begin{bmatrix}
+    S_{H_{11}} & S_{H_{12}} \\
+    S_{H_{21}} & S_{H_{22}}
+  \end{bmatrix}.
+\end{align}
+
+This matrix can also be computed and stored efficiently because it
+subtracts from $Q^{-1}$ another $2 \times 2$ symmetric block matrix. The upper
+left block of this term is the identity, its  upper right block is
+upper-bi-diagonal  and its lower right block is tri-diagonal.
+
+While $S_H$ can be computed and stored efficiently, the tri-diagonal block means
+the inverse of $S_H^{-1}$ is dense, and so can't be stored compactly. But this
+inverse can be applied efficiently to a vector without forming it.  We'll use
+the parititioned matrix inverse formula again invert $S_H$:
+\[
+  S_H^{-1} \equiv
+  \begin{bmatrix}
+    \tilde{S}_{H_{11}} & \tilde{S}_{H_{12}} \\
+    \tilde{S}_{H_{21}} & \tilde{S}_{H_{22}}
+  \end{bmatrix},
+\]
+where
+\begin{align}
+  \tilde{S}_{H_{22}} &\equiv \left(S_{H_{22}} - S_{H_{21}} S_{H_{11}}^{-1} S_{H_{12}}\right)^{-1} \\
+  \tilde{S}_{H_{21}} &\equiv -\tilde{S}_{H_{22}} S_{H_{21}} S_{H_{11}}^{-1} \\
+  \tilde{S}_{H_{12}} &\equiv \tilde{S}_{H_{21}}^\top \\
+  \tilde{S}_{H_{11}} &\equiv S_{H_{11}}^{-1} - S_{H_{11}}^{-1} S_{H_{12}} \tilde{S}_{H_{21}}
+\end{align}
+
+Each of these blocks can be applied to a vector without forming the block.
 
 \subsection*{Summary: Algorithm to compute $H^{-1} g$}
 
-Given a vector $g \in \R^{Lp}$, compute $H^{-1} g$ as follows:
+Compute $H^{-1} g$ for a given vector $g$ as follows:
 
 \begin{enumerate}
-  \item
-    \textbf{Compute the auxiliary vector:}
-    \[
-      g'  \in \R^{La + Lp} \equiv
-      \begin{bmatrix}
-        D_x \\ I
-      \end{bmatrix}
-      g.
-    \]
-    $D_x$ has $L$ $a\times p$ blocks on its diagonal, so it takes $Lap$ multiplications to compute $v$.
+  \item \textbf{Compute and store $A^{-1}$.} This is a block-tri-diagonan matrix:
+    \[A^{-1} = D_x^{-1} MM^\top D_x^{-\top}.\]
+    It can be applied efficiently by first computing $D_x^{-1}M$, which is
+    bi-diagonal, then applying it after applying its transpose. All told, applying $A^{-1}$ requires a two forward passes.
 
-  \item
-    \textbf{Form the banded matrix:}
-    \[
-      A \in \R^{L(a+p) \times L(a+p)} \equiv \hat{M} Q^{-1} \hat{M}^\top +
-      \begin{bmatrix}
-        D_x D_x^\top & D_x \\ D_x^\top & I
-      \end{bmatrix}
-      .
-    \]
-    To compute $Q^{-1}$, we first compute the blocks of $Q$. These take $La^3$ multiplications for $Q_{11} \in \R^{La\times
-    La}$, $La^2p$ for $Q_{12}\in \R^{L a\times Lp}$ and $Q_{21}\in \R^{Lp \times La}$, and $La^2p$ for $Q_{22}\in \R^{Lp
-    \times Lp}$. Computing $S\in \R^{La\times La}$ takes $L p^3$ to compute $Q_{22}^{-1}$, and $2Lap^2$ to compute the
-    product $Q_{12} Q_{22}^{-1} Q_{21}$. Given these quantities, for the blocks of $Q^{-1}$, it takes an additional $La^3$
-    to compute the upper left block, $L(a^2p+ap^2)$ to compute the off-diagonal blocks, and somewhat less than that to
-    compute the bottom diagonal block since the matrices involved have already been computed. In all, it takes less than
-    $9L\max(a,p)^3$ multiplications to compute $Q^{-1}$.
+  \item \textbf{Compute $\left[
+        \begin{smallmatrix}g_1'\\ g_2'
+    \end{smallmatrix}\right] = UA^{-1}g$.} Applying $U$ requires applying
+    $M^{-1}$, which requires one back-substitution pass.
 
-    To compute $\hat{M}Q^{-1}\hat{M}^\top$ requires an additional $2La^3$ operations for a total of $11L\max(a,p)^3$
-    multiplications.
+  \item \textbf{Compute and form $Q$}. This is $2 \times 2$ block matrix whose
+    blocks are given by Equations (\ref{eq:Q-blocks-11} - \ref{eq:Q-blocks-22}).
 
-    Finally, computing and adding the second term requires $La^2p$ multiplications, bringing the tally to at most $12 L
-    \max(a,p)^3$ multiplications to compute $A$.
+  \item \textbf{Compute and store $Q^{-1}$:} This is a $2 \times 2$ block matrix given by Equation (\ref{eq:Q-inverse}).
+    Computing this is dominated by computing the inverse of the blocks of $Q_{22}$.
 
-  \item
-    \textbf{Apply $A^{-1}$ to $g'$:}
-    \[
-      g'' =
-      \begin{bmatrix}
-        I & -A_{12} A_{22}^{-1} \\ 0 & I
-      \end{bmatrix}
-      ^\top
-      \begin{bmatrix}
-        A_{11} - A_{12} A_{22}^{-1} A_{12}^\top & 0      \\
-        0                                       & A_{22}
-      \end{bmatrix}
-      ^{-1}
-      \begin{bmatrix}
-        I & -A_{12} A_{22}^{-1} \\ 0 & I
-      \end{bmatrix}
-      g'.
-    \]
-    This computation requires $2L\max(a,p)^3$ multiplications to compute $A_{22}^{-1}$ and $\left[A_{11}-A_{12}
-    A_{22}^{-1}A_{12}\right]^{-1}$. The remaining operations are matrix multiplications that take at most $3L\max(a,p)^2$,
-    which is smaller than $Lp^3$ when $p>3$. This brings the tally to at most $15L\max(a,p)^3$ multiplications.
+  \item \textbf{Factorize $S_{H_{22}} - S_{H_{21}} S_{H_{11}}^{-1} S_{H_{12}}$ into $G G^\top$:} Since this matrix is a block-tri-diagonal matrix,
+    $G$ is a lower-block-bi-diagonal matrix.
 
-  \item
-    \textbf{Compute the final result:}
-    \[
-      y = g -
-      \begin{bmatrix}
-        D_x \\ I
-      \end{bmatrix}
-      ^\top g''.
-    \]
-    These are again matrix-vector multiplications that take at most $L\max(a,p)^2$ when $p>1$, bringing the tally to at
-    most $16L\max(a,p)^3$.
+  \item \textbf{Compute $\left[
+        \begin{smallmatrix}g_1''\\ g_2''
+      \end{smallmatrix}\right] = S_H^{-1}\left[
+        \begin{smallmatrix}g_1'\\ g_2'
+    \end{smallmatrix}\right]$:}
+    \begin{enumerate}
+      \item Compute $g_{22}'' = \tilde{S}_{H_{22}} g_2'$.  This can be accomplished by applying $G^{-\top}$ followed by $G^{-1}$ to $g_1'$, requiring two backward passes.
+      \item Compute $g_{12}'' = \tilde{S}_{H_{12}} g_2'$.  This requiers applying $G^{-\top}$ followed by $G^{-1}$ to $S_{H_{21}} S_{H_{11}}^{-1} g_2'$,
+      \item Compute $g_{21}'' = \tilde{S}_{H_{21}} g_1'$. This requires applying $G^{-\top}$ followed by $G^{-1}$ to $g_1'$, followed by scaling by $S_{H_{12}}$ and $S_{H_{11}}^{-1}$.
+      \item Compute $g_{11}'' = \tilde{S}_{H_{11}} g_1'$. This requires just scaling operations.
+      \item Compute $g_{1}'' = g_{11}'' + g_{12}''$.
+      \item Compute $g_{2}'' = g_{21}'' + g_{22}''$.
+    \end{enumerate}
+
 \end{enumerate}
 
 \bibliographystyle{plain}
