@@ -8,8 +8,10 @@ from block_partitioned_matrices import (
     IdentityWithLowerDiagonal,
     IdentityWithUpperDiagonal,
     Symmetric2x2,
+    SymmetricTriDiagonal,
     UpperBiDiagonal,
     UpperDiagonal,
+    LowerDiagonal,
     LowerBiDiagonal,
     Identity,
     downshifting_matrix,
@@ -516,6 +518,56 @@ class TestDownshift:
 class TestTransposeRelationship:
     """Tests for transpose relationship between Lower and Upper block diagonal matrices."""
 
+    def test_lower_diagonal_to_tensor(self):
+        torch.manual_seed(123)
+
+        L = LowerDiagonal(
+            height_leading_zeros=2,
+            lower_blocks=[torch.randn(2, 3), torch.randn(3, 4)],
+            width_trailing_zeros=4,
+        )
+
+        U = L.T
+
+        assert isinstance(U, UpperDiagonal)
+
+        # Compare dense tensor representations
+        L_dense = L.to_tensor()
+        U_dense = U.to_tensor()
+        torch.testing.assert_close(U_dense, L_dense.T)
+
+    def test_lower_bidiagonal_to_tensor(self):
+        torch.manual_seed(321)
+
+        L = LowerBiDiagonal(
+            lower_blocks=[torch.randn(2, 2), torch.randn(2, 2)],
+            diagonal_blocks=[torch.randn(2, 2), torch.randn(2, 2), torch.randn(2, 2)],
+        )
+        U = L.T
+
+        assert isinstance(U, UpperBiDiagonal)
+
+        # Compare dense tensor representations
+        L_dense = L.to_tensor()
+        U_dense = U.to_tensor()
+        torch.testing.assert_close(U_dense, L_dense.T)
+
+    def test_upper_bidiagonal_to_tensor(self):
+        torch.manual_seed(654)
+
+        U = UpperBiDiagonal(
+            upper_blocks=[torch.randn(3, 3), torch.randn(3, 3)],
+            diagonal_blocks=[torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)],
+        )
+        L = U.T
+
+        assert isinstance(L, LowerBiDiagonal)
+
+        # Compare dense tensor representations
+        U_dense = U.to_tensor()
+        L_dense = L.to_tensor()
+        torch.testing.assert_close(L_dense, U_dense.T)
+
     def test_lower_upper_transpose_consistency(self):
         """Test that M.T @ v = M^T @ v mathematically."""
         torch.manual_seed(42)
@@ -712,3 +764,85 @@ class TestSymmetricBlock2x2:
 
         torch.testing.assert_close(v_hat.blocks[0], v.blocks[0])
         torch.testing.assert_close(v_hat.blocks[1], v.blocks[1])
+
+
+class TestSymmetricTriDiagonal:
+    """Tests for SymmetricTriDiagonal class."""
+
+    def test_UDU_decomposition_reconstructs_matrix(self):
+        """Test that U @ D @ U.T equals the original symmetric tri-diagonal matrix."""
+        torch.manual_seed(0)
+
+        # Build a small 3-block SPD tri-diagonal system with 2x2 blocks.
+        A0 = torch.randn(2, 2)
+        A1 = torch.randn(2, 2)
+        A2 = torch.randn(2, 2)
+
+        D_blocks = [
+            A0 @ A0.T + torch.eye(2),
+            A1 @ A1.T + torch.eye(2),
+            A2 @ A2.T + torch.eye(2),
+        ]
+
+        L_blocks = [
+            torch.randn(2, 2),
+            torch.randn(2, 2),
+        ]
+
+        tri = SymmetricTriDiagonal(lower_blocks=L_blocks, diagonal_blocks=D_blocks)
+
+        U, D = tri.UDU_decomposition()
+
+        assert isinstance(U, UpperBiDiagonal)
+        assert isinstance(D, Diagonal)
+
+        T_dense = tri.to_tensor()
+
+        # Dense representation of the factorization.
+        U_dense = U.to_tensor()
+        D_dense = D.to_tensor()
+        UDU_dense = U_dense @ D_dense @ U_dense.T
+
+        torch.testing.assert_close(UDU_dense, T_dense, rtol=1e-5, atol=1e-5)
+
+    def test_invert_via_UDU_decomposition(self):
+        """Test solving A v = b via UDU decomposition for SymmetricTriDiagonal."""
+        torch.manual_seed(1)
+
+        A0 = torch.randn(2, 2)
+        A1 = torch.randn(2, 2)
+        A2 = torch.randn(2, 2)
+
+        D_blocks = [
+            A0 @ A0.T + torch.eye(2),
+            A1 @ A1.T + torch.eye(2),
+            A2 @ A2.T + torch.eye(2),
+        ]
+
+        L_blocks = [
+            torch.randn(2, 2),
+            torch.randn(2, 2),
+        ]
+
+        tri = SymmetricTriDiagonal(lower_blocks=L_blocks, diagonal_blocks=D_blocks)
+        U, D = tri.UDU_decomposition()
+
+        # Build a random RHS and solve using dense linear algebra as reference.
+        T_dense = tri.to_tensor()
+        b = torch.randn(T_dense.shape[0], 1)
+
+        # Reference solution using dense solver.
+        x_ref = torch.linalg.solve(T_dense, b)
+
+        # Solution using the UDU factorization: x = (U D U^T)^{-1} b.
+        # Interpret b as a Vertical of blocks matching the diagonal blocks.
+        block_size = D_blocks[0].shape[0]
+        b_blocks = [
+            b[i * block_size : (i + 1) * block_size] for i in range(len(D_blocks))
+        ]
+        b_vert = Vertical(b_blocks)
+
+        x_block = U.T.solve(D.solve(U.solve(b_vert)))
+        x = x_block.to_tensor()
+
+        torch.testing.assert_close(x, x_ref, rtol=1e-5, atol=1e-5)

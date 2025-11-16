@@ -206,9 +206,9 @@ class Vertical(Stacked):
     @property
     def width(self) -> int:
         width = self.blocks[0].width
-        assert all(
-            b.width == width for b in self.blocks
-        ), "All blocks must have the same width"
+        assert all(b.width == width for b in self.blocks), (
+            "All blocks must have the same width"
+        )
         return width
 
     @property
@@ -359,6 +359,16 @@ class LowerBiDiagonal(Matrix):
             diagonal_blocks=[b.T for b in self.diagonal_blocks],
         )
 
+    def to_tensor(self) -> torch.Tensor:
+        return (
+            LowerDiagonal(
+                height_leading_zeros=self.diagonal_blocks[0].height,
+                lower_blocks=self.lower_blocks,
+                width_trailing_zeros=self.diagonal_blocks[-1].width,
+            ).to_tensor()
+            + Diagonal(self.diagonal_blocks).to_tensor()
+        )
+
 
 def IdentityWithLowerDiagonal(lower_blocks: Sequence[Matrix]):
     return LowerBiDiagonal(
@@ -437,6 +447,16 @@ class UpperBiDiagonal(Matrix):
         return LowerBiDiagonal(
             lower_blocks=[b.T for b in self.upper_blocks],
             diagonal_blocks=[b.T for b in self.diagonal_blocks],
+        )
+
+    def to_tensor(self) -> torch.Tensor:
+        return (
+            UpperDiagonal(
+                width_leading_zeros=self.diagonal_blocks[0].width,
+                upper_blocks=self.upper_blocks,
+                height_trailing_zeros=self.diagonal_blocks[-1].height,
+            ).to_tensor()
+            + Diagonal(self.diagonal_blocks).to_tensor()
         )
 
 
@@ -690,3 +710,100 @@ def _(self, other: UpperDiagonal) -> Diagonal:
         [torch.zeros(self.height_leading_zeros, other.width_leading_zeros)]
         + [b @ other_block for b, other_block in zip(self.blocks, other.blocks)]
     )
+
+
+class SymmetricTriDiagonal(Matrix):
+    """
+    A symmetric block tridiagonal matrix, with diagonal_blocks D and lower_blocks L,
+    i.e. the blocks of the matrix look like
+
+    [ D_0  L_0^T   0      0   ... ]
+    [ L_0  D_1   L_1^T    0   ... ]
+    [  0   L_1   D_2    L_2^T ... ]
+    [ ...                        ]
+
+    """
+
+    def __init__(
+        self, lower_blocks: Sequence[Matrix], diagonal_blocks: Sequence[Matrix]
+    ):
+        if len(lower_blocks) + 1 != len(diagonal_blocks):
+            raise ValueError(
+                "Number of lower blocks must be one less than the number of diagonal blocks"
+            )
+        self.lower_blocks = list(map(Tensor.wrap, lower_blocks))
+        self.diagonal_blocks = list(map(Tensor.wrap, diagonal_blocks))
+
+    def __matmul__(self, other: Matrix) -> Matrix:
+        raise NotImplementedError
+
+    @singledispatchmethod
+    def __add__(self, other: Matrix) -> Matrix:
+        raise NotImplementedError
+
+    @__add__.register
+    def _(self, other: Diagonal) -> "SymmetricTriDiagonal":
+        if len(self.diagonal_blocks) != len(other.blocks):
+            raise ValueError("Number of blocks in the operands must match")
+        return SymmetricTriDiagonal(
+            lower_blocks=self.lower_blocks,
+            diagonal_blocks=[
+                b + other_b for b, other_b in zip(self.diagonal_blocks, other.blocks)
+            ],
+        )
+
+    def UDU_decomposition(self) -> tuple["UpperBiDiagonal", "Diagonal"]:
+        "Factorize into U D U^T, where U is upper block-diagonal, and D is diagonal."
+
+        # An illustration of block UDUᵗ decomposition:
+        #
+        #   T = U D Uᵗ
+        #
+        #    [ D₀    L₀ᵗ    0     ...               ]   =   [ I  U₀   0   ...           ] [ B₀  0   0  ...          ] [  I   0   0   ...          ]
+        #    [ L₀    D₁   L₁ᵗ     ...               ]       [ 0   I   U₁  ...           ] [  0  B₁  0  ...          ] [ U₀ᵗ  I   0   ...          ]
+        #    [ 0     L₁   D₂      ...               ]       [ 0   0    I  ...           ] [  0   0  B₂ ...          ] [  0  U₁ᵗ  I   ...          ]
+        #                 ...                                                           ...
+        #    [ 0     0    0       ... D_{n-2} L_{n-2}ᵗ ]    [ 0   0    0 ... I U_{n-2}  ] [ 0 0 0 ... B_{n-2} 0     ] [ 0 ... U_{n-3}ᵗ        I  0 ]
+        #    [ 0     0    0       ... L_{n-2} D_{n-1}  ]    [ 0   0    0 ... 0      I   ] [ 0 0 0 ...    0  B_{n-1} ] [ 0 ...          U_{n-2}ᵗ  I ]
+        #
+        #
+        # We have the base case
+        #   B[n-1] = D[n-1]
+        #
+        # For i < n-1, we also have
+        #   L[i-1] = B[i] @ U[i-1].T
+        #   D[i] = B[i] + U[i] @ B[i+1] @ U[i].T
+        #
+        # These imply, respectively,
+        #
+        #   U[i] = (B[i+1] \ L[i]).T
+        #   B[i] = D[i] - U[i] B[i+1] @ U[i].T
+
+        Bs = [self.diagonal_blocks[-1]]
+        Us = []
+        for L, D in zip(self.lower_blocks[::-1], self.diagonal_blocks[-2::-1]):
+            Us.insert(0, (Bs[0].solve(L)).T)
+            Bs.insert(0, D - Us[0] @ Bs[0] @ Us[0].T)
+
+        return UpperBiDiagonal(
+            upper_blocks=Us,
+            diagonal_blocks=[Identity(b.width) for b in Bs],
+        ), Diagonal(Bs)
+
+    @property
+    def height(self) -> int:
+        return sum(b.height for b in self.diagonal_blocks)
+
+    @property
+    def width(self) -> int:
+        return sum(b.width for b in self.diagonal_blocks)
+
+    def to_tensor(self) -> torch.Tensor:
+        L = LowerDiagonal(
+            height_leading_zeros=self.diagonal_blocks[0].height,
+            lower_blocks=self.lower_blocks,
+            width_trailing_zeros=self.diagonal_blocks[-1].width,
+        )
+        return (
+            Diagonal(self.diagonal_blocks).to_tensor() + L.to_tensor() + L.T.to_tensor()
+        )
