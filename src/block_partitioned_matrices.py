@@ -59,7 +59,7 @@ class Matrix:
 
 
 class Tensor(torch.Tensor, Matrix):
-    "Endows torch.Tensor with invert() and solve() methods."
+    "Endows torch.Tensor with extra matrix operations."
 
     def invert(self) -> "Tensor":
         return Tensor(torch.linalg.inv(self))
@@ -132,13 +132,11 @@ class Zero(Matrix):
     shape: tuple[int, int] = ()
 
     def __matmul__(self, other: Matrix) -> Matrix:
-        if self.shape:
-            if other.height != self.shape[1]:
-                raise ValueError(
-                    f"Shape mismatch {self} vs {other.height} x {other.width}"
-                )
-            return torch.zeros(self.shape[0], other.width)
-        return Tensor(torch.tensor([[0.0]]))
+        if not self.shape:
+            return Tensor(torch.tensor([[0.0]]))
+        if other.height != self.shape[1]:
+            raise ValueError(f"Shape mismatch {self} vs {other.height} x {other.width}")
+        return torch.zeros(self.shape[0], other.width)
 
     def to_tensor(self) -> torch.Tensor:
         return torch.zeros(*self.shape)
@@ -163,7 +161,6 @@ class Stacked(Matrix):
         self.blocks = list(map(Tensor.wrap, blocks))
 
     def __neg__(self) -> "Stacked":
-        """Return negation of the matrix."""
         return self.__class__([-block for block in self.blocks])
 
     @singledispatchmethod
@@ -199,6 +196,11 @@ def _(self, other: Stacked) -> Stacked:
 
 class Vertical(Stacked):
     """Blocked stacked vertically."""
+
+    def concat(self, other: "Vertical") -> "Vertical":
+        if self.width != other.width:
+            raise ValueError("Widths must match")
+        return Vertical(self.blocks + other.blocks)
 
     def to_tensor(self) -> torch.Tensor:
         return torch.cat([b.to_tensor() for b in self.blocks], dim=0)
@@ -263,7 +265,7 @@ def _(self, other: Stacked) -> Stacked:
         raise ValueError("Number of blocks must match")
 
     return other.__class__(
-        [block @ oblock for block, oblock in zip(self.blocks, other.blocks)]
+        [b @ other_b for b, other_b in zip(self.blocks, other.blocks)]
     )
 
 
@@ -370,7 +372,7 @@ class LowerBiDiagonal(Matrix):
         )
 
 
-def IdentityWithLowerDiagonal(lower_blocks: Sequence[Matrix]):
+def IdentityWithLowerDiagonal(lower_blocks: Sequence[Matrix]) -> LowerBiDiagonal:
     return LowerBiDiagonal(
         lower_blocks=list(map(Tensor.wrap, lower_blocks)),
         diagonal_blocks=[Identity()] * (len(lower_blocks) + 1),
@@ -460,7 +462,7 @@ class UpperBiDiagonal(Matrix):
         )
 
 
-def IdentityWithUpperDiagonal(upper_blocks: Sequence[Matrix]):
+def IdentityWithUpperDiagonal(upper_blocks: Sequence[Matrix]) -> UpperBiDiagonal:
     return UpperBiDiagonal(
         upper_blocks=list(map(Tensor.wrap, upper_blocks)),
         diagonal_blocks=[Identity()] * (len(upper_blocks) + 1),
@@ -491,19 +493,34 @@ class Symmetric2x2(Matrix):
         )
 
     def invert(self) -> "Symmetric2x2":
-        # The Schur complement S = Q11 - Q12 @ Q22^{-1} @ Q21, and its inverse.
-        block22_inv = self.block22.invert()
-        S = self.block11 - self.block12 @ block22_inv @ self.block12.T
-        S_inv = S.invert()
+        # S = UDU^T
+        U, D = self.UDU_decomposition()
 
+        # S^{-1} = U^-T D^-1 U^-1
+        #   =   [I      0]  [D0^{-1}      0  ]   [I  -U0]  = [D0^{-1}        -D0^{-1} U0               ]
+        #       [-U0^T  I]  [   0     D1^{-1}]   [0    I]    [-U0^T D0^{-1}   U0^T D0^{-1} U0 + D1^{-1}]
+        Dinv = D.invert()
+        block12 = -Dinv.blocks[0] @ U.upper_blocks[0]
         return Symmetric2x2(
-            # Q_inv_11 = S^{-1}
-            block11=S_inv,
-            # Q_inv_12 = -S^{-1} @ Q12 @ Q22^{-1}
-            block12=-S_inv @ self.block12 @ block22_inv,
-            # Q_inv_22 = Q22^{-1} + Q22^{-1} @ Q21 @ S^{-1} @ Q12 @ Q22^{-1}
-            block22=block22_inv
-            + block22_inv @ self.block12.T @ S_inv @ self.block12 @ block22_inv,
+            block11=Dinv.blocks[0],
+            block12=block12,
+            block22=Dinv.blocks[1] - U.upper_blocks[0].T @ block12,
+        )
+
+    def invert_via_LDL(self) -> "Symmetric2x2":
+        # S = LDL^T
+        L, D = self.LDL_decomposition()
+
+        # S^{-1} = L^-T D^-1 L^-1
+        #   =   [I      -L0']  [D0^{-1}      0  ]   [I     0]  = [D0^{-1} + L0' D1^{-1} L0          -L0' D1^{-1} ]
+        #       [0        I ]  [   0     D1^{-1}]   [-L0   I]    [-D1^{-1} L0                        D1^{-1}     ]
+        Dinv = D.invert()
+        block12 = -L.lower_blocks[0].T @ Dinv.blocks[1]
+        return Symmetric2x2(
+            block11=Dinv.blocks[0]
+            + L.lower_blocks[0].T @ Dinv.blocks[1] @ L.lower_blocks[0],
+            block12=block12,
+            block22=Dinv.blocks[1],
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -523,6 +540,14 @@ class Symmetric2x2(Matrix):
             [self.block11 - self.block12 @ b22_inv @ self.block12.T, self.block22]
         )
         return U, D
+
+    def LDL_decomposition(self) -> tuple[IdentityWithLowerDiagonal, Diagonal]:
+        a11_inv = self.block11.invert()
+        L = IdentityWithLowerDiagonal([self.block12.T @ a11_inv])
+        D = Diagonal(
+            [self.block11, self.block22 - self.block12.T @ a11_inv @ self.block12]
+        )
+        return L, D
 
 
 class LowerDiagonal(Stacked):

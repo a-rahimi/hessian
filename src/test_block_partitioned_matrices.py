@@ -649,6 +649,29 @@ class TestSymmetricBlock2x2:
         assert torch.allclose(result.blocks[0], v.blocks[0])
         assert torch.allclose(result.blocks[1], v.blocks[1])
 
+    def test_invert_via_LDL(self):
+        """Test inverting symmetric block 2x2 matrix via LDL decomposition."""
+        torch.manual_seed(42)
+        # Create positive definite blocks to ensure invertibility
+        block11 = torch.randn(3, 3)
+        block22 = torch.randn(2, 2)
+
+        matrix2x2 = Symmetric2x2(
+            block11 @ block11.T + torch.eye(3),
+            torch.randn(3, 2),
+            block22 @ block22.T + torch.eye(2),
+        )
+        matrix2x2_inv = matrix2x2.invert_via_LDL()
+
+        # Create a random vector
+        v = Vertical([torch.randn(3, 1), torch.randn(2, 1)])
+
+        # Check that matrix @ matrix_inv @ v = v
+        result = matrix2x2 @ (matrix2x2_inv @ (v))
+
+        assert torch.allclose(result.blocks[0], v.blocks[0])
+        assert torch.allclose(result.blocks[1], v.blocks[1])
+
     def test_matmul_with_upper_diagonal_blocks_using_to_tensor(self):
         """Test inverting SymmetricBlock2x2 with upper diagonal blocks."""
         matrix2x2 = Symmetric2x2(
@@ -742,6 +765,32 @@ class TestSymmetricBlock2x2:
 
         torch.testing.assert_close(UDUv.blocks[0], Av.blocks[0])
         torch.testing.assert_close(UDUv.blocks[1], Av.blocks[1])
+
+    def test_LDL_decomposition(self):
+        """Test LDL_decomposition is correctness by checking L @ D @ L.T = A."""
+        # Create positive definite blocks to ensure invertibility
+        block11 = torch.randn(3, 3)
+        block22 = torch.randn(2, 2)
+
+        matrix2x2 = Symmetric2x2(
+            block11 @ block11.T + torch.eye(3),
+            torch.randn(3, 2),
+            block22 @ block22.T + torch.eye(2),
+        )
+        L, D = matrix2x2.LDL_decomposition()
+
+        assert isinstance(L, LowerBiDiagonal)
+        assert isinstance(D, Diagonal)
+
+        # Generate a random vector
+        v = Vertical([torch.randn(3, 1), torch.randn(2, 1)])
+
+        # Test that L @ D @ L.T @ v = A @ v
+        LDLv = L @ (D @ (L.T @ v))
+        Av = matrix2x2 @ v
+
+        torch.testing.assert_close(LDLv.blocks[0], Av.blocks[0])
+        torch.testing.assert_close(LDLv.blocks[1], Av.blocks[1])
 
     def test_invert_via_UDU_decomposition(self):
         """Test inverting SymmetricBlock2x2 using LDL decomposition."""

@@ -276,44 +276,58 @@ class SequenceOfBlocks(nn.Module):
         M = bpm.IdentityWithLowerDiagonal((-Dz).blocks[1:])
         P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.blocks])
 
-        # Step 1: Compute g_prime = [D_x; I] @ g = [D_x @ g; g]
-        # TODO: Introduce a Vertical.concatenate method.
-        g_prime = bpm.Vertical((Dx @ g).blocks + g.blocks)
+        # Step 1: Set up to apply A_inv = D_x^{-1} MM^T D_x^{-T} to a vector v.
+        Dx_inv = Dx.invert()
 
-        # Step 2: Compute the blocks of Q and invert Q.
-        # Q = [[P' D_M D_zz P,  P' D_M D_xz],
-        #      [D_D D_zx P,     D_D D_xx - I]]
+        def A_inv_apply(v: bpm.Vertical) -> bpm.Vertical:
+            return Dx_inv @ (M @ (M.T @ (Dx_inv.T @ v)))
+
+        # Step 2: Compute t1 = UA^{-1} g.
+        t1 = A_inv_apply(g)
+        UA_inv_g = bpm.Vertical(M.solve(Dx @ t1), t1)
+
+        # Step 3 & 4: Compute the blocks of Q and invert Q.
         Q_inv = bpm.Symmetric2x2(
-            # Q11 = P' DM_Dzz  P
-            block11=P.T @ DM_Dzz @ P,
+            # Q11 = P' DM_Dzz  P - I
+            block11=P.T @ DM_Dzz @ P - bpm.Identity(),
             # Q12 = P' D_M D_xz = P' DD_Dzx'
             block12=P.T @ DD_Dzx.T,
-            # Q22 = DD_Dxx - I
-            block22=DD_Dxx - bpm.Identity(),
+            # Q22 = DD_Dxx
+            block22=DD_Dxx,
         ).invert()
 
-        # Step 3: Form A
-        A = bpm.Symmetric2x2(
-            # A11 = M @ Q_inv_11 @ M^T + D_x @ D_x^T
-            block11=M @ Q_inv.block11 @ M.T + Dx @ Dx.T,
-            # A12 = M @ Q_inv_12 + D_x
-            block12=M @ Q_inv.block12 + Dx,
-            # A22 = Q_inv_22 + I
-            block22=bpm.Diagonal(
-                [block + torch.eye(block.shape[0]) for block in Q_inv.block22.blocks]
-            ),
+        # Step 5: Form S_H
+        S_H = bpm.Symmetric2x2(
+            # A11 = Q_inv_11 + I
+            block11=Q_inv.block11 + bpm.Identity(),
+            # A12 = Q_inv_12 + M^T D_x^-T
+            block12=Q_inv.block12 + (Dx_inv @ M).T,
+            # A22 = Q_inv_22 + D_x^-1 MM^T D_x^-T
+            block22=Q_inv.block22 + Dx_inv @ M.self_outer() @ Dx_inv.T,
         )
 
-        # Step 4: Solve A @ g_double_prime = g_prime. Do this by computing the
-        # UDU^T decomposition of A and applying the inverse of that
-        # decomposition to g_prime.
-        U, D = A.UDU_decomposition()
-        g_double_prime = U.T.solve(D.solve(U.solve(g_prime)))
+        # Step 6: Factorize S_H_22 - S_H_12 S_H_11^{-1} S_H_12 into UDU^T.
+        # TODO: Move this to Symmetric2x2.solve()
+        S_H_11_inv = S_H.block11.invert()
+        U, D = (
+            S_H.block22 - S_H.block12 @ S_H_11_inv @ S_H.block12.T
+        ).UDU_decomposition()
 
-        # Step 4: Return g - [D_x; I]^T @ g_double_prime
-        return bpm.Vertical(
-            g - bpm.Vertical((Dx.T @ g_double_prime).blocks + g_double_prime.blocks)
-        )
+        def S_H_22_inv_apply(v: bpm.Vertical) -> bpm.Vertical:
+            return U.T.solve(D.solve(U.solve(v)))
+
+        # Step 7: Compute t2 = S_H \ UA_inv_g.
+        g_21 = -S_H_22_inv_apply(S_H.block12.T @ (S_H_11_inv @ UA_inv_g.blocks[0]))
+        g_12 = S_H_11_inv @ (S_H.block12 @ S_H_22_inv_apply(UA_inv_g.blocks[1]))
+        g_11 = S_H_11_inv @ (UA_inv_g.blocks[0] - S_H.block12 @ g_21)
+        g_22 = S_H_22_inv_apply(UA_inv_g.blocks[1])
+        t2 = bpm.Vertical([g_11 + g_12, g_21 + g_22])
+
+        # Step 8: A^{-1} U' t2
+        t3 = A_inv_apply(Dx @ M.T.solve(t2.blocks[0]))
+
+        # Step 9: A^{-1} g - t3
+        return A_inv_apply(g) - t3
 
 
 class SequenceOfDenseBlocks(SequenceOfBlocks):
