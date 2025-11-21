@@ -54,7 +54,7 @@ second order mixed derivatives of each layer, and the inverse of a block-bi-diag
 backpropoagation algorithm. Exploiting this structure offers a a direct way to compute Hessian-vector products using
 exactly the same operations as Pearlmutter's algorithm (see Appendix \ref{sec:pearlmutter}). It also leads to a way to
 compute Hessian-inverse-vector product that does not require forming or storing the full Hessian, and without incurring
-quadratically (let alone qubically) many FLOPs. For an $L$-layer deep net where each layer has $p$ parameters and
+quadratically (let alone cubically) many FLOPs. For an $L$-layer deep net where each layer has $p$ parameters and
 produces $a$ activations, naively storing the Hessian would require $O(L^2p^2)$ memory, and multiplying it by a vector
 or solving a linear system would require $O(L^2p^2 + L\max(a,p)^3)$ and $O(L^3p^3)$ operations, respectively. In
 contrast, we will show how to perform these operations using only $O(L \max(a, p)^3)$ computations. The dependence on
@@ -73,7 +73,7 @@ network, without forming $H$ explicitly. To do this, we employ the following str
     coincides exactly with the computations carried out by backpropagation.
   \item
     Differentiate this matrix form to obtain the second-order derivatives. Write the result in matrix form,
-    hiwch involves a second-order polynomial in the inverse of the aforementioned bi-diagonal matrix.
+    which involves a second-order polynomial in the inverse of the aforementioned bi-diagonal matrix.
   \item
     Lift this polynomial into a higher-dimensional matrix form, and use the Woodbury formula to invert the resulting
     matrix.
@@ -100,12 +100,12 @@ traditional deep net formalism in two ways: First, the training labels are subsu
 through the layers until they're used in the loss. Second, the last layer fuses the loss (which has no parameters) and
 the last layer (which does).
 
-We'll assume the first and partial derivatives of each layer with respect to its parameters and its inputs exist. This
-poses some complications with ReLU activations and other non-differentiable operations in modern networks. Notably, for
-the Hessian to be symmetric,
-
-some We'll largely ignoring this complication and assume that differentiable approximations to these operations are
-used.
+We'll assume the first and partial derivatives of each layer with respect to its
+parameters and its inputs exist. This poses some complications with ReLU
+activations and other non-differentiable operations in modern networks. Notably,
+for the Hessian to be symmetric, it must be differentiable everywhere.  We'll
+largely ignoring this complication and assume that difapproximations to these
+operations are used.
 
 At the end of each section, we'll count the number of floating point operations required to compute various
 expressions. While the derivations do not impose any restrictions on the shape of the layers, for the purpose of this
@@ -528,52 +528,44 @@ inverse is easy to compute:
 \begin{align}
   H & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x \\
   & =
-  \underbrace{
-    \begin{bmatrix}
-      M^{-1}D_x \\ I
-    \end{bmatrix}
-  }_{U^\top}
-  ^\top
   \begin{bmatrix}
-    P^\top D_M D_{zz} P & P^\top D_M D_{xz} \\
-    D_D D_{zx} P        & D_D D_{xx}
+    D_x \\ I
+  \end{bmatrix} ^\top
+  \begin{bmatrix}
+    M^{-\top}P^\top D_M D_{zz} PM^{-1} & M^{-\top} P^\top D_M D_{xz} \\
+    D_D D_{zx} P M^{-1}        & D_D D_{xx}
   \end{bmatrix}
-  \underbrace{
-    \begin{bmatrix}
-      M^{-1}D_x \\ I
-    \end{bmatrix}
-  }_{\equiv U}
+  \begin{bmatrix}
+    D_x \\ I
+  \end{bmatrix}
   \\
   & =
-  \underbrace{D_x^\top M^{-\top} M^{-1} D_x}_{\equiv A} +
+  \underbrace{I+D_x^\top  D_x}_{\equiv A} +
   \underbrace{
-    \begin{bmatrix} M^{-1}D_x \\ I
+    \begin{bmatrix} D_x \\ I
     \end{bmatrix}^\top
   }_{U^\top}
   \underbrace{
     \begin{bmatrix}
-      P^\top D_M D_{zz} P - I & P^\top D_M D_{xz} \\
-      D_D D_{zx} P        & D_D D_{xx}
+      M^{-\top}P^\top D_M D_{zz} PM^{-1} - I & M^{-\top} P^\top D_M D_{xz} \\
+      D_D D_{zx} P M^{-1}        & D_D D_{xx} - I
     \end{bmatrix}
   }_{\equiv Q}
   \underbrace{
-    \begin{bmatrix} M^{-1}D_x \\ I
-    \end{bmatrix}.
-  }_{\equiv U}
+    \begin{bmatrix} D_x \\ I
+    \end{bmatrix}
+  }_{\equiv U}.
 \end{align}
 
 By the Woodbury formula,
 \begin{align}
-  H^{-1} &= \left(A+U^\top Q U\right)^{-1} = A^{-1} - A^{-1} U^\top \left(Q^{-1} + U A^{-1} U^\top\right)^{-1} U A^{-1}.
+  H^{-1} &= \left(A+U^\top Q U\right)^{-1} = A^{-1} - A^{-1} U^\top \left(\underbrace{Q^{-1} + U A^{-1} U^\top}_{\equiv S_H}\right)^{-1} U A^{-1}.
 \end{align}
-This matrix can be efficiently applied to a vector without first forming it.
-First, aince $A^{-1} = D_x^{-1} MM^\top D_x^{-\top}$, multiplying a vector by $A^{-1}$
-is straightforward.  Applying the matrix $U$ is also straightforward since it
-requires scaling the vector by $D_x$, then using back-substitution to apply
-$M^{-1}$.
-
-The complication arises from computing the inverse of $S_H \equiv Q^{-1} + UA^{-1}U^\top$.
-We'll first need to compute and store the inverse of $Q$.  Denoting the blocks
+This matrix can be efficiently applied to a vector without first forming it
+because each of $U$, $A^{-1}$, and $S_H^{-1}$ can be applied efficiently to a vector.
+The matrices $U$ and $A^{-1}$ can be formed and applied efficiently.
+To apply the inverse of $S_H \equiv Q^{-1} + UA^{-1}U^\top$. we'll first 
+compute and store the inverse of $Q$.  Denoting the blocks
 of $Q$ by $Q_{11}, Q_{12}, Q_{21}, Q_{22}$, its inverse is
 \begin{align}
   \label{eq:Q-inverse}
@@ -590,13 +582,13 @@ of $Q$ by $Q_{11}, Q_{12}, Q_{21}, Q_{22}$, its inverse is
 where
 \begin{align}
   \label{eq:Q-blocks-11}
-  Q_{11} &= P^\top D_M D_{zz} P - I, \\
+  Q_{11} &= M^{-\top}P^\top D_M D_{zz} PM^{-1} - I \\
   \label{eq:Q-blocks-12}
-  Q_{12} &= P^\top D_M D_{xz}, \\
+  Q_{12} &= M^{-\top}P^\top D_M D_{xz} \\
   \label{eq:Q-blocks-21}
-  Q_{21} &= D_D D_{zx} P, \\
+  Q_{21} &= D_D D_{zx} P M^{-1} \\
   \label{eq:Q-blocks-22}
-  Q_{22} &= D_D D_{xx}, \\
+  Q_{22} &= D_D D_{xx} - I \\
   S_q &= Q_{11} - Q_{12} Q_{22}^{-1} Q_{21}.
 \end{align}
 Each of these blocks can be computed and stored efficiently. $Q_{12}$ is
@@ -608,12 +600,9 @@ lower-block-diagonal, respectively.
 
 This gives
 \begin{align}
+  \label{eq:S_H}
   S_H &\equiv Q^{-1} + UA^{-1}U^\top \\
-  &= -Q^{-1} - U D_x^{-1}M M^\top D_x^{-\top} U^\top \\
-  &=  -Q^{-1} -
-  \begin{bmatrix}I & M^\top D_x^{-\top} \\ D_x^{-1}M & D_x^{-1}MM^\top D_x^{-\top}
-  \end{bmatrix}  \\
-  &= -
+  &= 
   \begin{bmatrix}
     \tilde{Q}_{11}  + I & \tilde{Q}_{12} + M^\top D_x^{-\top} \\
     \tilde{Q}_{21} + D_x^{-1}M & \tilde{Q}_{22} + D_x^{-1}MM^\top D_x^{-\top} \\
@@ -633,7 +622,7 @@ upper-bi-diagonal  and its lower right block is tri-diagonal.
 While $S_H$ can be computed and stored efficiently, the tri-diagonal block means
 the inverse of $S_H^{-1}$ is dense, and so can't be stored compactly. But this
 inverse can be applied efficiently to a vector without forming it.  We'll use
-the parititioned matrix inverse formula again invert $S_H$:
+the partitioned matrix inverse formula again invert $S_H$:
 \[
   S_H^{-1} \equiv
   \begin{bmatrix}
@@ -672,8 +661,10 @@ Compute $H^{-1} g$ for a given vector $g$ as follows:
   \item \textbf{Compute and store $Q^{-1}$:} This is a $2 \times 2$ block matrix given by Equation (\ref{eq:Q-inverse}).
     Computing this is dominated by computing the inverse of the blocks of $Q_{22}$.
 
+  \item \textbf{Form $S_H$} using Equation (\ref{eq:S_H}).
+
   \item \textbf{Factorize $S_{H_{22}} - S_{H_{21}} S_{H_{11}}^{-1} S_{H_{12}}$ into $G G^\top$:} Since this matrix is a block-tri-diagonal matrix,
-    $G$ is a lower-block-bi-diagonal matrix.
+    $G$ is a block-bi-diagonal matrix.
 
   \item \textbf{Compute $\left[
         \begin{smallmatrix}g_1''\\ g_2''
@@ -682,7 +673,7 @@ Compute $H^{-1} g$ for a given vector $g$ as follows:
     \end{smallmatrix}\right]$:}
     \begin{enumerate}
       \item Compute $g_{22}'' = \tilde{S}_{H_{22}} g_2'$.  This can be accomplished by applying $G^{-\top}$ followed by $G^{-1}$ to $g_1'$, requiring two backward passes.
-      \item Compute $g_{12}'' = \tilde{S}_{H_{12}} g_2'$.  This requiers applying $G^{-\top}$ followed by $G^{-1}$ to $S_{H_{21}} S_{H_{11}}^{-1} g_2'$,
+      \item Compute $g_{12}'' = \tilde{S}_{H_{12}} g_2'$.  This requires applying $G^{-\top}$ followed by $G^{-1}$ to $S_{H_{21}} S_{H_{11}}^{-1} g_2'$,
       \item Compute $g_{21}'' = \tilde{S}_{H_{21}} g_1'$. This requires applying $G^{-\top}$ followed by $G^{-1}$ to $g_1'$, followed by scaling by $S_{H_{12}}$ and $S_{H_{11}}^{-1}$.
       \item Compute $g_{11}'' = \tilde{S}_{H_{11}} g_1'$. This requires just scaling operations.
       \item Compute $g_{1}'' = g_{11}'' + g_{12}''$.
