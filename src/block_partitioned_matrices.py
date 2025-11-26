@@ -31,9 +31,11 @@ One can then multiply A by a vector v with A @ v, or solve the linear system A @
 x = b with x = A.solve(b), or recover the inverse of A with A.invert().
 """
 
+from typing import Sequence, Iterator
+
 import dataclasses as dc
 from functools import singledispatchmethod
-from typing import Sequence
+import numpy as np
 import torch
 
 
@@ -258,6 +260,10 @@ class Diagonal(Stacked):
     def height(self) -> int:
         return sum(b.height for b in self.blocks)
 
+    @property
+    def diagonal_blocks(self) -> Sequence[Matrix]:
+        return self.blocks
+
 
 @Diagonal.__matmul__.register
 def _(self, other: Stacked) -> Stacked:
@@ -372,11 +378,12 @@ class LowerBiDiagonal(Matrix):
         )
 
 
-def IdentityWithLowerDiagonal(lower_blocks: Sequence[Matrix]) -> LowerBiDiagonal:
-    return LowerBiDiagonal(
-        lower_blocks=list(map(Tensor.wrap, lower_blocks)),
-        diagonal_blocks=[Identity()] * (len(lower_blocks) + 1),
-    )
+class IdentityWithLowerDiagonal(LowerBiDiagonal):
+    def __init__(self, lower_blocks: Sequence[Matrix]):
+        super().__init__(
+            lower_blocks=list(map(Tensor.wrap, lower_blocks)),
+            diagonal_blocks=[Identity()] * (len(lower_blocks) + 1),
+        )
 
 
 class UpperBiDiagonal(Matrix):
@@ -462,11 +469,12 @@ class UpperBiDiagonal(Matrix):
         )
 
 
-def IdentityWithUpperDiagonal(upper_blocks: Sequence[Matrix]) -> UpperBiDiagonal:
-    return UpperBiDiagonal(
-        upper_blocks=list(map(Tensor.wrap, upper_blocks)),
-        diagonal_blocks=[Identity()] * (len(upper_blocks) + 1),
-    )
+class IdentityWithUpperDiagonal(UpperBiDiagonal):
+    def __init__(self, upper_blocks: Sequence[Matrix]):
+        super().__init__(
+            upper_blocks=[Tensor.wrap(b) for b in upper_blocks],
+            diagonal_blocks=[Identity()] * (len(upper_blocks) + 1),
+        )
 
 
 class Symmetric2x2(Matrix):
@@ -832,3 +840,106 @@ class SymmetricTriDiagonal(Matrix):
         return (
             Diagonal(self.diagonal_blocks).to_tensor() + L.to_tensor() + L.T.to_tensor()
         )
+
+
+class Generic(Matrix):
+    def __init__(self, blocks: Sequence[Sequence[Matrix]]):
+        # Store references to the blocks as elements of a numpy array
+        # to facilitate index and slicing.
+        self.blocks = np.array(blocks, dtype=object)
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.blocks.shape
+
+    def reshape(self, shape: tuple[int, int]) -> "Generic":
+        return Generic(self.blocks.reshape(shape))
+
+    def __iter__(self) -> Iterator[Matrix]:
+        return iter(self.blocks.flatten())
+
+
+class Tridiagonal(Matrix):
+    def __init__(
+        self,
+        diagonal_blocks: Sequence[Matrix],
+        lower_blocks: Sequence[Matrix],
+        upper_blocks: Sequence[Matrix],
+    ):
+        self.diagonal_blocks = diagonal_blocks
+        self.lower_blocks = lower_blocks
+        self.upper_blocks = upper_blocks
+
+    @staticmethod
+    def from_matrix(matrix: Matrix) -> "Tridiagonal":
+        if isinstance(matrix, Tridiagonal):
+            return matrix
+        if isinstance(matrix, Diagonal):
+            return Tridiagonal(
+                diagonal_blocks=matrix.blocks,
+                lower_blocks=[Zero()] * (len(matrix.blocks) - 1),
+                upper_blocks=[Zero()] * (len(matrix.blocks) - 1),
+            )
+        if isinstance(matrix, LowerBiDiagonal):
+            return Tridiagonal(
+                diagonal_blocks=matrix.diagonal_blocks,
+                lower_blocks=matrix.lower_blocks,
+                upper_blocks=[Zero()] * (len(matrix.diagonal_blocks) - 1),
+            )
+        if isinstance(matrix, UpperBiDiagonal):
+            return Tridiagonal(
+                diagonal_blocks=matrix.diagonal_blocks,
+                lower_blocks=[Zero()] * (len(matrix.diagonal_blocks) - 1),
+                upper_blocks=matrix.upper_blocks,
+            )
+        raise ValueError(
+            f"Input matrix must be subclass of a diagonal class. Got {type(matrix)}"
+        )
+
+    @staticmethod
+    def blockwise_transpose(M: Generic) -> "Tridiagonal":
+        """Compute the blockwise transpose of matrix whose blocks are tridiagonal.
+
+        M be a block matrix. Denote the uv'th element of its ij'th block by M_{ij, uv}.
+        The blockwise transpsoe of M is a block matrix whose uv'th element of its ij'th
+        block is M_{vu, ji}.
+
+        The blocks of M are presumbed to be tridiagonal. That means M_{ij, uv} = 0
+        whenever |u-v| > 1. That means the blockwise tranpose of M satisfies M_{ij} = 0
+        whenever |i-j| > 1. In other words, M is block-tridiagonal.
+        """
+        # Ensure all blocks are tridiagonal.
+        generic_tridiagonal_blocks = []
+        num_diags = None
+        for block in M.flatten():
+            if num_diags is None:
+                num_diags = len(block.diagonal_blocks)
+            if len(block.diagonal_blocks) != num_diags:
+                raise ValueError(
+                    "All diagonal blocks must have the same number of blocks"
+                )
+            generic_tridiagonal_blocks.append(Tridiagonal.from_matrix(block))
+        M = Generic(generic_tridiagonal_blocks).reshape(M.shape)
+
+        return Tridiagonal(
+            diagonal_blocks=[
+                Generic([b.diagonal_blocks[i] for b in M]).reshape(M.shape)
+                for i in range(num_diags)
+            ],
+            lower_blocks=[
+                Generic([b.lower_blocks[i] for b in M]).reshape(M.shape)
+                for i in range(num_diags - 1)
+            ],
+            upper_blocks=[
+                Generic([b.upper_blocks[i] for b in M]).reshape(M.shape)
+                for i in range(num_diags - 1)
+            ],
+        )
+
+    def solve(self, v: Vertical) -> Vertical:
+        pass
+
+    def LDU_decomposition(
+        self,
+    ) -> tuple[IdentityWithLowerDiagonal, Diagonal, IdentityWithUpperDiagonal]:
+        pass
