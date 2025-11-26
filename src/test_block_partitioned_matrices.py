@@ -5,10 +5,13 @@ import torch
 from block_partitioned_matrices import (
     Vertical,
     Diagonal,
+    Generic,
     IdentityWithLowerDiagonal,
     IdentityWithUpperDiagonal,
     Symmetric2x2,
     SymmetricTriDiagonal,
+    Tensor,
+    Tridiagonal,
     UpperBiDiagonal,
     UpperDiagonal,
     LowerDiagonal,
@@ -895,3 +898,56 @@ class TestSymmetricTriDiagonal:
         x = x_block.to_tensor()
 
         torch.testing.assert_close(x, x_ref, rtol=1e-5, atol=1e-5)
+
+
+class TestTridiagonal:
+    def test_blockwise_transpose_collects_band_components(self):
+        def scalar_block(value: float) -> Diagonal:
+            return Diagonal([Tensor.wrap(torch.tensor([[value]]))])
+
+        def make_block(offset: float) -> Tridiagonal:
+            return Tridiagonal(
+                diagonal_blocks=[scalar_block(offset + i) for i in range(3)],
+                lower_blocks=[scalar_block(offset + 10 + i) for i in range(2)],
+                upper_blocks=[scalar_block(offset + 20 + i) for i in range(2)],
+            )
+
+        blocks = [
+            [make_block(1.0), make_block(2.0)],
+            [make_block(3.0), make_block(4.0)],
+        ]
+        M = Generic(blocks)
+
+        transposed = Tridiagonal.blockwise_transpose(M)
+
+        assert len(transposed.diagonal_blocks) == 3
+        assert len(transposed.lower_blocks) == 2
+        assert len(transposed.upper_blocks) == 2
+        assert transposed.diagonal_blocks[0].shape == M.shape
+
+        for diag_idx, diag_generic in enumerate(transposed.diagonal_blocks):
+            assert isinstance(diag_generic, Generic)
+            for row in range(2):
+                for col in range(2):
+                    assert (
+                        diag_generic.blocks[row, col]
+                        is blocks[row][col].diagonal_blocks[diag_idx]
+                    )
+
+        for band_idx, lower_generic in enumerate(transposed.lower_blocks):
+            assert isinstance(lower_generic, Generic)
+            for row in range(2):
+                for col in range(2):
+                    assert (
+                        lower_generic.blocks[row, col]
+                        is blocks[row][col].lower_blocks[band_idx]
+                    )
+
+        for band_idx, upper_generic in enumerate(transposed.upper_blocks):
+            assert isinstance(upper_generic, Generic)
+            for row in range(2):
+                for col in range(2):
+                    assert (
+                        upper_generic.blocks[row, col]
+                        is blocks[row][col].upper_blocks[band_idx]
+                    )

@@ -6,6 +6,10 @@
 \usepackage{authblk}
 
 \newcommand{\R}{\mathop{\mathbb{R}}}
+\newcommand{\K}{\mathcal{K}}
+
+\newtheorem{observation}{Observation}
+\newtheorem{example}{Example}
 
 \geometry{margin=1in}
 
@@ -30,14 +34,14 @@
 The Hessian of a deep net is the matrix of second-order mixed partial derivatives of its loss with respect to its
 parameters. Decades ago, when deep nets had only hundreds or thousands of parameters, the Hessian matrix could be
 inverted to implement optimizers that converged much faster than gradient descent \cite{Watrous1987, Barnard1992}.
-However, much larger modern deep nets, using the Hessian has become increasingly less practical: The Hessian of a model
+However, for much larger modern deep nets, using the Hessian has become increasingly less practical: The Hessian of a model
 with a billion parameters would have a quintillion entries, which is far larger than can be stored, multiplied,
 factorized, or inverted, even in the largest data centers. A common workaround is to approximate the Hessian as a
 low-rank matrix \cite{Webb1988, lbfgs-deep-net} or as a diagonal matrix \cite{becker-lecun-89, adagrad, adam}. Such
-approximations makes it easier to apply the inverse of the Hessian to a vector.
+approximations make it easier to apply the inverse of the Hessian to a vector.
 
 It has long been known that the product of the Hessian with a fixed vector (the so-called Hessian-vector product) can
-be computed in time and storage that scales linearly with with the number of parameters in the network. This is
+be computed in time and storage that scales linearly with the number of parameters in the network. This is
 dramatically less than the cubic scaling of the naive algorithm that first computes the Hessian matrix and then
 multiplies it by the vector. The trick, which is due to Pearlmutter \cite{pearlmutter94}, is to modify the original
 network to cause the gradient of the modified network to become the desired Hessian-vector product. Given a way to
@@ -104,7 +108,7 @@ We'll assume the first and partial derivatives of each layer with respect to its
 parameters and its inputs exist. This poses some complications with ReLU
 activations and other non-differentiable operations in modern networks. Notably,
 for the Hessian to be symmetric, it must be differentiable everywhere.  We'll
-largely ignoring this complication and assume that difapproximations to these
+largely ignore this complication and assume that differentiable approximations to these
 operations are used.
 
 At the end of each section, we'll count the number of floating point operations required to compute various
@@ -179,8 +183,6 @@ The matrix $M$ is block bi-diagonal. Its diagonal entries are identity matrices,
 gradient of the intermediate activations with respect to the layer's parameters. The matrix $D_x$ is block diagonal,
 with the block as the derivative of each layer's activations with respect to its inputs. $M$ is invertible because the
 spectrum of a triangular matrix can be read off its diagonal, which in this case is all ones.
-
-The number of operations required to compute
 
 \section{The Hessian}
 
@@ -518,8 +520,8 @@ operations involved in Pearlmutter's trick to compute the Hessian-vector
 product.
 
 It's tempting to use this insight to use Krylov methods to solve systems of the form $H x = b$ without forming $H$.
-This would require compute $H g$ some number of times that depends on the condition number of $H$. However, the next
-section shows how to compute $H^{-1} b$ with roughly only as many operations as are needed to comptue $H g$.
+This would require computing $H g$ some number of times that depends on the condition number of $H$. However, the next
+section shows how to compute $H^{-1} b$ with roughly only as many operations as are needed to compute $H g$.
 
 \section{The inverse of the Hessian}
 
@@ -555,7 +557,7 @@ Collecting these three linear equations gives us a unified system
       -D_x               & M                    & 0        \\
       -P^\top D_M D_{xz} & -P^\top D_M D_{zz} P & M^\top
     \end{bmatrix}
-  }_{\mathcal{K}}
+  }_{\K}
   \begin{bmatrix}
     x \\ y \\ z
   \end{bmatrix}
@@ -565,20 +567,90 @@ Collecting these three linear equations gives us a unified system
   \end{bmatrix}.
 \end{equation}
 
-Finding $x = H^{-1}g$ is equivalent to solving this following block-linear
-system for $x, y, z$.  The matrix $\mathcal{K}$ has dimension roughly $(Lp +
-  2La) \times (Lp + 2La)$.  $D_D D_{xx}$, $D_D D_{zx} P$, $P^\top D_M D_{xz}$,
-$P^\top D_M D_{zz} P$, and $D_x$ are block-diagonal or block-off-diagonal, and
-$M$ is block-bidiagonal.
+Finding $x = H^{-1}g$ is equivalent to solving this block-linear system and
+reporting the resulting $x$. The benefit of doing this is that
+this system can be pivoted into a block-tri-diagonal system, which can be solved more
+efficiently than Gaussian elimination on $\K$ or $H$.
 
-If we reorder the variables layer-by-layer as $(x_1, y_1, z_1, \dots, x_L, y_L,
-  z_L)$, the matrix $\mathcal{K}$ becomes a block-banded matrix with bandwidth
-proportional to $(p+a)$.  Solving a linear system with a banded matrix of size
-$N$ and bandwidth $w$ requires $O(N w^2)$ operations. Here, $N \propto L$ and $w
-  \propto (p+a)$. Therefore, we can compute $H^{-1}g$ in $O(L(p+a)^3)$ time. This
-confirms that for tall-skinny networks, inverting the Hessian is linear in the
-depth of the network.
+The pivoting we'll apply reorders the blocks of the variables $x,y,z$ from
+$x_1,\ldots,x_L, y_1,\ldots, y_L, z_1,\ldots, z_L$ to
+$x_1,y_1,z_1,\dots,x_L,y_L,z_L$.  To see why such a pivoting results in a
+simpler to solve system, denote the $ij$th block of $\K$ by $\K_{ij}$ and the
+$uv$th sub-block of this block by $\K_{ij,uv}$.  Let $x$ denote a vector
+conformant with $\K$, with $x_j$ denoting the column vector that multiplies each
+block $\K_{\cdot j}$ and $x_{jv}$ denoting the $v$th sub-block of $x_j$, which
+multiplies $\K_{\cdot j,\cdot v}$.  We say that $x$ is $j$-major because as we
+traverse the entries of $x$ from top to bottom, the index $j$ increments more
+slowly than the $v$ index.
 
+Denote by $\Pi$ the permutation that transposes the
+blocks with the sub-blocks.  Applying this permutation matrix $\Pi$ to $x$ reorders
+it from $j$-major to $d$-major. Applying it to the rows and columns
+columns of $\K$ results in a block matrix $\K' \equiv \Pi
+  \K \Pi^\top$ that satisfies $\K_{ij,uv} = \K'_{uv,ij}$.
+
+\begin{observation}
+  The permutation $\Pi$ is involutory, meaning $\Pi^{-1} =\Pi$.
+\end{observation}
+
+This implies that  to solve a system $\K x = b$, we can instead solve $\K' x' =
+  \Pi b$ for $x'$, then report $x = \Pi x'$.
+
+This permutation reduces the bandwidth of certain block matrices:
+
+\begin{observation}
+  Suppose each block of $\K$ is banded with bandwidth $w$. Then
+  $\K'$  is block-banded with bandwidth $w$.
+\end{observation}
+
+Notably, even when $\K$ has very large bandwidth, $\K'$ will have bandwidth no
+greater than that of the blocks of $\K$.  Section \ref{sec:pivoting-examples}
+illustrates this point with some examples.
+
+The blocks in $\K$ are either block-diagonal, block-upper-bi-diagonal, or
+block-lower-bi-diagonal, so $\K'$ is at most block-tri-diagonal:
+\[
+  \K' = \begin{bmatrix}
+    \begin{bmatrix}
+      K_{11,11} & K_{12,11} & K_{13,11} \\
+      K_{21,11} & K_{22,11} & K_{23,11} \\
+      K_{31,11} & K_{32,11} & K_{33,11} \\
+    \end{bmatrix} & \begin{bmatrix}
+                      K_{11,12} & K_{12,12} & K_{13,12} \\
+                      K_{21,12} & K_{22,12} & K_{23,12} \\
+                      K_{31,12} & K_{32,12} & K_{33,12} \\
+                    \end{bmatrix}                                                                           \\
+    \begin{bmatrix}
+      K_{11,21} & K_{12,21} & K_{13,21} \\
+      K_{21,21} & K_{22,21} & K_{23,21} \\
+      K_{31,21} & K_{32,21} & K_{33,21} \\
+    \end{bmatrix} & \begin{bmatrix}
+                      K_{11,22} & K_{12,22} & K_{13,22} \\
+                      K_{21,22} & K_{22,22} & K_{23,22} \\
+                      K_{31,22} & K_{32,22} & K_{33,22} \\
+                    \end{bmatrix} &
+    \begin{bmatrix}
+      K_{11,23} & K_{12,23} & K_{13,23} \\
+      K_{21,23} & K_{22,23} & K_{23,23} \\
+      K_{31,23} & K_{32,23} & K_{33,23} \\
+    \end{bmatrix}                                                                                           \\
+                                         & \begin{bmatrix}
+                                             K_{11,32} & K_{12,32} & K_{13,32} \\
+                                             K_{21,32} & K_{22,32} & K_{23,32} \\
+                                             K_{31,32} & K_{32,32} & K_{33,32} \\
+                                           \end{bmatrix} & \begin{bmatrix}
+                                                             K_{11,33} & K_{12,33} & K_{13,33} \\
+                                                             K_{21,33} & K_{22,33} & K_{23,33} \\
+                                                             K_{31,33} & K_{32,33} & K_{33,33} \\
+                                                           \end{bmatrix} & \begin{bmatrix}
+                                                                             K_{11,34} & K_{12,34} & K_{13,34} \\
+                                                                             K_{21,34} & K_{22,34} & K_{23,34} \\
+                                                                             K_{31,34} & K_{32,34} & K_{33,34} \\
+                                                                           \end{bmatrix}
+    \\
+                                         & \ddots                               & \ddots                               & \ddots \\
+  \end{bmatrix}
+\]
 
 \bibliographystyle{plain}
 \bibliography{hessian}
@@ -664,5 +736,118 @@ into Equation (\ref{eq:pearlmutter-2}) and solving for $b'$ gives
   \nabla_x^2 z_L \cdot v = D_x^\top M^{-\top} P D_M  \left(D_{zz} M^{-1} D_x v + D_{xz} v\right) +  D_D \left(D_{zx} P M^{-1} D_x v + D_{xx} v\right).
 \end{equation}
 This coincides with Equation (\ref{eq:hessian}), showing that the two algorithms are equivalent.
+
+\section{Examples of Pivoting Matrices to Block-Banded Form}
+\label{sec:pivoting-examples}
+
+\begin{example}
+  Suppose each block $D_{ij}$ of $\K$ is diagonal. Then the full $4\times4$ matrix is
+  \[
+    \K = \begin{bmatrix}
+      D_{11} & D_{12} \\
+      D_{21} & D_{22}
+    \end{bmatrix} =
+    \begin{bmatrix}
+      a & 0 & c & 0 \\
+      0 & b & 0 & d \\
+      e & 0 & g & 0 \\
+      0 & f & 0 & h
+    \end{bmatrix},
+  \]
+  where
+  \[
+    D_{11} = \begin{bmatrix} a & 0 \\ 0 & b \end{bmatrix}, \quad
+    D_{12} = \begin{bmatrix} c & 0 \\ 0 & d \end{bmatrix}, \quad
+    D_{21} = \begin{bmatrix} e & 0 \\ 0 & f \end{bmatrix}, \quad
+    D_{22} = \begin{bmatrix} g & 0 \\ 0 & h \end{bmatrix}.
+  \]
+
+  The vector $x = \begin{bmatrix} x_1^1 \\ x_1^2 \\ x_2^1 \\ x_2^2
+    \end{bmatrix}$ (in $j$-major order) is reordered by $\Pi$ into
+  $\begin{bmatrix} x_1^1 \\ x_2^1 \\ x_1^2 \\ x_2^2 \end{bmatrix}$ ($v$-major order).
+  Then
+  \[\Pi \K \Pi =
+    \begin{bmatrix}
+      \hspace{0.3em}
+      \begin{smallmatrix}
+        \rule{0pt}{2.2ex}
+        D_{11, 11} & D_{12, 11} \\
+        D_{21, 11} & D_{21, 11}
+        \rule[-1.2ex]{0pt}{0pt}
+      \end{smallmatrix}
+      \hspace{0.8em} &
+      \hspace{0.3em}
+      \begin{smallmatrix}
+        \rule{0pt}{2.2ex}
+        D_{11, 12} & D_{12, 12} \\
+        D_{21, 12} & D_{21, 12}
+        \rule[-1.2ex]{0pt}{0pt}
+      \end{smallmatrix}
+      \hspace{0.3em}   \\
+      \hspace{0.3em}
+      \begin{smallmatrix}
+        \rule{0pt}{2.2ex}
+        D_{11, 21} & D_{12, 21} \\
+        D_{21, 21} & D_{21, 21}
+        \rule[-1.2ex]{0pt}{0pt}
+      \end{smallmatrix}
+      \hspace{0.8em} &
+      \hspace{0.3em}
+      \begin{smallmatrix}
+        \rule{0pt}{2.2ex}
+        D_{11, 22} & D_{12, 22} \\
+        D_{21, 22} & D_{21, 22}
+        \rule[-1.2ex]{0pt}{0pt}
+      \end{smallmatrix}
+      \hspace{0.3em}
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+      a & c & 0 & 0 \\
+      e & g & 0 & 0 \\
+      0 & 0 & b & d \\
+      0 & 0 & f & h
+    \end{bmatrix}
+  \]
+  Notice that the resulting matrix has become block-diagonal, whereas $\K$ had a bandwidth of 2.
+\end{example}
+
+\begin{example}
+  Now endow each block $D_{ij}$ with an upper off-diagonal entry:
+  \[
+    D_{11} = \begin{bmatrix} a & \alpha \\ 0 & b \end{bmatrix}, \quad
+    D_{12} = \begin{bmatrix} c & \beta \\ 0 & d \end{bmatrix}, \quad
+    D_{21} = \begin{bmatrix} e & \delta \\ 0 & f \end{bmatrix}, \quad
+    D_{22} = \begin{bmatrix} g & \gamma \\ 0 & h \end{bmatrix}.
+  \]
+  The full $4\times4$ matrix is
+  \[
+    \K = \begin{bmatrix}
+      D_{11} & D_{12} \\
+      D_{21} & D_{22}
+    \end{bmatrix} =
+    \begin{bmatrix}
+      a & \alpha & c & \beta  \\
+      0 & b      & 0 & d      \\
+      e & \delta & g & \gamma \\
+      0 & f      & 0 & h
+    \end{bmatrix}.
+  \]
+
+  After applying the same permutation $\Pi$ as before, we obtain
+  \[
+    \Pi \K \Pi^\top =
+    \begin{bmatrix}
+      a & c & \alpha & \beta  \\
+      e & g & \delta & \gamma \\
+      0 & 0 & b      & d      \\
+      0 & 0 & f      & h
+    \end{bmatrix}.
+  \]
+  The off-diagonal entries in each block $D_{ij}$ are collected in
+  the upper-right block of the permuted matrix. The permuted matrix
+  is block-banded with bandwidth 2, with a dense upper-right block and a sparse
+  lower-left block.
+\end{example}
 
 \end{document}
