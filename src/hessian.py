@@ -251,8 +251,8 @@ class SequenceOfBlocks(nn.Module):
         """
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
 
-        M = bpm.IdentityWithLowerDiagonal((-Dz).blocks[1:])
-        P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.blocks])
+        M = bpm.IdentityWithLowerDiagonal((-Dz).flat[1:])
+        P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.flatten()])
 
         # Compute equation \ref{eq:hessian} from hessian.tex:
         # H v = D_D D_xx v + D_D D_zx P M⁻¹ Dₓ v
@@ -280,7 +280,7 @@ class SequenceOfBlocks(nn.Module):
             [
                 [DD_Dxx, DD_Dzx @ P, Dx.T],
                 [-Dx, M, bpm.Zeros()],
-                [-P.T @ DD_Dzx.T, -P.T @ DM_Dzz & P, M.T],
+                [-P.T @ DD_Dzx.T, -P.T @ DM_Dzz @ P, M.T],
             ]
         )
         K_pivoted = bpm.Tridiagonal.from_generic(K)
