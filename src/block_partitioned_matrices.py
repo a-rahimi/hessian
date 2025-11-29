@@ -50,12 +50,25 @@ class Matrix:
     def solve(self, rhs: "Matrix") -> "Matrix":
         raise NotImplementedError
 
+    def __matmul__(self, other: "Matrix") -> "Matrix":
+        raise NotImplementedError
+
+    def __add__(self, other: "Matrix") -> "Matrix":
+        raise NotImplementedError
+
+    def __sub__(self, other: "Matrix") -> "Matrix":
+        raise NotImplementedError
+
     @property
     def width(self) -> int:
         raise NotImplementedError
 
     @property
     def height(self) -> int:
+        raise NotImplementedError
+
+    @property
+    def T(self) -> "Matrix":
         raise NotImplementedError
 
 
@@ -79,6 +92,14 @@ class Tensor(torch.Tensor, Matrix):
     @singledispatchmethod
     def __matmul__(self, other: Matrix) -> Matrix:
         return Tensor.wrap(torch.Tensor.__matmul__(self, other))
+
+    @singledispatchmethod
+    def __add__(self, other: Matrix) -> Matrix:
+        return Tensor.wrap(torch.Tensor.__add__(self, other))
+
+    @singledispatchmethod
+    def __sub__(self, other: Matrix) -> Matrix:
+        return Tensor.wrap(torch.Tensor.__sub__(self, other))
 
     @property
     def width(self) -> int:
@@ -114,6 +135,9 @@ class Identity(Matrix):
 
     def to_tensor(self) -> torch.Tensor:
         return torch.eye(self.dimension)
+
+    def __eq__(self, other: Matrix) -> bool:
+        return isinstance(other, Identity) and self.dimension == other.dimension
 
     @property
     def T(self) -> "Identity":
@@ -153,6 +177,17 @@ class Zero(Matrix):
     def solve(self, rhs: "Matrix") -> "Matrix":
         raise ValueError("Zero matrix is not invertible")
 
+    def __eq__(self, other: Matrix) -> bool:
+        return isinstance(other, Zero) and self.shape == other.shape
+
+    def __add__(self, other: Matrix) -> Matrix:
+        if other.width != self.width or other.height != self.height:
+            raise ValueError(f"Shape mismatch {self} vs {other.height} x {other.width}")
+        return other
+
+    def __sub__(self, other: Matrix) -> Matrix:
+        return self.__add__(other)
+
     @property
     def width(self) -> int:
         return self.shape[1]
@@ -165,7 +200,26 @@ class Zero(Matrix):
     def T(self) -> "Zero":
         if not self.shape:
             return Zero()
-        return Zero(shape=(self.shape[1], self.shape[0]))
+        return Zero((self.shape[1], self.shape[0]))
+
+
+@Tensor.__matmul__.register
+def _(self, other: Zero) -> Tensor:
+    if self.width != other.height:
+        raise ValueError(f"Shape mismatch {self} vs {other.height} x {other.width}")
+    return Zero((self.shape[0], other.width))
+
+
+@Tensor.__add__.register
+def _(self, other: Zero) -> Tensor:
+    if self.width != other.width or self.height != other.height:
+        raise ValueError(f"Shape mismatch {self} vs {other.height} x {other.width}")
+    return self
+
+
+@Tensor.__sub__.register
+def _(self, other: Zero) -> Tensor:
+    return self.__add__(other)
 
 
 def reshape_to_2d_list(lst: Sequence[Any], shape: tuple[int, int]) -> list[list[Any]]:
@@ -189,14 +243,14 @@ class Ragged(Matrix):
 
     @singledispatchmethod
     def __add__(self, other: Matrix) -> Matrix:
-        raise NotImplementedError
+        raise NotImplementedError  # Special cases implemented below.
 
     @singledispatchmethod
     def __sub__(self, other: Matrix) -> Matrix:
-        raise NotImplementedError
+        raise NotImplementedError  # Special cases implemented below.
 
     def flatten(self) -> Iterator[Matrix]:
-        "Iterate over all the blocks in the matrix."
+        "Iterate over all the blocks in the matrix in row-major order."
         for row in self.blocks:
             yield from row
 
@@ -212,7 +266,7 @@ class Ragged(Matrix):
 
     def apply_binary_operation(
         self, other: "Ragged", op: Callable[[Matrix, Matrix], Matrix]
-    ) -> list[Matrix]:
+    ) -> "Ragged":
         if len(self.blocks) != len(other.blocks):
             raise ValueError("Number of rows in the operands must match")
         result_blocks = []
@@ -899,11 +953,10 @@ def _(self, _: Identity) -> Diagonal:
 def _(self, other: Diagonal) -> "SymmetricTriDiagonal":
     if len(self.diagonal_blocks) != len(other.blocks):
         raise ValueError("Number of blocks in the operands must match")
+    # T + D just adds to the diagonal blocks.
     return SymmetricTriDiagonal(
         lower_blocks=self.lower_blocks,
-        diagonal_blocks=[
-            b + other_b for b, other_b in zip(self.diagonal_blocks, other.flatten())
-        ],
+        diagonal_blocks=(Diagonal(self.diagonal_blocks) + other).flat,
     )
 
 
@@ -939,13 +992,10 @@ class LowerDiagonal(LowerBiDiagonal):
         if other.num_blocks() != len(self.diagonal_blocks):
             raise ValueError("Number of blocks in the operands must match")
 
-        # TODO: Write this as the product of two Diagonals after some surgey on the rhs.
+        # L v amounts to L[:] v[:-1], with a zero tacked on at the start.
         return Vertical(
-            [torch.zeros(self.height_leading_zeros, other.width)]
-            + [
-                b @ other_block
-                for b, other_block in zip(self.lower_blocks, other.flat[:-1])
-            ],
+            [Zero((self.height_leading_zeros, other.width))]
+            + (Diagonal(self.lower_blocks) @ Vertical(other.flat[:-1])).flat,
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -973,13 +1023,10 @@ def _(self, other: Diagonal) -> "LowerDiagonal":
     if len(other.num_blocks()) != len(self.diagonal_blocks):
         raise ValueError("Number of blocks in the operands must match")
 
-    # TODO: Write this as the product of two Diagonals after some surgey on the rhs.
+    # L D is lower diagonal, with entries L[:] D[:-1].
     return LowerDiagonal(
         height_leading_zeros=self.height_leading_zeros,
-        lower_blocks=[
-            b @ other_block
-            for b, other_block in zip(self.lower_blocks, other.flat[:-1])
-        ],
+        lower_blocks=(Diagonal(self.lower_blocks) @ Diagonal(other.flat[:-1])).flat,
         width_trailing_zeros=other.flat[-1].shape[1],
     )
 
@@ -988,11 +1035,10 @@ def _(self, other: Diagonal) -> "LowerDiagonal":
 def _(self, other: LowerDiagonal) -> Diagonal:
     if self.num_blocks() != len(other.diagonal_blocks):
         raise ValueError("Number of blocks in the operands must match")
+    # D L is lower diagonal, with entries D[1:] L[:], and zero tacked on at
     return LowerDiagonal(
         height_leading_zeros=self.flat[0].height,
-        lower_blocks=[
-            b @ other_block for b, other_block in zip(self.flat[1:], other.lower_blocks)
-        ],
+        lower_blocks=(Diagonal(self.flat[1:]) @ Diagonal(other.lower_blocks)).flat,
         width_trailing_zeros=other.width_trailing_zeros,
     )
 
@@ -1035,12 +1081,10 @@ class UpperDiagonal(UpperBiDiagonal):
     def _(self, other: Diagonal) -> Matrix:
         if other.num_blocks() != len(self.diagonal_blocks):
             raise ValueError("Number of blocks in the operands must match")
+        # U D is upper diagonal, with entries U[:] D[1:]
         return UpperDiagonal(
             width_leading_zeros=other.flat[0].shape[1],
-            upper_blocks=[
-                b @ other_block
-                for b, other_block in zip(self.upper_blocks, other.flat[1:])
-            ],
+            upper_blocks=(Diagonal(self.upper_blocks) @ Diagonal(other.flat[1:])).flat,
             height_trailing_zeros=self.height_trailing_zeros,
         )
 
@@ -1048,23 +1092,22 @@ class UpperDiagonal(UpperBiDiagonal):
     def _(self, other: Vertical) -> Vertical:
         if other.num_blocks() != len(self.diagonal_blocks):
             raise ValueError("Number of blocks in the operands must match")
-        # TODO: Write this as the product of two Diagonals after some surgey on the rhs.
+
+        # U v amounts U[:] v[1:], with a zero tacked on at the end.
         return Vertical(
-            [
-                b @ other_block
-                for b, other_block in zip(self.upper_blocks, other.flat[1:])
-            ]
-            + [torch.zeros(self.height_trailing_zeros, other.width)]
+            (Diagonal(self.upper_blocks) @ Vertical(other.flat[1:])).flat
+            + [Zero((self.height_trailing_zeros, other.width))]
         )
 
     @__matmul__.register
     def _(self, other: LowerDiagonal) -> Diagonal:
         if other.num_blocks() != self.num_blocks():
             raise ValueError("Number of blocks in the operands must match")
-        # TODO: Write this as the product of two Diagonals after some surgey on the rhs.
+        # U L is lower diagonal, with entries U[:] L[:], and zero tacked on at
+        # the end.
         return Diagonal(
-            [b @ other_b for b, other_b in zip(self.upper_blocks, other.lower_blocks)]
-            + [torch.zeros(self.height_trailing_zeros, other.width_trailing_zeros)]
+            (Diagonal(self.upper_blocks) @ Diagonal(other.lower_blocks)).flat
+            + [Zero((self.height_trailing_zeros, other.width_trailing_zeros))]
         )
 
     def to_tensor(self) -> torch.Tensor:
@@ -1089,12 +1132,10 @@ class UpperDiagonal(UpperBiDiagonal):
 def _(self, other: UpperDiagonal) -> Diagonal:
     if self.num_blocks() != len(other.diagonal_blocks):
         raise ValueError("Number of blocks in the operands must match")
-    # TODO: Write this as the product of two Diagonals after some surgey on the rhs.
+    # D U is upper diagonal, with entries D[:-1] U[:].
     return UpperDiagonal(
         width_leading_zeros=other.width_leading_zeros,
-        upper_blocks=[
-            b @ other_b for b, other_b in zip(self.flat[:-1], other.upper_blocks)
-        ],
+        upper_blocks=(Diagonal(self.flat[:-1]) @ Diagonal(other.upper_blocks)).flat,
         height_trailing_zeros=self.flat[-1].height,
     )
 
@@ -1103,10 +1144,8 @@ def _(self, other: UpperDiagonal) -> Diagonal:
 def _(self, other: UpperDiagonal) -> Diagonal:
     if len(other.blocks) != len(self.blocks):
         raise ValueError("Number of blocks in the operands must match")
+    # L U is diagonal, with entries L[:] U[:].
     return Diagonal(
-        [torch.zeros(self.height_leading_zeros, other.width_leading_zeros)]
-        + [
-            b @ other_block
-            for b, other_block in zip(self.lower_blocks, other.upper_blocks)
-        ]
+        [Zero((self.height_leading_zeros, other.width_leading_zeros))]
+        + (Diagonal(self.lower_blocks) @ Diagonal(other.upper_blocks)).flat
     )

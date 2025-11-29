@@ -17,9 +17,23 @@ from block_partitioned_matrices import (
     LowerDiagonal,
     LowerBiDiagonal,
     Identity,
+    Zero,
     reshape_to_2d_list,
     downshifting_matrix,
 )
+
+
+class TestTensor:
+    def test_eq_identity(self):
+        assert Identity(2) == Identity(2)
+
+    def test_eq_zero(self):
+        assert Zero((2, 2)) == Zero((2, 2))
+
+    def test_eq_zero_with_tensor(self):
+        torch.testing.assert_close(
+            Zero((2, 2)).to_tensor(), Tensor.wrap(torch.zeros(2, 2)).to_tensor()
+        )
 
 
 class TestGeneric:
@@ -616,7 +630,7 @@ class TestDownshift:
         Pv = P @ v
         assert Pv.num_blocks() == 3
 
-        torch.testing.assert_close(Pv.flat[0], torch.zeros(10, 1))
+        assert Pv.flat[0] == Zero((10, 1))
         torch.testing.assert_close(Pv.flat[1], v.flat[0])
         torch.testing.assert_close(Pv.flat[2], v.flat[1])
 
@@ -626,7 +640,7 @@ class TestDownshift:
         assert PTv.num_blocks() == 3
         torch.testing.assert_close(PTv.flat[0], v.flat[1])
         torch.testing.assert_close(PTv.flat[1], v.flat[2])
-        torch.testing.assert_close(PTv.flat[2], torch.zeros(4, 1))
+        assert PTv.flat[2] == Zero((4, 1))
 
     def test_down_then_upshift(self, v):
         P = downshifting_matrix(10, [b.shape[0] for b in v.flatten()])
@@ -634,7 +648,7 @@ class TestDownshift:
         assert r.num_blocks() == 3
         torch.testing.assert_close(r.flat[0], v.flat[0])
         torch.testing.assert_close(r.flat[1], v.flat[1])
-        torch.testing.assert_close(r.flat[2], torch.zeros(4, 1))
+        assert r.flat[2] == Zero((4, 1))
 
     def test_PTP(self, v):
         P = downshifting_matrix(10, [b.shape[0] for b in v.flatten()])
@@ -642,7 +656,7 @@ class TestDownshift:
         rr = (P.T @ P) @ v
         assert r.num_blocks() == rr.num_blocks()
         for br, brr in zip(r.flatten(), rr.flatten()):
-            torch.testing.assert_close(br, brr)
+            torch.testing.assert_close(br.to_tensor(), brr.to_tensor())
 
     def test_PPT_blocks(self, v):
         P = downshifting_matrix(2, [b.shape[0] for b in v.flatten()])
@@ -661,7 +675,7 @@ class TestDownshift:
         rr = (P @ P.T) @ v
         assert r.num_blocks() == rr.num_blocks()
         for br, brr in zip(r.flatten(), rr.flatten()):
-            torch.testing.assert_close(br, brr)
+            torch.testing.assert_close(br.to_tensor(), brr.to_tensor())
 
     def test_PTDP(self):
         P = downshifting_matrix(2, [3, 4, 5])
@@ -671,7 +685,7 @@ class TestDownshift:
         rr = (P.T @ D) @ P
         assert r.num_blocks() == rr.num_blocks()
         for br, brr in zip(r.flatten(), rr.flatten()):
-            torch.testing.assert_close(br, brr)
+            torch.testing.assert_close(br.to_tensor(), brr.to_tensor())
 
 
 class TestTransposeRelationship:
