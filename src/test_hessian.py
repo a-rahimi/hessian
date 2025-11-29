@@ -282,12 +282,12 @@ class TestLossLayer:
         Test that forward() returns a scalar despite num_classes=10.
         """
         # Verify output is a scalar
-        assert (
-            output.ndim == 0
-        ), f"Output should be scalar (0-dim), got {output.ndim}-dim"
-        assert (
-            output.numel() == 1
-        ), f"Output should have 1 element, got {output.numel()}"
+        assert output.ndim == 0, (
+            f"Output should be scalar (0-dim), got {output.ndim}-dim"
+        )
+        assert output.numel() == 1, (
+            f"Output should have 1 element, got {output.numel()}"
+        )
 
         # Verify it's a valid loss value (non-negative for cross-entropy)
         assert output.item() >= 0, "Cross-entropy loss should be non-negative"
@@ -322,13 +322,15 @@ class TestLossLayer:
         assert output.ndim == 0
         output.backward()
 
-        assert (
-            loss_layer.linear.weight.grad is not None
-        ), "weight.grad should exist after backward()"
+        assert loss_layer.linear.weight.grad is not None, (
+            "weight.grad should exist after backward()"
+        )
         assert loss_layer.linear.weight.grad.shape == (
             num_classes,
             input_dim,
-        ), f"Expected weight.grad shape ({num_classes}, {input_dim}), got {loss_layer.linear.weight.grad.shape}"
+        ), (
+            f"Expected weight.grad shape ({num_classes}, {input_dim}), got {loss_layer.linear.weight.grad.shape}"
+        )
 
     def test_functional_call_jacrev_linear_weight_shape(
         self, z_in, loss_layer, num_classes, input_dim, target
@@ -376,17 +378,23 @@ class TestLossLayer:
         assert derivs.DD_Dxx.shape == (
             num_params,
             num_params,
-        ), f"DD_Dxx shape should be ({num_params}, {num_params}), got {derivs.DD_Dxx.shape}"
+        ), (
+            f"DD_Dxx shape should be ({num_params}, {num_params}), got {derivs.DD_Dxx.shape}"
+        )
 
         assert derivs.DD_Dzx.shape == (
             num_params,
             input_dim,
-        ), f"DD_Dzx shape should be ({num_params}, {input_dim}), got {derivs.DD_Dzx.shape}"
+        ), (
+            f"DD_Dzx shape should be ({num_params}, {input_dim}), got {derivs.DD_Dzx.shape}"
+        )
 
         assert derivs.DM_Dzz.shape == (
             input_dim,
             input_dim,
-        ), f"DM_Dzz shape should be ({input_dim}, {input_dim}), got {derivs.DM_Dzz.shape}"
+        ), (
+            f"DM_Dzz shape should be ({input_dim}, {input_dim}), got {derivs.DM_Dzz.shape}"
+        )
 
 
 class TestSequenceOfBlocks:
@@ -435,17 +443,17 @@ class TestSequenceOfBlocks:
             assert hasattr(layer, "dloss_dout"), f"Layer {layer_idx} missing dloss_dout"
             assert layer.dloss_dout is not None, f"Layer {layer_idx} dloss_dout is None"
             assert layer.output is not None, f"Layer {layer_idx} output not cached"
-            assert (
-                layer.dloss_dout.shape == layer.output.shape
-            ), f"Layer {layer_idx} dloss_dout shape {layer.dloss_dout.shape} != output shape {layer.output.shape}"
+            assert layer.dloss_dout.shape == layer.output.shape, (
+                f"Layer {layer_idx} dloss_dout shape {layer.dloss_dout.shape} != output shape {layer.output.shape}"
+            )
 
         # Check loss layer as well (scalar loss)
         assert hasattr(model.loss_layer, "dloss_dout")
         assert model.loss_layer.dloss_dout is not None
         # loss is scalar; grad shape should match loss shape
-        assert (
-            model.loss_layer.dloss_dout.shape == loss.shape
-        ), f"Loss layer dloss_dout shape {model.loss_layer.dloss_dout.shape} != loss shape {loss.shape}"
+        assert model.loss_layer.dloss_dout.shape == loss.shape, (
+            f"Loss layer dloss_dout shape {model.loss_layer.dloss_dout.shape} != loss shape {loss.shape}"
+        )
 
         # It should in fact be 1.
         assert torch.allclose(model.loss_layer.dloss_dout, torch.ones_like(loss))
@@ -460,10 +468,10 @@ class TestSequenceOfBlocks:
         """
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = model.derivatives(z_in, target)
 
-        M = bpm.IdentityWithLowerDiagonal((-Dz).blocks[1:])
+        M = bpm.IdentityWithLowerDiagonal((-Dz).flat[1:])
         e_L = bpm.Vertical([torch.zeros(layer.output.numel(), 1) for layer in model])
-        assert e_L.blocks[-1].numel() == 1
-        e_L.blocks[-1][:] = 1.0
+        assert e_L.flat[-1].numel() == 1
+        e_L.flat[-1][:] = 1.0
         dloss_dx = Dx.T @ M.T.solve(e_L)
         grad_flat = dloss_dx.to_tensor().flatten()
 
@@ -520,9 +528,9 @@ class TestSequenceOfBlocks:
         hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
         H = hessian.flatten_2d_pytree(hessian_dict)
         singular_values = torch.linalg.svd(H).S
-        assert (
-            singular_values[0] / singular_values[-1] < 1e6
-        ), "Hessian is not invertible: singular_values = " + str(singular_values)
+        assert singular_values[0] / singular_values[-1] < 1e6, (
+            "Hessian is not invertible: singular_values = " + str(singular_values)
+        )
 
     def test_hessian_inverse_is_inverse_of_hessian(self, model, z_in, target):
         """

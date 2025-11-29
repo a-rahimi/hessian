@@ -17,8 +17,83 @@ from block_partitioned_matrices import (
     LowerDiagonal,
     LowerBiDiagonal,
     Identity,
+    reshape_to_2d_list,
     downshifting_matrix,
 )
+
+
+class TestGeneric:
+    @pytest.fixture
+    def blocks_ragged(self):
+        return [
+            [Tensor(2, 2), Tensor(2, 3)],
+            [Tensor(3, 2), Tensor(3, 3)],
+        ]
+
+    @pytest.fixture
+    def blocks_all_same_widths(self):
+        return [
+            [Tensor(2, 3), Tensor(2, 3)],
+            [Tensor(2, 3), Tensor(2, 3)],
+        ]
+
+    def test_reshape_returns_expected_nested_lists(self):
+        values = list(range(6))
+        reshaped = reshape_to_2d_list(values, (2, 3))
+        assert reshaped == [[0, 1, 2], [3, 4, 5]]
+
+    def test_reshape_invalid_length_raises(self):
+        with pytest.raises(ValueError, match="Length of list 5 does not match shape"):
+            reshape_to_2d_list(list(range(5)), (2, 3))
+
+    def test_shape_preserves_input_layout(self, blocks_ragged):
+        M = Generic(blocks_ragged)
+
+        assert M.shape == (2, 2)
+        assert M[0, 1] is blocks_ragged[0][1]
+        assert M[1, 0] is blocks_ragged[1][0]
+
+    def test_reshape_returns_new_generic_with_same_blocks(self, blocks_all_same_widths):
+        M = Generic(blocks_all_same_widths)
+
+        M_reshaped = M.reshape((4, 1))
+
+        assert M_reshaped.shape == (4, 1)
+        assert M_reshaped[0, 0] is blocks_all_same_widths[0][0]
+        assert M_reshaped[1, 0] is blocks_all_same_widths[0][1]
+        assert M_reshaped[2, 0] is blocks_all_same_widths[1][0]
+        assert M_reshaped[3, 0] is blocks_all_same_widths[1][1]
+
+    def test_iter_traverses_blocks_row_major(self, blocks_ragged):
+        M = Generic(blocks_ragged)
+
+        expected = [
+            blocks_ragged[0][0],
+            blocks_ragged[0][1],
+            blocks_ragged[1][0],
+            blocks_ragged[1][1],
+        ]
+
+        assert len(M.flat) == len(expected)
+        for actual, original in zip(M.flatten(), expected):
+            assert actual is original
+
+    def test_slicing_preserves_block_identity(self, blocks_all_same_widths):
+        M = Generic(blocks_all_same_widths)
+
+        first_row = M[0, :]
+        assert first_row.shape == (1, 2)
+        assert first_row[0, 0] is blocks_all_same_widths[0][0]
+        assert first_row[0, 1] is blocks_all_same_widths[0][1]
+
+        second_column = M[:, 1]
+        assert second_column.shape == (2, 1)
+        assert second_column[0, 0] is blocks_all_same_widths[0][1]
+        assert second_column[1, 0] is blocks_all_same_widths[1][1]
+
+        sub_block = M[1:, 1:]
+        assert sub_block.shape == (1, 1)
+        assert sub_block[0, 0] is blocks_all_same_widths[1][1]
 
 
 def col(*args) -> torch.Tensor:
@@ -42,8 +117,8 @@ class TestBlockVector:
 
         result = v1 + v2
 
-        assert torch.allclose(result.blocks[0], col(11.0, 22.0))
-        assert torch.allclose(result.blocks[1], col(33.0, 44.0, 55.0))
+        assert torch.allclose(result[0, 0], col(11.0, 22.0))
+        assert torch.allclose(result[1, 0], col(33.0, 44.0, 55.0))
 
     def test_add_single_block(self):
         """Test adding two block vectors with a single block each."""
@@ -52,14 +127,14 @@ class TestBlockVector:
 
         result = v1 + v2
 
-        assert torch.allclose(result.blocks[0], col(5.0, 7.0, 9.0))
+        assert torch.allclose(result[0, 0], col(5.0, 7.0, 9.0))
 
     def test_add_mismatched_block_count_raises(self):
         """Test that adding vectors with different block counts raises ValueError."""
         v1 = Vertical([col(1.0, 2.0)])
         v2 = Vertical([col(3.0, 4.0), col(5.0, 6.0)])
 
-        with pytest.raises(ValueError, match="Number of blocks must match"):
+        with pytest.raises(ValueError, match="Number of .* must match"):
             v1 + v2
 
     def test_add_mismatched_block_shape_raises(self):
@@ -87,59 +162,63 @@ class TestBlockDiagonal:
 
     def test_init(self):
         """Test BlockDiagonal initialization."""
-        blocks = [torch.eye(2), torch.eye(3)]
-        bdm = Diagonal(blocks)
-        assert len(bdm.blocks) == 2
+        D = Diagonal([torch.eye(2), torch.eye(3)])
+        assert D.num_blocks() == 2
 
     def test_neg(self):
         """Test negation of block-diagonal matrix."""
         blocks = [torch.tensor([[1.0, 2.0], [3.0, 4.0]]), torch.tensor([[5.0]])]
-        bdm = Diagonal(blocks)
-        neg_bdm = -bdm
+        D = Diagonal(blocks)
+        neg_D = -D
 
-        assert torch.allclose(neg_bdm.blocks[0], -blocks[0])
-        assert torch.allclose(neg_bdm.blocks[1], -blocks[1])
+        assert torch.allclose(neg_D.flat[0], -blocks[0])
+        assert torch.allclose(neg_D.flat[1], -blocks[1])
 
-    def test_apply(self):
+    def test_multiply_vertical(self):
         """Test applying block-diagonal matrix to vector."""
-        bdm = Diagonal(
+        D = Diagonal(
             [
-                torch.tensor([[2.0, 0.0], [0.0, 3.0]]),
-                torch.tensor([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 3.0]]),
+                torch.tensor([[2.0, 0.0], [0.0, 3.0]]),  # 2x2 block
+                torch.tensor(
+                    [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 3.0]]
+                ),  # 3x3 block
             ]
         )
         v = Vertical([col(1.0, 1.0), col(1.0, 1.0, 1.0)])
 
-        result = bdm @ v
+        Dv = D @ v
 
-        assert torch.allclose(result.blocks[0], col(2.0, 3.0))
-        assert torch.allclose(result.blocks[1], col(1.0, 2.0, 3.0))
+        assert isinstance(Dv, Vertical)
+        assert torch.allclose(Dv.flat[0], col(2.0, 3.0))
+        assert torch.allclose(Dv.flat[1], col(1.0, 2.0, 3.0))
 
     def test_apply_mismatched_blocks_raises(self):
         """Test that apply with mismatched blocks raises ValueError."""
         blocks = [torch.eye(2), torch.eye(3)]
-        bdm = Diagonal(blocks)
+        D = Diagonal(blocks)
 
         v_blocks = [col(1.0, 1.0)]  # Only 1 block
         v = Vertical(v_blocks)
 
-        with pytest.raises(ValueError, match="Number of blocks"):
-            bdm @ v
+        with pytest.raises(
+            ValueError, match="Number of columns in each row must match"
+        ):
+            D @ v
 
     def test_invert(self):
         """Test inverting block-diagonal matrix."""
-        # Use simple invertible matrices
-        blocks = [
-            torch.tensor([[2.0, 0.0], [0.0, 3.0]]),
-            torch.tensor([[4.0]]),
-        ]
-        bdm = Diagonal(blocks)
-        inv_bdm = bdm.invert()
+        D = Diagonal(
+            [
+                torch.tensor([[2.0, 0.0], [0.0, 3.0]]),
+                torch.tensor([[4.0]]),
+            ]
+        )
+        inv_D = D.invert()
 
         assert torch.allclose(
-            inv_bdm.blocks[0], torch.tensor([[0.5, 0.0], [0.0, 1.0 / 3.0]])
+            inv_D.flat[0], torch.tensor([[0.5, 0.0], [0.0, 1.0 / 3.0]])
         )
-        assert torch.allclose(inv_bdm.blocks[1], torch.tensor([[0.25]]))
+        assert torch.allclose(inv_D.flat[1], torch.tensor([[0.25]]))
 
     def test_invert_singular_raises(self):
         """Test that inverting singular matrix raises error."""
@@ -151,14 +230,13 @@ class TestBlockDiagonal:
     def test_solve(self):
         """Test solving linear system with block-diagonal matrix."""
         # A x = b where A is block diagonal
-        bdm = Diagonal([torch.tensor([[2.0, 0.0], [0.0, 3.0]]), torch.tensor([[4.0]])])
+        D = Diagonal([torch.tensor([[2.0, 0.0], [0.0, 3.0]]), torch.tensor([[4.0]])])
 
         rhs = Vertical([col(4.0, 6.0), col(8.0)])
 
-        solution = bdm.solve(rhs)
-
-        assert torch.allclose(solution.blocks[0], col(2.0, 2.0))
-        assert torch.allclose(solution.blocks[1], col(2.0))
+        solution = D.solve(rhs)
+        assert torch.allclose(solution.flat[0], col(2.0, 2.0))
+        assert torch.allclose(solution.flat[1], col(2.0))
 
     def test_solve_mismatched_blocks_raises(self):
         """Test that solve with mismatched blocks raises ValueError."""
@@ -178,30 +256,30 @@ class TestBlockDiagonal:
         A2 = torch.randn(2, 2)
         A2 = A2 @ A2.T + torch.eye(2)  # Make positive definite
 
-        bdm = Diagonal([A1, A2])
+        D = Diagonal([A1, A2])
 
         rhs = Vertical([torch.randn(3, 1), torch.randn(2, 1)])
 
-        solution = bdm.solve(rhs)
+        solution = D.solve(rhs)
 
         # Verify: A @ x = b
-        result = bdm @ solution
-        assert torch.allclose(result.blocks[0], rhs.blocks[0], atol=1e-5)
-        assert torch.allclose(result.blocks[1], rhs.blocks[1], atol=1e-5)
+        result = D @ solution
+        assert torch.allclose(result.flat[0], rhs.flat[0], atol=1e-5)
+        assert torch.allclose(result.flat[1], rhs.flat[1], atol=1e-5)
 
     def test_add_identity(self):
         "Test that D+I works"
         D = Diagonal([torch.eye(2), torch.eye(3)])
         Daug = D + Identity()
-        assert torch.allclose(Daug.blocks[0], 2 * torch.eye(2))
-        assert torch.allclose(Daug.blocks[1], 2 * torch.eye(3))
+        assert torch.allclose(Daug.flat[0], 2 * torch.eye(2))
+        assert torch.allclose(Daug.flat[1], 2 * torch.eye(3))
 
     def test_sub_identity(self):
         "Test that D-I works"
         D = Diagonal([torch.eye(2), torch.eye(3)])
         Daug = D - Identity()
-        assert torch.allclose(Daug.blocks[0], torch.zeros((2, 2)))
-        assert torch.allclose(Daug.blocks[1], torch.zeros((3, 3)))
+        assert torch.allclose(Daug.flat[0], torch.zeros((2, 2)))
+        assert torch.allclose(Daug.flat[1], torch.zeros((3, 3)))
 
     def test_symmetricize(self):
         M = Diagonal([torch.randn(2, 2), torch.randn(3, 3)])
@@ -239,9 +317,9 @@ class TestIdentityWithLowerBlockDiagonal:
         # result[1] = A @ v[0] + v[1] = [1, 1] + [2, 2] = [3, 3]
         # result[2] = B @ v[1] + v[2] = 2*[2, 2] + [3, 3] = [7, 7]
 
-        assert torch.allclose(result.blocks[0], col(1.0, 1.0))
-        assert torch.allclose(result.blocks[1], col(3.0, 3.0))
-        assert torch.allclose(result.blocks[2], col(7.0, 7.0))
+        assert torch.allclose(result.flat[0], col(1.0, 1.0))
+        assert torch.allclose(result.flat[1], col(3.0, 3.0))
+        assert torch.allclose(result.flat[2], col(7.0, 7.0))
 
     def test_apply_mismatched_blocks_raises(self):
         """Test that apply with mismatched blocks raises ValueError."""
@@ -268,10 +346,9 @@ class TestIdentityWithLowerBlockDiagonal:
         rhs = Vertical([col(1.0, 1.0), col(2.0, 2.0), col(3.0, 3.0)])
 
         solution = M.solve(rhs)
-
-        assert torch.allclose(solution.blocks[0], col(1.0, 1.0))
-        assert torch.allclose(solution.blocks[1], col(1.0, 1.0))
-        assert torch.allclose(solution.blocks[2], col(1.0, 1.0))
+        assert torch.allclose(solution.flat[0], col(1.0, 1.0))
+        assert torch.allclose(solution.flat[1], col(1.0, 1.0))
+        assert torch.allclose(solution.flat[2], col(1.0, 1.0))
 
     def test_solve_verifies_solution(self):
         """Test that solve produces a valid solution."""
@@ -285,9 +362,9 @@ class TestIdentityWithLowerBlockDiagonal:
 
         # Verify: M @ x = rhs
         result = M @ solution
-        assert torch.allclose(result.blocks[0], rhs.blocks[0], atol=1e-5)
-        assert torch.allclose(result.blocks[1], rhs.blocks[1], atol=1e-5)
-        assert torch.allclose(result.blocks[2], rhs.blocks[2], atol=1e-5)
+        assert torch.allclose(result.flat[0], rhs.flat[0], atol=1e-5)
+        assert torch.allclose(result.flat[1], rhs.flat[1], atol=1e-5)
+        assert torch.allclose(result.flat[2], rhs.flat[2], atol=1e-5)
 
     def test_solve_with_zero_blocks(self):
         """Test solving when some lower blocks are zero."""
@@ -304,9 +381,9 @@ class TestIdentityWithLowerBlockDiagonal:
         # x[1] = rhs[1] - 0 @ x[0] = [3, 4]
         # x[2] = rhs[2] - B @ x[1] = [5, 6] - [3, 4] = [2, 2]
 
-        assert torch.allclose(solution.blocks[0], col(1.0, 2.0))
-        assert torch.allclose(solution.blocks[1], col(3.0, 4.0))
-        assert torch.allclose(solution.blocks[2], col(2.0, 2.0))
+        assert torch.allclose(solution.flat[0], col(1.0, 2.0))
+        assert torch.allclose(solution.flat[1], col(3.0, 4.0))
+        assert torch.allclose(solution.flat[2], col(2.0, 2.0))
 
     def test_transpose(self):
         """Test that transpose returns IdentityWithUpperDiagonal."""
@@ -351,9 +428,9 @@ class TestIdentityWithUpperBlockDiagonal:
         # result[1] = v[1] + B @ v[2] = [2, 2] + 2*[3, 3] = [8, 8]
         # result[2] = v[2] = [3, 3]
 
-        assert torch.allclose(result.blocks[0], col(3.0, 3.0))
-        assert torch.allclose(result.blocks[1], col(8.0, 8.0))
-        assert torch.allclose(result.blocks[2], col(3.0, 3.0))
+        assert torch.allclose(result.flat[0], col(3.0, 3.0))
+        assert torch.allclose(result.flat[1], col(8.0, 8.0))
+        assert torch.allclose(result.flat[2], col(3.0, 3.0))
 
     def test_apply_mismatched_blocks_raises(self):
         """Test that apply with mismatched blocks raises ValueError."""
@@ -385,9 +462,9 @@ class TestIdentityWithUpperBlockDiagonal:
         # x[1] = rhs[1] - B @ x[2] = [8, 8] - 2*[3, 3] = [2, 2]
         # x[0] = rhs[0] - A @ x[1] = [3, 3] - [2, 2] = [1, 1]
 
-        assert torch.allclose(solution.blocks[0], col(1.0, 1.0))
-        assert torch.allclose(solution.blocks[1], col(2.0, 2.0))
-        assert torch.allclose(solution.blocks[2], col(3.0, 3.0))
+        assert torch.allclose(solution.flat[0], col(1.0, 1.0))
+        assert torch.allclose(solution.flat[1], col(2.0, 2.0))
+        assert torch.allclose(solution.flat[2], col(3.0, 3.0))
 
     def test_solve_verifies_solution(self):
         """Test that solve produces a valid solution."""
@@ -401,9 +478,9 @@ class TestIdentityWithUpperBlockDiagonal:
 
         # Verify: M @ x = rhs
         result = M @ solution
-        assert torch.allclose(result.blocks[0], rhs.blocks[0], atol=1e-5)
-        assert torch.allclose(result.blocks[1], rhs.blocks[1], atol=1e-5)
-        assert torch.allclose(result.blocks[2], rhs.blocks[2], atol=1e-5)
+        assert torch.allclose(result.flat[0], rhs.flat[0], atol=1e-5)
+        assert torch.allclose(result.flat[1], rhs.flat[1], atol=1e-5)
+        assert torch.allclose(result.flat[2], rhs.flat[2], atol=1e-5)
 
     def test_solve_with_zero_blocks(self):
         """Test solving when some upper blocks are zero."""
@@ -420,9 +497,9 @@ class TestIdentityWithUpperBlockDiagonal:
         # x[1] = rhs[1] - 0 @ x[2] = [5, 6]
         # x[0] = rhs[0] - A @ x[1] = [3, 4] - [5, 6] = [-2, -2]
 
-        assert torch.allclose(solution.blocks[0], col(-2.0, -2.0))
-        assert torch.allclose(solution.blocks[1], col(5.0, 6.0))
-        assert torch.allclose(solution.blocks[2], col(7.0, 8.0))
+        assert torch.allclose(solution.flat[0], col(-2.0, -2.0))
+        assert torch.allclose(solution.flat[1], col(5.0, 6.0))
+        assert torch.allclose(solution.flat[2], col(7.0, 8.0))
 
     def test_transpose(self):
         """Test that transpose returns IdentityWithLowerBlockDiagonal."""
@@ -451,15 +528,82 @@ class TestIdentityWithUpperBlockDiagonal:
         m_T_T = m.T.T
         result2 = m_T_T @ v
 
-        assert torch.allclose(result1.blocks[0], result2.blocks[0], atol=1e-5)
-        assert torch.allclose(result1.blocks[1], result2.blocks[1], atol=1e-5)
-        assert torch.allclose(result1.blocks[2], result2.blocks[2], atol=1e-5)
+        assert torch.allclose(result1.flat[0], result2.flat[0], atol=1e-5)
+        assert torch.allclose(result1.flat[1], result2.flat[1], atol=1e-5)
+        assert torch.allclose(result1.flat[2], result2.flat[2], atol=1e-5)
 
 
-class TestUpperBlockDiagonal:
-    def test_to_tensor(self):
+class TestUpperDiagonal:
+    def test_width_and_height(self):
+        U = UpperDiagonal(2, [torch.randn(2, 3), torch.randn(3, 3)], 3)
+
+        # The diagonal_blocks look like:
+        # [Zero(2,2), Zero(3,3), Zero(3,3)] (by construction)
+        # Upper blocks set the block layout for the actual width/height calculations.
+        assert U.height == 2 + 3 + 3
+        assert U.width == 2 + 3 + 3
+
+        # Try a different shape (with rectangular blocks)
+        U2 = UpperDiagonal(4, [torch.randn(5, 2), torch.randn(6, 5)], 7)
+        # Diagonal blocks will have shapes: (5,4), (6,2), (7,5)
+        assert U2.height == 5 + 6 + 7
+        assert U2.width == 4 + 2 + 5
+
+        # More upper blocks (test more cases)
+        U3 = UpperDiagonal(
+            1, [torch.randn(2, 4), torch.randn(3, 2), torch.randn(5, 3)], 6
+        )
+        # Diagonal blocks shapes: (2,1), (3,4), (5,2), (6,3)
+        assert U3.height == 2 + 3 + 5 + 6
+        assert U3.width == 1 + 4 + 2 + 3
+
+        U_tensor = U.to_tensor()
+        assert U_tensor.shape[0] == U.height
+        assert U_tensor.shape[1] == U.width
+
+    def test_transpose(self):
         U = UpperDiagonal(2, [torch.randn(2, 3), torch.randn(3, 3)], 3)
         assert torch.allclose(U.T.to_tensor(), U.to_tensor().T)
+
+
+class TestLowerDiagonal:
+    def test_width_and_height(self):
+        # Format matches UpperDiagonal: LowerDiagonal(height_leading_zeros, lower_blocks, width_trailing_zeros)
+        L = LowerDiagonal(2, [torch.randn(3, 2), torch.randn(3, 3)], 3)
+
+        # The diagonal_blocks look like:
+        # [Zero(2,2), Zero(3,3), Zero(3,3)] (by construction)
+        # Lower blocks set the block layout for the actual width/height calculations.
+        assert L.height == 2 + 3 + 3
+        assert L.width == 2 + 3 + 3
+
+        # Try a different shape (with rectangular blocks)
+        L2 = LowerDiagonal(4, [torch.randn(2, 5), torch.randn(5, 6)], 7)
+        # L2 has shape
+        #    [ (4x5)0         0        0    ]
+        #    [ (2x5)L0   (2x6)0        0    ]
+        #    [    0      (5x6)L1  (5x7)0   ]
+        assert L2.height == 4 + 2 + 5
+        assert L2.width == 5 + 6 + 7
+
+        L3 = LowerDiagonal(
+            1, [torch.randn(4, 2), torch.randn(2, 3), torch.randn(3, 5)], 6
+        )
+        # L3 has the structure:
+        #      [ (1x2)0      0        0        0      ]
+        #      [ (4x2)L0   (4x3)0     0        0      ]
+        #      [    0      (2x3)L1   (2x5)0    0      ]
+        #      [    0         0      (3x5)L2  (3x6)0  ]
+        assert L3.height == 1 + 4 + 2 + 3
+        assert L3.width == 2 + 3 + 5 + 6
+
+        L_tensor = L.to_tensor()
+        assert L_tensor.shape[0] == L.height
+        assert L_tensor.shape[1] == L.width
+
+    def test_transpose(self):
+        L = LowerDiagonal(2, [torch.randn(3, 2), torch.randn(3, 3)], 3)
+        assert torch.allclose(L.T.to_tensor(), L.to_tensor().T)
 
 
 class TestDownshift:
@@ -468,43 +612,55 @@ class TestDownshift:
         return Vertical([torch.randn(2, 1), torch.randn(3, 1), torch.randn(4, 1)])
 
     def test_downshift(self, v):
-        P = downshifting_matrix(10, [b.shape[0] for b in v.blocks])
+        P = downshifting_matrix(10, [b.shape[0] for b in v.flatten()])
         Pv = P @ v
-        assert len(Pv.blocks) == 3
-        torch.testing.assert_close(Pv.blocks[0], torch.zeros(10, 1))
-        torch.testing.assert_close(Pv.blocks[1], v.blocks[0])
-        torch.testing.assert_close(Pv.blocks[2], v.blocks[1])
+        assert Pv.num_blocks() == 3
+
+        torch.testing.assert_close(Pv.flat[0], torch.zeros(10, 1))
+        torch.testing.assert_close(Pv.flat[1], v.flat[0])
+        torch.testing.assert_close(Pv.flat[2], v.flat[1])
 
     def test_upshift(self, v):
-        P = downshifting_matrix(2, [b.shape[0] for b in v.blocks])
+        P = downshifting_matrix(2, [b.shape[0] for b in v.flatten()])
         PTv = P.T @ v
-        assert len(PTv.blocks) == 3
-        torch.testing.assert_close(PTv.blocks[0], v.blocks[1])
-        torch.testing.assert_close(PTv.blocks[1], v.blocks[2])
-        torch.testing.assert_close(PTv.blocks[2], torch.zeros(4, 1))
+        assert PTv.num_blocks() == 3
+        torch.testing.assert_close(PTv.flat[0], v.flat[1])
+        torch.testing.assert_close(PTv.flat[1], v.flat[2])
+        torch.testing.assert_close(PTv.flat[2], torch.zeros(4, 1))
 
     def test_down_then_upshift(self, v):
-        P = downshifting_matrix(10, [b.shape[0] for b in v.blocks])
+        P = downshifting_matrix(10, [b.shape[0] for b in v.flatten()])
         r = P.T @ (P @ v)
-        assert len(r.blocks) == 3
-        torch.testing.assert_close(r.blocks[0], v.blocks[0])
-        torch.testing.assert_close(r.blocks[1], v.blocks[1])
-        torch.testing.assert_close(r.blocks[2], torch.zeros(4, 1))
+        assert r.num_blocks() == 3
+        torch.testing.assert_close(r.flat[0], v.flat[0])
+        torch.testing.assert_close(r.flat[1], v.flat[1])
+        torch.testing.assert_close(r.flat[2], torch.zeros(4, 1))
 
     def test_PTP(self, v):
-        P = downshifting_matrix(10, [b.shape[0] for b in v.blocks])
+        P = downshifting_matrix(10, [b.shape[0] for b in v.flatten()])
         r = P.T @ (P @ v)
         rr = (P.T @ P) @ v
-        assert len(r.blocks) == len(rr.blocks)
-        for br, brr in zip(r.blocks, rr.blocks):
+        assert r.num_blocks() == rr.num_blocks()
+        for br, brr in zip(r.flatten(), rr.flatten()):
             torch.testing.assert_close(br, brr)
 
+    def test_PPT_blocks(self, v):
+        P = downshifting_matrix(2, [b.shape[0] for b in v.flatten()])
+        D = P @ P.T
+        assert isinstance(D, Diagonal)
+        assert D.num_blocks() == 3
+        assert D.flat[0].shape == (2, 2)
+        assert isinstance(D.flat[1], Identity)
+        assert D.flat[1].dimension == 2
+        assert isinstance(D.flat[2], Identity)
+        assert D.flat[2].dimension == 3
+
     def test_PPT(self, v):
-        P = downshifting_matrix(2, [b.shape[0] for b in v.blocks])
+        P = downshifting_matrix(2, [b.shape[0] for b in v.flatten()])
         r = P @ (P.T @ v)
         rr = (P @ P.T) @ v
-        assert len(r.blocks) == len(rr.blocks)
-        for br, brr in zip(r.blocks, rr.blocks):
+        assert r.num_blocks() == rr.num_blocks()
+        for br, brr in zip(r.flatten(), rr.flatten()):
             torch.testing.assert_close(br, brr)
 
     def test_PTDP(self):
@@ -513,8 +669,8 @@ class TestDownshift:
 
         r = P.T @ (D @ P)
         rr = (P.T @ D) @ P
-        assert len(r.blocks) == len(rr.blocks)
-        for br, brr in zip(r.blocks, rr.blocks):
+        assert r.num_blocks() == rr.num_blocks()
+        for br, brr in zip(r.flatten(), rr.flatten()):
             torch.testing.assert_close(br, brr)
 
 
@@ -613,8 +769,8 @@ class TestSymmetricBlock2x2:
         #         = [2, 3] + [2, 2] = [4, 5]
         # result[1] = Q22 @ v[1] + Q12^T @ v[0] = [4] @ [2] + [1, 1] @ [1, 1]
         #         = [8] + [2] = [10]
-        assert torch.allclose(result.blocks[0], col(4.0, 5.0))
-        assert torch.allclose(result.blocks[1], col(10.0))
+        assert torch.allclose(result.flat[0], col(4.0, 5.0))
+        assert torch.allclose(result.flat[1], col(10.0))
 
     def test_apply_mismatched_blocks_raises(self):
         """Test that apply with wrong number of blocks raises ValueError."""
@@ -647,10 +803,10 @@ class TestSymmetricBlock2x2:
         v = Vertical([torch.randn(3, 1), torch.randn(2, 1)])
 
         # Check that matrix @ matrix_inv @ v = v
-        result = matrix2x2 @ (matrix2x2_inv @ (v))
+        result = matrix2x2 @ (matrix2x2_inv @ v)
 
-        assert torch.allclose(result.blocks[0], v.blocks[0])
-        assert torch.allclose(result.blocks[1], v.blocks[1])
+        assert torch.allclose(result.flat[0], v.flat[0])
+        assert torch.allclose(result.flat[1], v.flat[1])
 
     def test_invert_via_LDL(self):
         """Test inverting symmetric block 2x2 matrix via LDL decomposition."""
@@ -672,8 +828,8 @@ class TestSymmetricBlock2x2:
         # Check that matrix @ matrix_inv @ v = v
         result = matrix2x2 @ (matrix2x2_inv @ (v))
 
-        assert torch.allclose(result.blocks[0], v.blocks[0])
-        assert torch.allclose(result.blocks[1], v.blocks[1])
+        assert torch.allclose(result.flat[0], v.flat[0])
+        assert torch.allclose(result.flat[1], v.flat[1])
 
     def test_matmul_with_upper_diagonal_blocks_using_to_tensor(self):
         """Test inverting SymmetricBlock2x2 with upper diagonal blocks."""
@@ -699,10 +855,10 @@ class TestSymmetricBlock2x2:
 
         r = matrix2x2 @ v
         assert len(r.blocks) == 2
-        torch.testing.assert_close(r.blocks[0].blocks[0], 5 * torch.ones(2, 1))
-        torch.testing.assert_close(r.blocks[0].blocks[1], 3 * torch.ones(3, 1))
-        torch.testing.assert_close(r.blocks[1].blocks[0], 3 * torch.ones(2, 1))
-        torch.testing.assert_close(r.blocks[1].blocks[1], 6 * torch.ones(3, 1))
+        torch.testing.assert_close(r.flat[0].flat[0], 5 * torch.ones(2, 1))
+        torch.testing.assert_close(r.flat[0].flat[1], 3 * torch.ones(3, 1))
+        torch.testing.assert_close(r.flat[1].flat[0], 3 * torch.ones(2, 1))
+        torch.testing.assert_close(r.flat[1].flat[1], 6 * torch.ones(3, 1))
 
     def test_invert_with_upper_diagonal_blocks_using_to_tensor(self):
         """Test inverting SymmetricBlock2x2 with upper diagonal blocks."""
@@ -737,11 +893,11 @@ class TestSymmetricBlock2x2:
             ]
         )
         r = M_inv @ (M @ v)
-        assert len(r.blocks) == 2
-        torch.testing.assert_close(r.blocks[0].blocks[0], v.blocks[0].blocks[0])
-        torch.testing.assert_close(r.blocks[0].blocks[1], v.blocks[0].blocks[1])
-        torch.testing.assert_close(r.blocks[1].blocks[0], v.blocks[1].blocks[0])
-        torch.testing.assert_close(r.blocks[1].blocks[1], v.blocks[1].blocks[1])
+        assert r.num_blocks() == 2
+        torch.testing.assert_close(r.flat[0].flat[0], v.flat[0].flat[0])
+        torch.testing.assert_close(r.flat[0].flat[1], v.flat[0].flat[1])
+        torch.testing.assert_close(r.flat[1].flat[0], v.flat[1].flat[0])
+        torch.testing.assert_close(r.flat[1].flat[1], v.flat[1].flat[1])
 
     def test_UDU_decomposition(self):
         """Test UDU_decomposition is correctness by checking U @ D @ U.T = A."""
@@ -766,8 +922,8 @@ class TestSymmetricBlock2x2:
         UDUv = U @ (D @ (U.T @ v))
         Av = matrix2x2 @ v
 
-        torch.testing.assert_close(UDUv.blocks[0], Av.blocks[0])
-        torch.testing.assert_close(UDUv.blocks[1], Av.blocks[1])
+        torch.testing.assert_close(UDUv.flat[0], Av.flat[0])
+        torch.testing.assert_close(UDUv.flat[1], Av.flat[1])
 
     def test_LDL_decomposition(self):
         """Test LDL_decomposition is correctness by checking L @ D @ L.T = A."""
@@ -905,7 +1061,7 @@ class TestTridiagonal:
         def scalar_block(value: float) -> Diagonal:
             return Diagonal([Tensor.wrap(torch.tensor([[value]]))])
 
-        def make_block(offset: float) -> Tridiagonal:
+        def make_tridiagonal(offset: float) -> Tridiagonal:
             return Tridiagonal(
                 diagonal_blocks=[scalar_block(offset + i) for i in range(3)],
                 lower_blocks=[scalar_block(offset + 10 + i) for i in range(2)],
@@ -913,8 +1069,8 @@ class TestTridiagonal:
             )
 
         blocks = [
-            [make_block(1.0), make_block(2.0)],
-            [make_block(3.0), make_block(4.0)],
+            [make_tridiagonal(1.0), make_tridiagonal(2.0)],
+            [make_tridiagonal(3.0), make_tridiagonal(4.0)],
         ]
         M = Generic(blocks)
 
@@ -925,29 +1081,27 @@ class TestTridiagonal:
         assert len(transposed.upper_blocks) == 2
         assert transposed.diagonal_blocks[0].shape == M.shape
 
-        for diag_idx, diag_generic in enumerate(transposed.diagonal_blocks):
-            assert isinstance(diag_generic, Generic)
+        for diag_idx, diag_block in enumerate(transposed.diagonal_blocks):
+            assert isinstance(diag_block, Generic)
             for row in range(2):
                 for col in range(2):
                     assert (
-                        diag_generic.blocks[row, col]
+                        diag_block[row, col]
                         is blocks[row][col].diagonal_blocks[diag_idx]
                     )
 
-        for band_idx, lower_generic in enumerate(transposed.lower_blocks):
-            assert isinstance(lower_generic, Generic)
+        for band_idx, lower_block in enumerate(transposed.lower_blocks):
+            assert isinstance(lower_block, Generic)
             for row in range(2):
                 for col in range(2):
                     assert (
-                        lower_generic.blocks[row, col]
-                        is blocks[row][col].lower_blocks[band_idx]
+                        lower_block[row, col] is blocks[row][col].lower_blocks[band_idx]
                     )
 
-        for band_idx, upper_generic in enumerate(transposed.upper_blocks):
-            assert isinstance(upper_generic, Generic)
+        for band_idx, upper_block in enumerate(transposed.upper_blocks):
+            assert isinstance(upper_block, Generic)
             for row in range(2):
                 for col in range(2):
                     assert (
-                        upper_generic.blocks[row, col]
-                        is blocks[row][col].upper_blocks[band_idx]
+                        upper_block[row, col] is blocks[row][col].upper_blocks[band_idx]
                     )
