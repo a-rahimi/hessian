@@ -1,5 +1,44 @@
 Shows how to apply the inverse of the Hessian of a deep net against a vector.
 
+Pearlmutter showed a clever way to compute the product of the Hessian of a deep
+net against a vector.  This repo shows how to comptue the product of the
+**inverse** of the Hessian against a vector. If the Hessian-vector product $H
+v$ for some fixed vector $v$, we're interested in solving $H x = v$ for $x$.
+The trick is to augment this system of equations with auxiliary variables,
+pivoting it into a block-tri-diagonal system, factoring that system, and
+solving it. This, in effect, ends up looking like running propagation on a dual
+network.
+
 See [hessian.pdf](hessian.pdf) for the full documentation.
 
 The implementation under [src/](src/) is work in progress.
+
+# Partitioned Matrix Library
+
+The implementation relies heavily on operations on structured, partitioned,
+block matrices, so the code includes a library for manipuating these.
+
+## Partitioned Matrix Class Hierarchy
+
+<!-- BEGIN MATRIX HIERARCHY -->
+```
+Matrix
+├── Identity
+├── Ragged
+│   ├── Generic
+│   │   ├── Horizontal
+│   │   └── Vertical
+│   ├── Symmetric2x2
+│   └── Tridiagonal
+│       ├── Diagonal
+│       ├── LowerBiDiagonal
+│       │   └── IdentityWithLowerDiagonal
+│       ├── LowerDiagonal
+│       ├── SymmetricTriDiagonal
+│       ├── UpperBiDiagonal
+│       │   └── IdentityWithUpperDiagonal
+│       └── UpperDiagonal
+├── Tensor (also torch.Tensor)
+└── Zero
+```
+<!-- END MATRIX HIERARCHY -->
