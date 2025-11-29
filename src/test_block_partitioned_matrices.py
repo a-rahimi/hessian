@@ -1077,7 +1077,7 @@ class TestTridiagonal:
 
         def make_tridiagonal(offset: float) -> Tridiagonal:
             return Tridiagonal(
-                diagonal_blocks=[scalar_block(offset + i) for i in range(3)],
+                [scalar_block(offset + i) for i in range(3)],
                 lower_blocks=[scalar_block(offset + 10 + i) for i in range(2)],
                 upper_blocks=[scalar_block(offset + 20 + i) for i in range(2)],
             )
@@ -1126,8 +1126,8 @@ class TestTridiagonal:
         L = [torch.ones(2, 2), torch.ones(2, 2)]
         U = [torch.ones(2, 2), torch.ones(2, 2)]
 
-        T1 = Tridiagonal(diagonal_blocks=D, lower_blocks=L, upper_blocks=U)
-        T2 = Tridiagonal(diagonal_blocks=D, lower_blocks=L, upper_blocks=U)
+        T1 = Tridiagonal(D, lower_blocks=L, upper_blocks=U)
+        T2 = Tridiagonal(D, lower_blocks=L, upper_blocks=U)
 
         T_sum = T1 + T2
 

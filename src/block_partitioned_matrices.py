@@ -291,13 +291,16 @@ def _(self, other: Ragged) -> Ragged:
 class Generic(Ragged):
     """A ragged array whose rows have the same number of columns."""
 
-    def __init__(self, blocks: Ragged | Sequence[Sequence[Matrix]], validate=True):
-        if isinstance(blocks, Ragged):
-            blocks = blocks.flat
+    @singledispatchmethod
+    def __init__(self, blocks: Sequence[Sequence[Matrix]], validate=True):
         super().__init__(blocks)
         self.shape = (len(blocks), len(blocks[0]))
         if validate:
             self.validate()
+
+    @__init__.register
+    def _(self, blocks: Ragged, validate=True):
+        self.__init__(blocks.flat, validate)
 
     def validate(self):
         # Ensure the matrix isn't ragged.
@@ -444,12 +447,15 @@ class Symmetric2x2(Ragged):
 class Vertical(Generic):
     """Blocks stacked vertically."""
 
-    def __init__(self, blocks: Ragged | Sequence[Matrix], validate=True):
-        if isinstance(blocks, Ragged):
-            blocks = blocks.flat
+    @singledispatchmethod
+    def __init__(self, blocks: Sequence[Matrix], validate=True):
         super().__init__([[b] for b in blocks], validate)
         if self.shape[1] != 1:
             raise ValueError("Vertical matrix must have exactly one column")
+
+    @__init__.register
+    def _(self, blocks: Ragged, validate=True):
+        self.__init__(blocks.flat, validate=validate)
 
 
 @Symmetric2x2.__matmul__.register
@@ -467,24 +473,25 @@ def __matmul__(self, v: Vertical) -> Vertical:
 class Horizontal(Generic):
     """Blocks stacked horizontally."""
 
-    def __init__(self, blocks: Ragged | Sequence[Matrix], validate=True):
-        if isinstance(blocks, Ragged):
-            blocks = blocks.flat
+    @singledispatchmethod
+    def __init__(self, blocks: Sequence[Matrix], validate=True):
         super().__init__([blocks], validate)
         if self.shape[0] != 1:
             raise ValueError("Horizontal matrix must have exactly one row")
 
+    @__init__.register
+    def _(self, blocks: Ragged, validate=True):
+        self.__init__(blocks.flat, validate=validate)
+
 
 class Tridiagonal(Ragged):
+    @singledispatchmethod
     def __init__(
         self,
-        diagonal_blocks: Ragged | Sequence[Matrix],
-        lower_blocks: Sequence[Matrix] = [],
-        upper_blocks: Sequence[Matrix] = [],
+        diagonal_blocks: Sequence[Matrix],
+        lower_blocks: Sequence[Matrix],
+        upper_blocks: Sequence[Matrix],
     ):
-        if isinstance(diagonal_blocks, Ragged):
-            diagonal_blocks, lower_blocks, upper_blocks = diagonal_blocks.blocks
-
         if lower_blocks != [] and (len(diagonal_blocks) != len(lower_blocks) + 1):
             raise ValueError(
                 "Number of diagonal blocks must be one more than the number of lower blocks"
@@ -494,6 +501,12 @@ class Tridiagonal(Ragged):
                 "Number of diagonal blocks must be one more than the number of upper blocks"
             )
         super().__init__([diagonal_blocks, lower_blocks, upper_blocks])
+
+    @__init__.register
+    def _(self, diagonal_blocks: Ragged):
+        if len(diagonal_blocks.blocks) != 3:
+            raise ValueError("Ragged input must have exactly three rows")
+        self.__init__(*diagonal_blocks.blocks)
 
     @property
     def diagonal_blocks(self) -> Sequence[Matrix]:
@@ -567,7 +580,7 @@ class Tridiagonal(Ragged):
         M = Generic([generic_tridiagonal_blocks]).reshape(M.shape)
 
         return Tridiagonal(
-            diagonal_blocks=[
+            [
                 Generic([[b.diagonal_blocks[i] for b in M.flatten()]]).reshape(M.shape)
                 for i in range(num_diags)
             ],
@@ -625,9 +638,9 @@ class SymmetricTriDiagonal(Tridiagonal):
             )
 
         super().__init__(
-            diagonal_blocks=diagonal_blocks,
-            lower_blocks=lower_blocks,
-            upper_blocks=[],
+            diagonal_blocks,
+            lower_blocks,
+            [],
         )
 
     @cached_property
@@ -698,8 +711,8 @@ class LowerBiDiagonal(Tridiagonal):
                 "Number of lower blocks must be one less than the number of diagonal blocks"
             )
         super().__init__(
-            diagonal_blocks=diagonal_blocks,
-            lower_blocks=lower_blocks,
+            diagonal_blocks,
+            lower_blocks,
             upper_blocks=[],
         )
 
@@ -795,7 +808,7 @@ class UpperBiDiagonal(Tridiagonal):
                 "Number of upper blocks must be one less than the number of diagonal blocks"
             )
         super().__init__(
-            diagonal_blocks=diagonal_blocks,
+            diagonal_blocks,
             lower_blocks=[],
             upper_blocks=upper_blocks,
         )
@@ -869,14 +882,17 @@ class IdentityWithUpperDiagonal(UpperBiDiagonal):
 
 
 class Diagonal(Tridiagonal):
-    def __init__(self, diagonal_blocks: Ragged | Sequence[Matrix]):
-        if isinstance(diagonal_blocks, Ragged):
-            diagonal_blocks = diagonal_blocks.flat
+    @singledispatchmethod
+    def __init__(self, diagonal_blocks: Sequence[Matrix]):
         super().__init__(
-            upper_blocks=[],
-            diagonal_blocks=diagonal_blocks,
-            lower_blocks=[],
+            diagonal_blocks,
+            [],
+            [],
         )
+
+    @__init__.register
+    def _(self, diagonal_blocks: Ragged):
+        self.__init__(diagonal_blocks.flat)
 
     @property
     def upper_blocks(self) -> list[Matrix]:
