@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import ast
 import re
 from collections import defaultdict
@@ -77,13 +78,13 @@ def _build_hierarchy(
         if extra_bases:
             extras[cls_name] = extra_bases
 
-    for children in tree.values():
-        children.sort()
     tree.setdefault("Matrix", [])
     return tree, extras
 
 
-def _render_tree(tree: dict[str, list[str]], extras: dict[str, list[str]]) -> str:
+def _render_tree(
+    tree: dict[str, list[str]], extras: dict[str, list[str]], order: str
+) -> str:
     def node_label(name: str) -> str:
         if name in extras:
             extra = ", ".join(extras[name])
@@ -94,6 +95,8 @@ def _render_tree(tree: dict[str, list[str]], extras: dict[str, list[str]]) -> st
 
     def walk(parent: str, prefix: str = "") -> None:
         children = tree.get(parent, [])
+        if order == "alphabetical":
+            children = sorted(children)
         for idx, child in enumerate(children):
             is_last = idx == len(children) - 1
             connector = "└── " if is_last else "├── "
@@ -122,10 +125,27 @@ def _update_readme(hierarchy: str) -> None:
     README_PATH.write_text(updated)
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Update README.md with the hierarchy of Matrix subclasses defined in "
+            "src/block_partitioned_matrices.py."
+        )
+    )
+    parser.add_argument(
+        "--order",
+        choices=["source", "alphabetical"],
+        default="source",
+        help="Order children as they appear in source or alphabetically (default: source).",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = _parse_args()
     class_bases = _parse_classes()
     tree, extras = _build_hierarchy(class_bases)
-    hierarchy = _render_tree(tree, extras)
+    hierarchy = _render_tree(tree, extras, order=args.order)
     _update_readme(hierarchy)
 
 
