@@ -1119,3 +1119,23 @@ class TestTridiagonal:
                     assert (
                         upper_block[row, col] is blocks[row][col].upper_blocks[band_idx]
                     )
+
+    def test_add_tridiagonal(self):
+        """Test adding two Tridiagonal matrices."""
+        D = [torch.eye(2), torch.eye(2), torch.eye(2)]
+        L = [torch.ones(2, 2), torch.ones(2, 2)]
+        U = [torch.ones(2, 2), torch.ones(2, 2)]
+
+        T1 = Tridiagonal(diagonal_blocks=D, lower_blocks=L, upper_blocks=U)
+        T2 = Tridiagonal(diagonal_blocks=D, lower_blocks=L, upper_blocks=U)
+
+        T_sum = T1 + T2
+
+        assert isinstance(T_sum, Tridiagonal)
+        # Verify blocks
+        for b1, b_sum in zip(T1.diagonal_blocks, T_sum.diagonal_blocks):
+            torch.testing.assert_close(b_sum.to_tensor(), b1.to_tensor() * 2)
+        for b1, b_sum in zip(T1.lower_blocks, T_sum.lower_blocks):
+            torch.testing.assert_close(b_sum.to_tensor(), b1.to_tensor() * 2)
+        for b1, b_sum in zip(T1.upper_blocks, T_sum.upper_blocks):
+            torch.testing.assert_close(b_sum.to_tensor(), b1.to_tensor() * 2)

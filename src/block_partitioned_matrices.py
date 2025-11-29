@@ -381,7 +381,7 @@ class Symmetric2x2(Ragged):
 
     @singledispatchmethod
     def __matmul__(self, v: Matrix) -> Matrix:
-        raise NotImplementedError
+        raise NotImplementedError  # Special cases implemented below.
 
     def invert(self) -> "Symmetric2x2":
         # S = UDU^T
@@ -478,10 +478,13 @@ class Horizontal(Generic):
 class Tridiagonal(Ragged):
     def __init__(
         self,
-        diagonal_blocks: Sequence[Matrix],
-        lower_blocks: Sequence[Matrix],
-        upper_blocks: Sequence[Matrix],
+        diagonal_blocks: Ragged | Sequence[Matrix],
+        lower_blocks: Sequence[Matrix] = [],
+        upper_blocks: Sequence[Matrix] = [],
     ):
+        if isinstance(diagonal_blocks, Ragged):
+            diagonal_blocks, lower_blocks, upper_blocks = diagonal_blocks.blocks
+
         if lower_blocks != [] and (len(diagonal_blocks) != len(lower_blocks) + 1):
             raise ValueError(
                 "Number of diagonal blocks must be one more than the number of lower blocks"
