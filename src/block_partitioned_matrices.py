@@ -623,79 +623,6 @@ class SymmetricTriDiagonal(Tridiagonal):
         ), Diagonal(Bs)
 
 
-class LowerDiagonal(Tridiagonal):
-    def __init__(
-        self,
-        height_leading_zeros: int,
-        lower_blocks: Sequence[Matrix],
-        width_trailing_zeros: int,
-    ):
-        lower_blocks = list(map(Tensor.wrap, lower_blocks))
-        diagonal_blocks = []
-        h = height_leading_zeros
-        for L in lower_blocks:
-            diagonal_blocks.append(Zero((h, L.width)))
-            h = L.height
-        diagonal_blocks.append(Zero((h, width_trailing_zeros)))
-
-        super().__init__(
-            diagonal_blocks=diagonal_blocks, lower_blocks=lower_blocks, upper_blocks=[]
-        )
-        self.height_leading_zeros = height_leading_zeros
-        self.width_trailing_zeros = width_trailing_zeros
-
-    @property
-    def upper_blocks(self) -> list[Matrix]:
-        raise NotImplementedError
-
-    @singledispatchmethod
-    def __matmul__(self, other: Matrix) -> Matrix:
-        raise NotImplementedError
-
-    @__matmul__.register
-    def _(self, other: Vertical) -> Vertical:
-        if other.num_blocks() != len(self.diagonal_blocks):
-            raise ValueError("Number of blocks in the operands must match")
-
-        # TODO: Write this as the product of two Diagonals after some surgey on the rhs.
-        return Vertical(
-            [torch.zeros(self.height_leading_zeros, other.width)]
-            + [
-                b @ other_block
-                for b, other_block in zip(self.lower_blocks, other.flat[:-1])
-            ],
-        )
-
-    def to_tensor(self) -> torch.Tensor:
-        t = torch.zeros(self.height, self.width)
-
-        row, col = self.height_leading_zeros, 0
-        for L in self.lower_blocks:
-            t[row : row + L.height, col : col + L.width] = L.to_tensor()
-            row += L.height
-            col += L.width
-
-        return t
-
-    @property
-    def T(self) -> "UpperDiagonal":
-        return UpperDiagonal(
-            width_leading_zeros=self.height_leading_zeros,
-            upper_blocks=[b.T for b in self.lower_blocks],
-            height_trailing_zeros=self.width_trailing_zeros,
-        )
-
-
-def downshifting_matrix(
-    height_leading_zeros, v_heights: Sequence[int]
-) -> LowerDiagonal:
-    return LowerDiagonal(
-        height_leading_zeros=height_leading_zeros,
-        lower_blocks=list(map(Identity, v_heights[:-1])),
-        width_trailing_zeros=v_heights[-1],
-    )
-
-
 class LowerBiDiagonal(Tridiagonal):
     """Represents a block bi-diagonal matrix.
 
@@ -946,19 +873,6 @@ def _(self, other: Vertical) -> Vertical:
     return Vertical(self @ Diagonal(other))
 
 
-@Diagonal.__matmul__.register
-def _(self, other: LowerDiagonal) -> Diagonal:
-    if self.num_blocks() != len(other.diagonal_blocks):
-        raise ValueError("Number of blocks in the operands must match")
-    return LowerDiagonal(
-        height_leading_zeros=self.flat[0].height,
-        lower_blocks=[
-            b @ other_block for b, other_block in zip(self.flat[1:], other.lower_blocks)
-        ],
-        width_trailing_zeros=other.width_trailing_zeros,
-    )
-
-
 @Diagonal.__add__.register
 def _(self, other: Diagonal) -> Diagonal:
     return Ragged.__add__(self, other)  # This overload just forwards to the parent.
@@ -993,6 +907,67 @@ def _(self, other: Diagonal) -> "SymmetricTriDiagonal":
     )
 
 
+class LowerDiagonal(LowerBiDiagonal):
+    def __init__(
+        self,
+        height_leading_zeros: int,
+        lower_blocks: Sequence[Matrix],
+        width_trailing_zeros: int,
+    ):
+        lower_blocks = list(map(Tensor.wrap, lower_blocks))
+        diagonal_blocks = []
+        h = height_leading_zeros
+        for L in lower_blocks:
+            diagonal_blocks.append(Zero((h, L.width)))
+            h = L.height
+        diagonal_blocks.append(Zero((h, width_trailing_zeros)))
+
+        super().__init__(diagonal_blocks=diagonal_blocks, lower_blocks=lower_blocks)
+        self.height_leading_zeros = height_leading_zeros
+        self.width_trailing_zeros = width_trailing_zeros
+
+    @property
+    def upper_blocks(self) -> list[Matrix]:
+        raise NotImplementedError
+
+    @singledispatchmethod
+    def __matmul__(self, other: Matrix) -> Matrix:
+        raise NotImplementedError
+
+    @__matmul__.register
+    def _(self, other: Vertical) -> Vertical:
+        if other.num_blocks() != len(self.diagonal_blocks):
+            raise ValueError("Number of blocks in the operands must match")
+
+        # TODO: Write this as the product of two Diagonals after some surgey on the rhs.
+        return Vertical(
+            [torch.zeros(self.height_leading_zeros, other.width)]
+            + [
+                b @ other_block
+                for b, other_block in zip(self.lower_blocks, other.flat[:-1])
+            ],
+        )
+
+    def to_tensor(self) -> torch.Tensor:
+        t = torch.zeros(self.height, self.width)
+
+        row, col = self.height_leading_zeros, 0
+        for L in self.lower_blocks:
+            t[row : row + L.height, col : col + L.width] = L.to_tensor()
+            row += L.height
+            col += L.width
+
+        return t
+
+    @property
+    def T(self) -> "UpperDiagonal":
+        return UpperDiagonal(
+            width_leading_zeros=self.height_leading_zeros,
+            upper_blocks=[b.T for b in self.lower_blocks],
+            height_trailing_zeros=self.width_trailing_zeros,
+        )
+
+
 @LowerDiagonal.__matmul__.register
 def _(self, other: Diagonal) -> "LowerDiagonal":
     if len(other.num_blocks()) != len(self.diagonal_blocks):
@@ -1009,7 +984,30 @@ def _(self, other: Diagonal) -> "LowerDiagonal":
     )
 
 
-class UpperDiagonal(Tridiagonal):
+@Diagonal.__matmul__.register
+def _(self, other: LowerDiagonal) -> Diagonal:
+    if self.num_blocks() != len(other.diagonal_blocks):
+        raise ValueError("Number of blocks in the operands must match")
+    return LowerDiagonal(
+        height_leading_zeros=self.flat[0].height,
+        lower_blocks=[
+            b @ other_block for b, other_block in zip(self.flat[1:], other.lower_blocks)
+        ],
+        width_trailing_zeros=other.width_trailing_zeros,
+    )
+
+
+def downshifting_matrix(
+    height_leading_zeros, v_heights: Sequence[int]
+) -> LowerDiagonal:
+    return LowerDiagonal(
+        height_leading_zeros=height_leading_zeros,
+        lower_blocks=list(map(Identity, v_heights[:-1])),
+        width_trailing_zeros=v_heights[-1],
+    )
+
+
+class UpperDiagonal(UpperBiDiagonal):
     def __init__(
         self,
         width_leading_zeros: int,
@@ -1025,15 +1023,9 @@ class UpperDiagonal(Tridiagonal):
             w = U.width
         diagonal_blocks.append(Zero((height_trailing_zeros, w)))
 
-        super().__init__(
-            diagonal_blocks=diagonal_blocks, lower_blocks=[], upper_blocks=upper_blocks
-        )
+        super().__init__(diagonal_blocks=diagonal_blocks, upper_blocks=upper_blocks)
         self.height_trailing_zeros = height_trailing_zeros
         self.width_leading_zeros = width_leading_zeros
-
-    @property
-    def lower_blocks(self) -> list[Matrix]:
-        raise NotImplementedError
 
     @singledispatchmethod
     def __matmul__(self, other: Matrix) -> Matrix:

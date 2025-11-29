@@ -11,34 +11,34 @@ network.
 
 See [hessian.pdf](hessian.pdf) for the full documentation.
 
-The implementation under [src/](src/) is work in progress.
-
 # Partitioned Matrix Library
 
-The implementation relies heavily on operations on structured, partitioned,
-block matrices, so the code includes a library for manipuating these.
+The implementation under [src/](src/) is work in progress.  It relies heavily on
+operations on structured, partitioned, block matrices, so the code includes a
+library for manipuating block-partitioned matrices in
+[block_partitioned_matrices.py](src/block_partitioned_matrices.py).
 
 ## Partitioned Matrix Class Hierarchy
 
 <!-- BEGIN MATRIX HIERARCHY -->
 ```
 Matrix
-├── Identity
-├── Ragged
-│   ├── Generic
-│   │   ├── Horizontal
-│   │   └── Vertical
-│   ├── Symmetric2x2
-│   └── Tridiagonal
-│       ├── Diagonal
-│       ├── LowerBiDiagonal
-│       │   └── IdentityWithLowerDiagonal
-│       ├── LowerDiagonal
-│       ├── SymmetricTriDiagonal
-│       ├── UpperBiDiagonal
-│       │   └── IdentityWithUpperDiagonal
-│       └── UpperDiagonal
 ├── Tensor (also torch.Tensor)
-└── Zero
+├── Identity
+├── Zero
+└── Ragged
+    ├── Generic
+    │   ├── Vertical
+    │   └── Horizontal
+    ├── Symmetric2x2
+    └── Tridiagonal
+        ├── SymmetricTriDiagonal
+        ├── LowerBiDiagonal
+        │   ├── IdentityWithLowerDiagonal
+        │   └── LowerDiagonal
+        ├── UpperBiDiagonal
+        │   ├── IdentityWithUpperDiagonal
+        │   └── UpperDiagonal
+        └── Diagonal
 ```
 <!-- END MATRIX HIERARCHY -->
