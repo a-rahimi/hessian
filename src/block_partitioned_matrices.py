@@ -599,8 +599,50 @@ class Tridiagonal(Ragged):
 
     def LDU_decomposition(
         self,
-    ) -> tuple[IdentityWithLowerDiagonal, Diagonal, IdentityWithUpperDiagonal]:
-        pass
+    ) -> tuple["IdentityWithLowerDiagonal", "Diagonal", "IdentityWithUpperDiagonal"]:
+        "Factorize into L D U, where L is lower block-diagonal, U is upper block-diagonal, and D is diagonal."
+
+        # An illustration of block LDU decomposition:
+        #
+        #   T = L D U
+        #
+        #    [ D₀    U₀     0     ...               ]   =   [ I   0   0   ...           ] [ B₀  0   0  ...          ] [  I   V₀   0   ...          ]
+        #    [ L₀    D₁     U₁    ...               ]       [ K₀  I   0   ...           ] [  0  B₁  0  ...          ] [  0   I   V₁   ...          ]
+        #    [ 0     L₁     D₂      ...             ]       [ 0   K₁  I   ...           ] [  0   0  B₂ ...          ] [  0   0    I   ...          ]
+        #                 ...                                                           ...
+        #    [ 0     0    0       ... D_{n-2} U_{n-2}  ]    [ 0   0    0 ... I   0      ] [ 0 0 0 ... B_{n-2} 0     ] [ 0 ... 0        I   V_{n-2} ]
+        #    [ 0     0    0       ... L_{n-2} D_{n-1}  ]    [ 0   0    0 ... K_{n-2} I  ] [ 0 0 0 ...    0  B_{n-1} ] [ 0 ...          0   I      ]
+        #
+        #
+        # We have the base case
+        #   B[0] = D[0]
+        #
+        # For i < n-1, we also have
+        #   U[i] = B[i] @ V[i]
+        #   L[i] = K[i] @ B[i]
+        #   D[i+1] = B[i+1] + K[i] @ B[i] @ V[i]
+        #
+        # These imply, respectively,
+        #
+        #   V[i] = B[i] \ U[i]
+        #   K[i] = (B[i].T \ L[i].T).T
+        #   B[i+1] = D[i+1] - K[i] @ B[i] @ V[i]
+
+        Bs = [self.diagonal_blocks[0]]
+        Vs = []
+        Ks = []
+        for U, L, Dnext in zip(
+            self.upper_blocks, self.lower_blocks, self.diagonal_blocks[1:]
+        ):
+            Vs.append(Bs[-1].solve(U))
+            Ks.append(Bs[-1].T.solve(L.T).T)
+            Bs.append(Dnext - Ks[-1] @ Bs[-1] @ Vs[-1])
+
+        return (
+            IdentityWithLowerDiagonal(Ks),
+            Diagonal(Bs),
+            IdentityWithUpperDiagonal(Vs),
+        )
 
     def to_tensor(self) -> torch.Tensor:
         L = LowerDiagonal(
@@ -781,9 +823,11 @@ class LowerBiDiagonal(Tridiagonal):
 
 class IdentityWithLowerDiagonal(LowerBiDiagonal):
     def __init__(self, lower_blocks: Sequence[Matrix]):
+        lower_blocks = [Tensor.wrap(b) for b in lower_blocks]
         super().__init__(
             lower_blocks=lower_blocks,
-            diagonal_blocks=[Identity()] * (len(lower_blocks) + 1),
+            diagonal_blocks=[Identity(L.width) for L in lower_blocks]
+            + [Identity(lower_blocks[-1].height)],
         )
 
 
@@ -875,9 +919,11 @@ class UpperBiDiagonal(Tridiagonal):
 
 class IdentityWithUpperDiagonal(UpperBiDiagonal):
     def __init__(self, upper_blocks: Sequence[Matrix]):
+        upper_blocks = [Tensor.wrap(b) for b in upper_blocks]
         super().__init__(
             upper_blocks=upper_blocks,
-            diagonal_blocks=[Identity()] * (len(upper_blocks) + 1),
+            diagonal_blocks=[Identity(L.height) for L in upper_blocks]
+            + [Identity(upper_blocks[-1].width)],
         )
 
 
