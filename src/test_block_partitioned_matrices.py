@@ -170,6 +170,68 @@ class TestBlockVector:
         v = Vertical([Vertical([col(1.0, 2.0)]), Vertical([col(3.0, 4.0, 5.0)])])
         assert torch.allclose(v.to_tensor(), col(1.0, 2.0, 3.0, 4.0, 5.0))
 
+    def test_blockwise_transpose_structure(self):
+        """Test blockwise_transpose structure and content."""
+        v11 = col(1.0, 1.1)
+        v12 = col(2.0, 2.1)
+        V1 = Vertical([v11, v12])
+
+        v21 = col(3.0, 3.1)
+        v22 = col(4.0, 4.1)
+        V2 = Vertical([v21, v22])
+
+        V = Vertical([V1, V2])
+
+        VT = V.blockwise_transpose()
+
+        # Expected: VT = [Vertical([v11, v21]), Vertical([v12, v22])]
+        assert isinstance(VT, Vertical)
+        assert VT.num_blocks() == 2
+
+        U1 = VT.flat[0]
+        U2 = VT.flat[1]
+
+        assert isinstance(U1, Vertical)
+        assert isinstance(U2, Vertical)
+
+        assert U1.num_blocks() == 2
+        assert U2.num_blocks() == 2
+
+        # Check content
+        torch.testing.assert_close(U1.flat[0].to_tensor(), v11)
+        torch.testing.assert_close(U1.flat[1].to_tensor(), v21)
+
+        torch.testing.assert_close(U2.flat[0].to_tensor(), v12)
+        torch.testing.assert_close(U2.flat[1].to_tensor(), v22)
+
+    def test_blockwise_transpose_mismatched_blocks_raises(self):
+        """Test that blockwise_transpose raises ValueError for mismatched sub-blocks."""
+        V1 = Vertical([col(1.0), col(2.0)])
+        V2 = Vertical([col(3.0)])  # Only 1 sub-block
+
+        V = Vertical([V1, V2])
+
+        with pytest.raises(
+            ValueError, match="All blocks must have the same number of sub-blocks"
+        ):
+            V.blockwise_transpose()
+
+    def test_blockwise_transpose_involution(self):
+        """Test that blockwise_transpose is an involution (f(f(x)) = x)."""
+        v11 = col(1.0, 1.1)
+        v12 = col(2.0, 2.1)
+        V1 = Vertical([v11, v12])
+
+        v21 = col(3.0, 3.1)
+        v22 = col(4.0, 4.1)
+        V2 = Vertical([v21, v22])
+
+        V = Vertical([V1, V2])
+
+        V_TT = V.blockwise_transpose().blockwise_transpose()
+
+        torch.testing.assert_close(V_TT.to_tensor(), V.to_tensor())
+
 
 class TestBlockDiagonal:
     """Tests for BlockDiagonal class."""
