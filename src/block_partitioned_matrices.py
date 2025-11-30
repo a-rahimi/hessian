@@ -29,6 +29,27 @@ A = Symmetri2x2(
 
 One can then multiply A by a vector v with A @ v, or solve the linear system A @
 x = b with x = A.solve(b), or recover the inverse of A with A.invert().
+
+Here is the class hierarchy:
+
+Matrix
+├── Tensor (also torch.Tensor)
+├── Identity
+├── Zero
+└── Ragged
+    ├── Generic
+    │   ├── Vertical
+    │   └── Horizontal
+    ├── Symmetric2x2
+    └── Tridiagonal
+        ├── SymmetricTriDiagonal
+        ├── LowerBiDiagonal
+        │   ├── IdentityWithLowerDiagonal
+        │   └── LowerDiagonal
+        ├── UpperBiDiagonal
+        │   ├── IdentityWithUpperDiagonal
+        │   └── UpperDiagonal
+        └── Diagonal
 """
 
 from typing import Any, Callable, Iterator, Sequence
@@ -229,7 +250,7 @@ def reshape_to_2d_list(lst: Sequence[Any], shape: tuple[int, int]) -> list[list[
 
 
 class Ragged(Matrix):
-    """An unstructured blocked partition matrix.
+    """An unstructured block-partitioned matrix.
 
     Each block in this matrix can in turn be a matrix. You can index into the
     blocks, traverse them, and reshape the block structure.
@@ -320,7 +341,7 @@ class Generic(Ragged):
             if not np.all(widths == widths[0]):
                 raise ValueError("All blocks in column must have the same width")
 
-    def __getitem__(self, index: Any) -> Matrix | "Generic":
+    def __getitem__(self, index: Any) -> Matrix | "Horizontal" | "Vertical" | "Generic":
         if not isinstance(index, tuple):
             raise ValueError("Index must be a tuple of two elements (row, column)")
         row, col = index
@@ -344,19 +365,18 @@ class Generic(Ragged):
         return Generic(reshape_to_2d_list(list(self.flatten()), shape))
 
     def to_tensor(self) -> torch.Tensor:
-        return torch.cat(
-            [torch.cat([b.to_tensor() for b in row], dim=1) for row in self.blocks],
-            dim=0,
+        return torch.vstack(
+            [torch.hstack([b.to_tensor() for b in row]) for row in self.blocks]
         )
 
     @property
     def width(self) -> int:
-        # Sum up the width of the blocks in the first row.
+        # Sum up the width of the blocks of the first row.
         return sum(b.width for b in self.blocks[0])
 
     @property
     def height(self) -> int:
-        # Sum up the height of the blocks in the first column.
+        # Sum up the height of the blocks of the first column.
         return sum(row[0].height for row in self.blocks)
 
 
@@ -697,11 +717,7 @@ class SymmetricTriDiagonal(Tridiagonal):
                 "Number of lower blocks must be one less than the number of diagonal blocks"
             )
 
-        super().__init__(
-            diagonal_blocks,
-            lower_blocks,
-            [],
-        )
+        super().__init__(diagonal_blocks, lower_blocks, [])
 
     @cached_property
     def upper_blocks(self) -> list[Matrix]:
@@ -800,6 +816,9 @@ class LowerBiDiagonal(Tridiagonal):
 
     def solve(self, rhs: Vertical) -> Vertical:
         """Solve M x = rhs using back-substitution."""
+        if rhs.num_blocks() != len(self.diagonal_blocks):
+            raise ValueError("Number of blocks in vector and matrix must match")
+
         # We have that
         #   diagonal_blocks[0] @ x[0] = rhs[0]
         # so
@@ -808,10 +827,6 @@ class LowerBiDiagonal(Tridiagonal):
         #   lower_blocks[i] @ x[i] + diagonal_blocks[i+1] @ x[i+1] = rhs[i+1]
         # so
         #   x[i+1] = diagonal_blocks[i+1] \ (rhs[i+1] - lower_blocks[i] @ x[i])
-
-        if rhs.num_blocks() != len(self.diagonal_blocks):
-            raise ValueError("Number of blocks in vector and matrix must match")
-
         result_blocks = [self.diagonal_blocks[0].solve(rhs.flat[0])]
         for i in range(len(self.lower_blocks)):
             result_blocks.append(
@@ -867,7 +882,7 @@ class UpperBiDiagonal(Tridiagonal):
     ):
         if len(upper_blocks) != len(diagonal_blocks) - 1:
             raise ValueError(
-                "Number of upper blocks must be one less than the number of diagonal blocks"
+                "Number of upper blocks must be the number of diagonal blocks minus one"
             )
         super().__init__(
             diagonal_blocks,
@@ -877,7 +892,7 @@ class UpperBiDiagonal(Tridiagonal):
 
     @singledispatchmethod
     def __matmul__(self, v: Matrix) -> Matrix:
-        raise NotImplementedError
+        raise NotImplementedError  # Special cases implemented below.
 
     @__matmul__.register
     def __matmul__(self, v: Vertical) -> Vertical:
@@ -895,6 +910,9 @@ class UpperBiDiagonal(Tridiagonal):
 
     def solve(self, rhs: Vertical) -> Vertical:
         """Solve M x = rhs using forward-substitution."""
+        if rhs.num_blocks() != len(self.diagonal_blocks):
+            raise ValueError("Number of blocks in vector and matrix must match")
+
         # We have for i<N,
         #   diagonal_blocks[i] @ x[i] + upper_blocks[i] @ x[i+1] = rhs[i]
         # so
@@ -903,10 +921,6 @@ class UpperBiDiagonal(Tridiagonal):
         #   diagonal_blocks[N] @ x[N] = rhs[N]
         # so
         #   x[N] = diagonal_blocks[N] \ rhs[N]
-
-        if rhs.num_blocks() != len(self.diagonal_blocks):
-            raise ValueError("Number of blocks in vector and matrix must match")
-
         result_blocks = [self.diagonal_blocks[-1].solve(rhs.flat[-1])]
         for i in range(len(self.upper_blocks) - 1, -1, -1):
             result_blocks.insert(
@@ -948,11 +962,7 @@ class IdentityWithUpperDiagonal(UpperBiDiagonal):
 class Diagonal(Tridiagonal):
     @singledispatchmethod
     def __init__(self, diagonal_blocks: Sequence[Matrix]):
-        super().__init__(
-            diagonal_blocks,
-            [],
-            [],
-        )
+        super().__init__(diagonal_blocks, [], [])
 
     @__init__.register
     def _(self, diagonal_blocks: Ragged):
@@ -985,15 +995,15 @@ class Diagonal(Tridiagonal):
 
     @singledispatchmethod
     def __matmul__(self, other: Matrix) -> Matrix:
-        raise NotImplementedError
+        raise NotImplementedError  # Special cases implemented below.
 
     @singledispatchmethod
     def __add__(self, other: Matrix) -> Matrix:
-        raise NotImplementedError
+        raise NotImplementedError  # Special cases implemented below.
 
     @singledispatchmethod
     def __sub__(self, other: Matrix) -> Matrix:
-        raise NotImplementedError
+        raise NotImplementedError  # Special cases implemented below.
 
     @property
     def T(self) -> "Diagonal":
@@ -1012,7 +1022,7 @@ def _(self, other: Vertical) -> Vertical:
 
 @Diagonal.__add__.register
 def _(self, other: Diagonal) -> Diagonal:
-    return Ragged.__add__(self, other)  # This overload just forwards to the parent.
+    return Ragged.__add__(self, other)  # Forwards to the parent.
 
 
 @Diagonal.__add__.register
@@ -1023,7 +1033,7 @@ def _(self, _: Identity) -> Diagonal:
 
 @Diagonal.__sub__.register
 def _(self, other: Diagonal) -> Diagonal:
-    return Ragged.__sub__(self, other)  # This overload just forwards to the parent.
+    return Ragged.__sub__(self, other)  # Forwards to the parent.
 
 
 @Diagonal.__sub__.register
@@ -1036,6 +1046,7 @@ def _(self, _: Identity) -> Diagonal:
 def _(self, other: Diagonal) -> "SymmetricTriDiagonal":
     if len(self.diagonal_blocks) != len(other.blocks):
         raise ValueError("Number of blocks in the operands must match")
+
     # T + D just adds to the diagonal blocks.
     return SymmetricTriDiagonal(
         lower_blocks=self.lower_blocks,
@@ -1118,6 +1129,7 @@ def _(self, other: Diagonal) -> "LowerDiagonal":
 def _(self, other: LowerDiagonal) -> Diagonal:
     if self.num_blocks() != len(other.diagonal_blocks):
         raise ValueError("Number of blocks in the operands must match")
+
     # D L is lower diagonal, with entries D[1:] L[:], and zero tacked on at
     return LowerDiagonal(
         height_leading_zeros=self.flat[0].height,
@@ -1164,6 +1176,7 @@ class UpperDiagonal(UpperBiDiagonal):
     def _(self, other: Diagonal) -> Matrix:
         if other.num_blocks() != len(self.diagonal_blocks):
             raise ValueError("Number of blocks in the operands must match")
+
         # U D is upper diagonal, with entries U[:] D[1:]
         return UpperDiagonal(
             width_leading_zeros=other.flat[0].shape[1],
@@ -1186,6 +1199,7 @@ class UpperDiagonal(UpperBiDiagonal):
     def _(self, other: LowerDiagonal) -> Diagonal:
         if other.num_blocks() != self.num_blocks():
             raise ValueError("Number of blocks in the operands must match")
+
         # U L is lower diagonal, with entries U[:] L[:], and zero tacked on at
         # the end.
         return Diagonal(
@@ -1215,6 +1229,7 @@ class UpperDiagonal(UpperBiDiagonal):
 def _(self, other: UpperDiagonal) -> Diagonal:
     if self.num_blocks() != len(other.diagonal_blocks):
         raise ValueError("Number of blocks in the operands must match")
+
     # D U is upper diagonal, with entries D[:-1] U[:].
     return UpperDiagonal(
         width_leading_zeros=other.width_leading_zeros,
@@ -1227,6 +1242,7 @@ def _(self, other: UpperDiagonal) -> Diagonal:
 def _(self, other: UpperDiagonal) -> Diagonal:
     if len(other.blocks) != len(self.blocks):
         raise ValueError("Number of blocks in the operands must match")
+
     # L U is diagonal, with entries L[:] U[:].
     return Diagonal(
         [Zero((self.height_leading_zeros, other.width_leading_zeros))]
