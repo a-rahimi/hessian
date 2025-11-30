@@ -1139,3 +1139,76 @@ class TestTridiagonal:
             torch.testing.assert_close(b_sum.to_tensor(), b1.to_tensor() * 2)
         for b1, b_sum in zip(T1.upper_blocks, T_sum.upper_blocks):
             torch.testing.assert_close(b_sum.to_tensor(), b1.to_tensor() * 2)
+
+    def test_LDU_decomposition_reconstructs_matrix(self):
+        """Test that L @ D @ U equals the original tridiagonal matrix."""
+        torch.manual_seed(0)
+
+        # Build a small 3-block tridiagonal system with 2x2 blocks.  Ensure its
+        # diagonal blocks are invertible.
+        tri = Tridiagonal(
+            [
+                torch.randn(2, 2) + 2 * torch.eye(2),
+                torch.randn(2, 2) + 2 * torch.eye(2),
+                torch.randn(2, 2) + 2 * torch.eye(2),
+            ],
+            lower_blocks=[torch.randn(2, 2), torch.randn(2, 2)],
+            upper_blocks=[torch.randn(2, 2), torch.randn(2, 2)],
+        )
+        L, D, U = tri.LDU_decomposition()
+
+        assert isinstance(L, IdentityWithLowerDiagonal)
+        assert isinstance(D, Diagonal)
+        assert isinstance(U, IdentityWithUpperDiagonal)
+
+        T_dense = tri.to_tensor()
+
+        # Dense representation of the factorization.
+        L_dense = L.to_tensor()
+        D_dense = D.to_tensor()
+        U_dense = U.to_tensor()
+        LDU_dense = L_dense @ D_dense @ U_dense
+
+        torch.testing.assert_close(LDU_dense, T_dense, rtol=1e-5, atol=1e-5)
+
+    def test_solve_via_LDU_decomposition(self):
+        """Test solving A v = b via LDU decomposition for Tridiagonal."""
+        torch.manual_seed(1)
+
+        D_blocks = [
+            torch.randn(2, 2) + 5 * torch.eye(2),
+            torch.randn(2, 2) + 5 * torch.eye(2),
+            torch.randn(2, 2) + 5 * torch.eye(2),
+        ]
+
+        L_blocks = [torch.randn(2, 2), torch.randn(2, 2)]
+        U_blocks = [torch.randn(2, 2), torch.randn(2, 2)]
+
+        tri = Tridiagonal(D_blocks, L_blocks, U_blocks)
+        L_mat, D_mat, U_mat = tri.LDU_decomposition()
+
+        # Build a random RHS and solve using dense linear algebra as reference.
+        T_dense = tri.to_tensor()
+        b = torch.randn(T_dense.shape[0], 1)
+
+        # Reference solution using dense solver.
+        x_ref = torch.linalg.solve(T_dense, b)
+
+        # Solution using the LDU factorization: x = (L D U)^{-1} b = U^{-1} D^{-1} L^{-1} b.
+        # Interpret b as a Vertical of blocks matching the diagonal blocks.
+        block_size = D_blocks[0].shape[0]
+        b_blocks = [
+            b[i * block_size : (i + 1) * block_size] for i in range(len(D_blocks))
+        ]
+        b_vert = Vertical(b_blocks)
+
+        # Solve L y = b  => y = L^{-1} b
+        # Solve D z = y  => z = D^{-1} y
+        # Solve U x = z  => x = U^{-1} z
+        y = L_mat.solve(b_vert)
+        z = D_mat.solve(y)
+        x_block = U_mat.solve(z)
+
+        x = x_block.to_tensor()
+
+        torch.testing.assert_close(x, x_ref, rtol=1e-5, atol=1e-5)
