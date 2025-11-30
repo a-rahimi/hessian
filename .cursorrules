@@ -7,9 +7,18 @@ Always use the virtual environment located at `/Users/ali/hessian/.venv` when ru
 - Or activate first: `source /Users/ali/hessian/.venv/bin/activate`
 
 ## Running Python Commands
-When executing Python scripts, tests, or any Python code in this project, always use the virtual environment to ensure consistent dependencies and package versions.
+
+When executing Python scripts, tests, or any Python code in this project,
+always use the virtual environment to ensure consistent dependencies and
+package versions.
 
 ## Code Generation Guidelines
+
+### Coding standards
+
+* Prefer to inline variables. If a variable is only used once, inline it. Use
+  keyword args to give the result a name. If the resulting expression is
+  complex, write a comment to explain what the expression does.
 
 ### Comments
 
@@ -38,6 +47,8 @@ a.call_callback()
 
 ### Tests
 
-* Test files don't need a main driver. They'll always be called through pytest. They'll never be called as standalone programs.
+* Test files don't need a main driver. They'll always be called through pytest.
+  They'll never be called as standalone programs.
 
-* When many tests share the same local variables and objects, refactor these redundancies into pytest fixtures
+* When many tests share the same local variables and objects, refactor these
+  redundancies into pytest fixtures
