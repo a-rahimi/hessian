@@ -9,7 +9,8 @@ pivoting it into a block-tri-diagonal system, factoring that system, and
 solving it. This, in effect, ends up looking like running propagation on a dual
 network.
 
-See [hessian.pdf](hessian.pdf) for the full documentation.
+See [hessian.pdf](hessian.pdf) for the full documentation. For a quick look at
+the algortihm, see the [hessian_inverse_product](src/hessian.py#L269) function.
 
 # Partitioned Matrix Library
 
