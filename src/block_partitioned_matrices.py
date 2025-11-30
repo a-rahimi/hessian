@@ -1,4 +1,4 @@
-"""A small library of operations on partitioned matrices.
+"""A library of operations on partitioned matrices.
 
 The blocks of these matrices can in turn be block matrices themselves, or they
 canbe torch tensors. This way, it becomes easy to express linear algebra
@@ -456,6 +456,23 @@ class Vertical(Generic):
     @__init__.register
     def _(self, blocks: Ragged, validate=True):
         self.__init__(blocks.flat, validate=validate)
+
+    def blockwise_transpose(self) -> "Vertical":
+        """Assuming this object has blocks v_ij, return a new Vertical object with blocks v_ji."""
+
+        # For the operation to make sense, every block v_i must have the
+        # the same number of sub-blocks. Ensure this is the case.
+        num_subblocks = self.flat[0].num_blocks()
+        for b in self.flat:
+            if b.num_blocks() != num_subblocks:
+                raise ValueError("All blocks must have the same number of sub-blocks")
+
+        return Vertical(
+            [
+                Vertical([self.flat[i].flat[j] for i in range(self.num_blocks())])
+                for j in range(num_subblocks)
+            ]
+        )
 
 
 @Symmetric2x2.__matmul__.register
