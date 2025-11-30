@@ -9,10 +9,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PATH = PROJECT_ROOT / "src" / "block_partitioned_matrices.py"
-README_PATH = PROJECT_ROOT / "README.md"
 
-BEGIN_MARKER = "<!-- BEGIN MATRIX HIERARCHY -->"
-END_MARKER = "<!-- END MATRIX HIERARCHY -->"
+START_MARKER = "Here is the class hierarchy:"
+END_MARKER = '"""'
 
 
 def _base_name(expr: ast.expr) -> str:
@@ -108,28 +107,24 @@ def _render_tree(
     return "\n".join(lines)
 
 
-def _update_readme(hierarchy: str) -> None:
-    block = "\n".join([BEGIN_MARKER, "```", hierarchy, "```", END_MARKER])
-    readme_text = README_PATH.read_text()
+def _update_source(hierarchy: str) -> None:
+    block = f"{START_MARKER}\n\n{hierarchy}\n{END_MARKER}"
+    source_text = SOURCE_PATH.read_text()
     pattern = re.compile(
-        re.escape(BEGIN_MARKER) + r".*?" + re.escape(END_MARKER), re.DOTALL
+        re.escape(START_MARKER) + r".*?" + re.escape(END_MARKER), re.DOTALL
     )
-    if pattern.search(readme_text):
-        updated = pattern.sub(block, readme_text)
+    if pattern.search(source_text):
+        updated = pattern.sub(block, source_text)
+        SOURCE_PATH.write_text(updated)
     else:
-        if not readme_text.endswith("\n"):
-            readme_text += "\n"
-        updated = (
-            readme_text + "\n## Partitioned Matrix Class Hierarchy\n\n" + block + "\n"
-        )
-    README_PATH.write_text(updated)
+        print(f"Markers '{START_MARKER}' ... '{END_MARKER}' not found in {SOURCE_PATH}")
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Update README.md with the hierarchy of Matrix subclasses defined in "
-            "src/block_partitioned_matrices.py."
+            "Update the docstring in src/block_partitioned_matrices.py with the hierarchy "
+            "of Matrix subclasses."
         )
     )
     parser.add_argument(
@@ -146,7 +141,7 @@ def main() -> None:
     class_bases = _parse_classes()
     tree, extras = _build_hierarchy(class_bases)
     hierarchy = _render_tree(tree, extras, order=args.order)
-    _update_readme(hierarchy)
+    _update_source(hierarchy)
 
 
 if __name__ == "__main__":
