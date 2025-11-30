@@ -595,7 +595,8 @@ class Tridiagonal(Ragged):
         )
 
     def solve(self, v: Vertical) -> Vertical:
-        pass
+        L, D, U = self.LDU_decomposition()
+        return U.solve(D.solve(L.solve(v)))
 
     def LDU_decomposition(
         self,

@@ -1212,3 +1212,26 @@ class TestTridiagonal:
         x = x_block.to_tensor()
 
         torch.testing.assert_close(x, x_ref, rtol=1e-5, atol=1e-5)
+
+    def test_solve(self):
+        """Test Tridiagonal.solve against dense reference."""
+        torch.manual_seed(2)
+
+        tri = Tridiagonal(
+            [
+                torch.randn(2, 2) + 2 * torch.eye(2),
+                torch.randn(2, 2) + 2 * torch.eye(2),
+                torch.randn(2, 2) + 2 * torch.eye(2),
+            ],
+            lower_blocks=[torch.randn(2, 2), torch.randn(2, 2)],
+            upper_blocks=[torch.randn(2, 2), torch.randn(2, 2)],
+        )
+
+        # Build RHS
+        b = Vertical([torch.randn(b.height, 1) for b in tri.diagonal_blocks])
+
+        # Solve
+        solution = tri.solve(b)
+
+        solution_expected = torch.linalg.solve(tri.to_tensor(), b.to_tensor())
+        torch.testing.assert_close(solution.to_tensor(), solution_expected)
