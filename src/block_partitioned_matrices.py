@@ -3,19 +3,9 @@
 The blocks of these matrices can in turn be block matrices themselves, or they
 canbe torch tensors. This way, it becomes easy to express linear algebra
 operations like matrix multiplication, inversion, and solving linear systems
-with matrices that have hierarchical structure.
-
-The package offers a few different kinds of structures:
-* Vertically stacked matrices (`Vertical`)
-* Block diagonal matrices (`Diagonal`)
-* Upper and lower block diagonal matrices (`UpperBiDiagonal` and `LowerBiDiagonal`)
-* Bi-diagonal matrices (`UpperBiDiagonal` and `LowerBiDiagonal`)
-* Symmetric block 2x2 matrices (`Symmetric2x2`)
-
-It also provides place holder matrices for Zero and Identity that don't take up
-any space in memory or compute other than for their metadata.
-
-For example, if a matrix A has a 2x2 block structre and each of these blocks are in turn block diagonal matrices,
+with matrices that have hierarchical structure.  For example, if a matrix A has
+a 2x2 block structre and each of these blocks are in turn block diagonal
+matrices,
 one can define
 
 A = Symmetri2x2(
@@ -29,6 +19,9 @@ A = Symmetri2x2(
 
 One can then multiply A by a vector v with A @ v, or solve the linear system A @
 x = b with x = A.solve(b), or recover the inverse of A with A.invert().
+
+The package provides placeholder matrices for Zero and Identity that don't take up
+any space in memory or compute other than for their metadata.
 
 Here is the class hierarchy:
 
@@ -159,6 +152,9 @@ class Identity(Matrix):
 
     def __eq__(self, other: Matrix) -> bool:
         return isinstance(other, Identity) and self.dimension == other.dimension
+
+    def __add__(self, other: Matrix) -> Matrix:
+        return other + self
 
     @property
     def T(self) -> "Identity":
@@ -557,6 +553,25 @@ class Tridiagonal(Ragged):
     def upper_blocks(self) -> Sequence[Matrix]:
         return self.blocks[2]
 
+    @singledispatchmethod
+    def __matmul__(self, other: Matrix):
+        raise NotImplementedError
+
+    @__matmul__.register
+    def _(self, v: Vertical) -> Vertical:
+        L = LowerDiagonal(
+            self.diagonal_blocks[0].height,
+            self.lower_blocks,
+            self.diagonal_blocks[-1].width,
+        )
+        D = Diagonal(self.diagonal_blocks)
+        U = UpperDiagonal(
+            self.diagonal_blocks[0].width,
+            self.upper_blocks,
+            self.diagonal_blocks[-1].height,
+        )
+        return L @ v + D @ v + U @ v
+
     @staticmethod
     def from_matrix(matrix: Matrix) -> "Tridiagonal":
         if isinstance(matrix, Tridiagonal):
@@ -723,6 +738,7 @@ class SymmetricTriDiagonal(Tridiagonal):
     def upper_blocks(self) -> list[Matrix]:
         return [b.T for b in self.lower_blocks]
 
+    @cached_property
     def __matmul__(self, other: Matrix) -> Matrix:
         raise NotImplementedError
 
@@ -775,8 +791,8 @@ class LowerBiDiagonal(Tridiagonal):
     [D_0    0
      L_1  D_2    0
           L_1  D_3
-              ...
-               L_N  D_N]
+              ...    0
+               L_N  D_{N - 1}]
     """
 
     def __init__(
@@ -786,19 +802,20 @@ class LowerBiDiagonal(Tridiagonal):
             raise ValueError(
                 "Number of lower blocks must be one less than the number of diagonal blocks"
             )
+        diagonal_blocks = list(map(Tensor.wrap, diagonal_blocks))
+
         super().__init__(
             diagonal_blocks,
             lower_blocks,
-            upper_blocks=[],
+            upper_blocks=[
+                Zero((D.height, Dnext.width))
+                for D, Dnext in zip(diagonal_blocks[:-1], diagonal_blocks[1:])
+            ],
         )
 
-    @property
-    def upper_blocks(self) -> list[Matrix]:
-        raise NotImplementedError
-
     @singledispatchmethod
-    def __matmul__(self, v: Matrix) -> Matrix:
-        raise NotImplementedError
+    def __matmul__(self, other: Matrix) -> Matrix:
+        return Tridiagonal.__matmul__(self, other)
 
     @__matmul__.register
     def _(self, v: Vertical) -> Vertical:
@@ -884,9 +901,13 @@ class UpperBiDiagonal(Tridiagonal):
             raise ValueError(
                 "Number of upper blocks must be the number of diagonal blocks minus one"
             )
+        diagonal_blocks = list(map(Tensor.wrap, diagonal_blocks))
         super().__init__(
             diagonal_blocks,
-            lower_blocks=[],
+            lower_blocks=[
+                Zero((Dnext.height, D.width))
+                for D, Dnext in zip(diagonal_blocks[:-1], diagonal_blocks[1:])
+            ],
             upper_blocks=upper_blocks,
         )
 
@@ -1157,6 +1178,7 @@ class UpperDiagonal(UpperBiDiagonal):
     ):
         upper_blocks = list(map(Tensor.wrap, upper_blocks))
 
+        # TODO: use list comprehension to make this tighter.
         diagonal_blocks = []
         w = width_leading_zeros
         for U in upper_blocks:

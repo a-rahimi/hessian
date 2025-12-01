@@ -1297,3 +1297,45 @@ class TestTridiagonal:
 
         solution_expected = torch.linalg.solve(tri.to_tensor(), b.to_tensor())
         torch.testing.assert_close(solution.to_tensor(), solution_expected)
+
+    def test_matmul_vertical(self):
+        """Test Tridiagonal @ Vertical multiplication."""
+        torch.manual_seed(42)
+        # Create a Tridiagonal Matrix
+        # [ 1I   U0   0  ]
+        # [ L0   2I   U1 ]
+        # [ 0    L1   3I ]
+
+        L0 = torch.randn(2, 2)
+        L1 = torch.randn(2, 2)
+        U0 = torch.randn(2, 2)
+        U1 = torch.randn(2, 2)
+
+        tri = Tridiagonal(
+            [1 * torch.eye(2), 2 * torch.eye(2), 3 * torch.eye(2)],
+            lower_blocks=[L0, L1],
+            upper_blocks=[U0, U1],
+        )
+
+        # Vector v = [v1, v2, v3]
+        v1 = col(1.0, 1.0)
+        v2 = col(2.0, 2.0)
+        v3 = col(3.0, 3.0)
+        v = Vertical([v1, v2, v3])
+
+        # Expected result:
+        # r1 = D1 v1 + U1 v2 = 1*v1 + U0 v2
+        # r2 = L1 v1 + D2 v2 + U2 v3 = L0 v1 + 2*v2 + U1 v3
+        # r3 = L2 v2 + D3 v3 = L1 v2 + 3*v3
+
+        r1 = 1 * v1 + U0 @ v2
+        r2 = L0 @ v1 + 2 * v2 + U1 @ v3
+        r3 = L1 @ v2 + 3 * v3
+
+        result = tri @ v
+
+        assert isinstance(result, Vertical)
+        assert result.num_blocks() == 3
+        assert torch.allclose(result.flat[0], r1)
+        assert torch.allclose(result.flat[1], r2)
+        assert torch.allclose(result.flat[2], r3)
