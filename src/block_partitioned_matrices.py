@@ -28,6 +28,7 @@ Here is the class hierarchy:
 Matrix
 ├── Tensor (also torch.Tensor)
 ├── Identity
+│   └── ScaledIdentity
 ├── Zero
 └── Ragged
     ├── Generic
@@ -168,10 +169,69 @@ class Identity(Matrix):
     def height(self) -> int:
         return self.dimension
 
+    def __mul__(self, scalar: float) -> "ScaledIdentity":
+        return ScaledIdentity(scalar, self.dimension)
+
+    def __rmul__(self, scalar: float) -> "ScaledIdentity":
+        return ScaledIdentity(scalar, self.dimension)
+
 
 @Tensor.__matmul__.register
 def _(self, _: Identity) -> Tensor:
     return self
+
+
+class ScaledIdentity(Identity):
+    def __init__(self, scale: float, dimension: int = 0):
+        super().__init__(dimension)
+        self.scale = scale
+
+    def to_tensor(self) -> torch.Tensor:
+        return self.scale * torch.eye(self.dimension)
+
+    def invert(self) -> "ScaledIdentity":
+        return ScaledIdentity(1.0 / self.scale, self.dimension)
+
+    def solve(self, rhs: Matrix) -> Matrix:
+        return ScaledIdentity(1.0 / self.scale, self.dimension) @ rhs
+
+    @singledispatchmethod
+    def __matmul__(self, other: Matrix) -> Matrix:
+        return super().__matmul__(other)
+
+    def __add__(self, other: Matrix) -> Matrix:
+        # Delegate to the other matrix.
+        return other + self
+
+    def __mul__(self, scalar: float) -> "ScaledIdentity":
+        return ScaledIdentity(self.scale * scalar, self.dimension)
+
+    def __rmul__(self, scalar: float) -> "ScaledIdentity":
+        return self.__mul__(scalar)
+
+    def __repr__(self):
+        return f"ScaledIdentity(scale={self.scale}, dimension={self.dimension})"
+
+
+@ScaledIdentity.__matmul__.register
+def _(self, other: "ScaledIdentity") -> "ScaledIdentity":
+    if (
+        self.dimension != 0
+        and other.dimension != 0
+        and self.dimension != other.dimension
+    ):
+        raise ValueError("Dimension mismatch")
+    return ScaledIdentity(self.scale * other.scale, self.dimension or other.dimension)
+
+
+@ScaledIdentity.__matmul__.register
+def _(self, other: Tensor) -> Tensor:
+    return Tensor(self.scale * other.to_tensor())
+
+
+@Tensor.__matmul__.register
+def _(self, other: ScaledIdentity) -> Tensor:
+    return Tensor(self.to_tensor() * other.scale)
 
 
 class Zero(Matrix):
@@ -1269,4 +1329,30 @@ def _(self, other: UpperDiagonal) -> Diagonal:
     return Diagonal(
         [Zero((self.height_leading_zeros, other.width_leading_zeros))]
         + (Diagonal(self.lower_blocks) @ Diagonal(other.upper_blocks)).flat
+    )
+
+
+@Tensor.__add__.register
+def _(self, other: ScaledIdentity) -> Tensor:
+    if other.dimension > 0 and (
+        self.height != other.dimension or self.width != other.dimension
+    ):
+        raise ValueError(
+            f"Shape mismatch {self.shape} vs ScaledIdentity({other.dimension})"
+        )
+    return Tensor(self.to_tensor() + other.scale * torch.eye(self.height))
+
+
+@Diagonal.__add__.register
+def _(self, other: ScaledIdentity) -> Diagonal:
+    # Distribute to blocks
+    return Diagonal([b + ScaledIdentity(other.scale, b.height) for b in self.flatten()])
+
+
+@SymmetricTriDiagonal.__add__.register
+def _(self, other: ScaledIdentity) -> "SymmetricTriDiagonal":
+    # T + sI = T + Diagonal(sI)
+    return SymmetricTriDiagonal(
+        lower_blocks=self.lower_blocks,
+        diagonal_blocks=(Diagonal(self.diagonal_blocks) + other).flat,
     )

@@ -1339,3 +1339,93 @@ class TestTridiagonal:
         assert torch.allclose(result.flat[0], r1)
         assert torch.allclose(result.flat[1], r2)
         assert torch.allclose(result.flat[2], r3)
+
+
+class TestScaledIdentity:
+    def test_init(self):
+        s = ScaledIdentity(2.0, 3)
+        assert s.scale == 2.0
+        assert s.dimension == 3
+
+    def test_mul_identity_creates_scaled(self):
+        I = Identity(3)
+        s = 2.0 * I
+        assert isinstance(s, ScaledIdentity)
+        assert s.scale == 2.0
+        assert s.dimension == 3
+
+        s2 = I * 3.0
+        assert isinstance(s2, ScaledIdentity)
+        assert s2.scale == 3.0
+        assert s2.dimension == 3
+
+    def test_to_tensor(self):
+        s = ScaledIdentity(2.0, 3)
+        expected = 2.0 * torch.eye(3)
+        torch.testing.assert_close(s.to_tensor(), expected)
+
+    def test_invert(self):
+        s = ScaledIdentity(2.0, 3)
+        inv = s.invert()
+        assert isinstance(inv, ScaledIdentity)
+        assert inv.scale == 0.5
+        assert inv.dimension == 3
+
+    def test_invert_product(self):
+        sI = ScaledIdentity(2.0, 3)
+        sIi = sI.invert()
+        v = Tensor(torch.tensor([[1.0], [2.0], [3.0]]))
+
+        res = sI @ sIi @ v
+
+        torch.testing.assert_close(res.to_tensor(), v.to_tensor())
+
+    def test_solve_tensor(self):
+        s = ScaledIdentity(2.0, 2)
+        rhs = Tensor(torch.tensor([[4.0], [6.0]]))
+        sol = s.solve(rhs)
+        assert isinstance(sol, Tensor)
+        torch.testing.assert_close(sol.to_tensor(), torch.tensor([[2.0], [3.0]]))
+
+    def test_matmul_tensor(self):
+        s = ScaledIdentity(2.0, 2)
+        other = Tensor(torch.eye(2))
+        res = s @ other
+        torch.testing.assert_close(res.to_tensor(), 2.0 * torch.eye(2))
+
+        res2 = other @ s
+        torch.testing.assert_close(res2.to_tensor(), 2.0 * torch.eye(2))
+
+    def test_matmul_scaled_identity(self):
+        s1 = ScaledIdentity(2.0, 3)
+        s2 = ScaledIdentity(3.0, 3)
+        res = s1 @ s2
+        assert isinstance(res, ScaledIdentity)
+        assert res.scale == 6.0
+        assert res.dimension == 3
+
+    def test_add_tensor(self):
+        t = Tensor(torch.ones(2, 2))
+        s = ScaledIdentity(2.0, 2)
+        res = t + s
+        expected = torch.tensor([[3.0, 1.0], [1.0, 3.0]])
+        torch.testing.assert_close(res.to_tensor(), expected)
+
+    def test_add_diagonal(self):
+        D = Diagonal([torch.eye(2), torch.eye(2)])
+        s = ScaledIdentity(2.0)  # implicit dimension
+        res = D + s
+        assert isinstance(res, Diagonal)
+        # Each block should be I + 2I = 3I
+        for b in res.diagonal_blocks:
+            torch.testing.assert_close(b.to_tensor(), 3.0 * torch.eye(2))
+
+    def test_add_symmetric_tridiagonal(self):
+        D = [torch.eye(2), torch.eye(2)]
+        L = [torch.zeros(2, 2)]
+        T = SymmetricTriDiagonal(lower_blocks=L, diagonal_blocks=D)
+        s = ScaledIdentity(2.0)
+        res = T + s
+        assert isinstance(res, SymmetricTriDiagonal)
+        for b in res.diagonal_blocks:
+            torch.testing.assert_close(b.to_tensor(), 3.0 * torch.eye(2))
