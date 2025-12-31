@@ -21,7 +21,7 @@
 
 \maketitle \begin{abstract} We describe an exact algorithm for solving linear
   systems $Hx=b$ where $H$ is the Hessian of a deep net. The method computes
-  Hessian-inverse-vector products without storing the Hesssian or its inverse.  in
+  Hessian-inverse-vector products without storing the Hessian or its inverse in
   time and storage that scale linearly in the number of layers.  Compared to the
   naive approach of first computing the Hessian, then solving the linear system,
   which takes storage that's quadratic in the number of parameters and cubically
@@ -35,7 +35,7 @@ The Hessian of a deep net is the matrix of second-order mixed partial
 derivatives of its loss with respect to its parameters. Decades ago, when deep
 nets had only hundreds or thousands of parameters, the Hessian matrix could be
 inverted to implement optimizers that converged much faster than gradient
-descent \cite{Watrous1987, Barnard1992}.  But large modern deep nets, using the
+descent \cite{Watrous1987, Barnard1992}.  But for large modern deep nets, using the
 Hessian has become less practical: The Hessian of a model with a billion
 parameters would have a quintillion entries, which is far larger than can be
 stored, multiplied, factorized, or inverted, even in the largest data centers. A
@@ -48,17 +48,17 @@ The Hessian-inverse-vector product can be computed in time and storage that
 scales linearly with the number of layers in the model, and cubically in the
 number of parameters and activations in each layer.
 
-
-It has long been known that the product of the Hessian with a fixed vector (the
-so-called Hessian-vector product) can be computed in time and storage that
-scales linearly with the number of parameters in the network.  The method, which
-is due to Pearlmutter \cite{pearlmutter94}, scales dramatically better than the
-cubic scaling of the naive algorithm that first computes the Hessian matrix and
-then multiplies it by the vector.  It idea is to produce a new network based on
-the the original network whose gradient is the desired Hessian-vector product.
-Given a way to compute the Hessian-vector product, one can then compute the
-Hessian-inverse-vector product by, say Krylov iterations like Conjugate
-Gradient. However, the quality of the result would then depend on the
+Pearlmutter \cite{pearlmutter94}showed the product of the Hessian with a fixed
+vector (the so-called Hessian-vector product) can be computed in time and
+storage that scales linearly with the number of layers in the network.  The
+scaling behavior of Pearlmutter's method is much better than the cubic scaling
+of the naive algorithm that first computes the Hessian matrix and then
+multiplies it by the vector.  The method  transforms the original network into a
+new network whose gradient is the desired Hessian-vector product. To compute the
+Hessian-vector product, one then just applies backpropagation to the new
+network.  Given a way to compute the Hessian-vector product, one can indirectly
+compute the Hessian-inverse-vector product via, say Krylov iterations like
+Conjugate Gradient. However, the quality of the result would then depend on the
 conditioning of the Hessian, which is notoriously poor for deep nets
 \cite{ying-behrooz-hessian-spectrum}. Unfortunately, there seems to exist no
 variant of Pearlmutter's trick to compute the Hessian-inverse-vector products
@@ -71,7 +71,7 @@ structure that makes it possible to compute Hessian-inverse-vector products
 exactly and efficiently. Regardless of the specific operations in each layer,
 the Hessian of a layerwise deep net is a second order matrix polynomial that
 involves the first order and second order mixed derivatives of each layer, and
-the inverse of a block-bi-diagonal operator that represents the backpropoagation
+the inverse of a block-bi-diagonal operator that represents the backpropagation
 algorithm.  Exploiting this structure offers a direct way to compute the
 Hessian-vector product using exactly the same operations as Pearlmutter's
 algorithm (see Appendix \ref{sec:pearlmutter}). It also leads to a way to
@@ -90,7 +90,7 @@ and skinny networks more efficient than the Hessian of short and fat networks.
 In a followup article, we will investigate training deep networks with the help
 of the Hessian-inverse-vector product as a preconditioner. Based on the
 running-time of the method, we expect it to speed up training in a regime where
-networks are extruded layerwise: instead of have a few layers with many
+networks are extruded layerwise: instead of having a few layers with many
 parameters and many activations, we expect the method to work better when the
 parameters and activations are spread over many layers.
 
@@ -304,8 +304,8 @@ as $dx \to 0$. Appendix \ref{sec:hessian} shows that the Hessian has the followi
 Given a vector $x \in \R^{Lp}$, the formula above allows us to compute $H x$ in
 $O\left(Lap^2 + L a^2p +La^3\right)$ operations without forming $H$. This cost
 is dominated by multiplying by the $D_{xx}$, $D_{zx}$, and $D_{zz}$ matrices.
-Appendix \ref{sec:pearlmutter} shows that these operations are exactly the are
-exactly  the operations performed in Pearlmutter's trick to compute the
+Appendix \ref{sec:pearlmutter} shows that these operations are exactly the
+operations performed in Pearlmutter's trick to compute the
 Hessian-vector product.
 
 To solve systems of the form $H x = b$, one could use Krylov methods to
@@ -367,18 +367,19 @@ efficiently than Gaussian elimination on $\K$ or $H$.
 The pivoting we'll apply reorders the blocks of the variables $x,y,z$ from
 $x_1,\ldots,x_L, y_1,\ldots, y_L, z_1,\ldots, z_L$ to
 $x_1,y_1,z_1,\dots,x_L,y_L,z_L$. This pivoting operation acts as a kind of
-transpose operation on block matrices. When appliekd to $\K$, it turns it into a
-block-tri-diagonal matrix.  To get a better feel for this operation, denote the
-$ij$th block of $\K$ by $\K_{ij}$ and the $uv$th sub-block of this block by
-$\K_{ij,uv}$.  Similarly, $x$ denote a vector conformant with $\K$, with $x_j$
-denoting the column vector that multiplies each block $\K_{\cdot j}$ and denote
-the $v$th sub-block of $x_j$ by $x_{jv}$, which multiplies $\K_{\cdot j,\cdot
-    v}$.  We say that $x$ is $j$-major because as we traverse the entries of $x$
-from top to bottom, the index $j$ increments more slowly than the $v$ index.
+transpose operation on block matrices (its generalization is called a
+"commutation matrix" in \cite{magnus-neudecker}). When applied to $\K$, it turns
+it into a block-tri-diagonal matrix.  To get a better feel for this operation,
+denote the $ij$th block of $\K$ by $\K_{ij}$ and the $uv$th sub-block of this
+block by $\K_{ij,uv}$.  Similarly, $x$ denote a vector conformant with $\K$,
+with $x_j$ denoting the column vector that multiplies each block $\K_{\cdot j}$
+and denote the $v$th sub-block of $x_j$ by $x_{jv}$, which multiplies $\K_{\cdot
+    j,\cdot v}$.  We say that $x$ is $j$-major because as we traverse the entries of
+$x$ from top to bottom, the index $j$ increments more slowly than the $v$ index.
 
 Denote by $\Pi$ the permutation that transposes the
 blocks with the sub-blocks.  Applying this permutation matrix $\Pi$ to $x$ reorders
-it from $j$-major to $d$-major. Applying it to the rows and columns
+it from $j$-major to $d$-major. Applying it to the rows and
 columns of $\K$ results in a block matrix $\K' \equiv \Pi
   \K \Pi^\top$ that satisfies $\K_{ij,uv} = \K'_{uv,ij}$.
 Section \ref{sec:pivoting-examples} illustrates this operator with some examples.
@@ -421,7 +422,7 @@ Then $\K'$ can be written as the block-tri-diagonal matrix
 That means we can solve the system $\K'x'=b'$ by first decomposing $\K'$ via
 block LDU decomposition into the product of a lower-block-bi-diagonal matrix, a
 block-diagonal matrix, and an upper-block-bi-diagonal matrix as $LDU x'=b'$,
-then solve for $L y = b'$  using back subustitution, and finally solve for
+then solve for $L y = b'$  using back substitution, and finally solve for
 $DUx'=y$ using forward substitution. Because these systems are
 block-bi-diagonal, solving them looks like forward and backward propagation on a
 chain. The running time for these solvers is linear in the depth of the network
@@ -716,16 +717,16 @@ Applying $\nabla_x$ to both sides gives
 \end{equation}
 In other words, to compute the Hessian-vector product $\nabla_x^2 z_L \cdot v$,
 it suffices to compute the gradient of $\frac{\partial z_L}{\partial \alpha} $
-with respect to $x$.  We can do this by applying standard backpropoagation
+with respect to $x$.  We can do this by applying standard backpropagation
 to $\frac{\partial z_L}{\partial \alpha}$. At each stage $\ell$ during its
 backward pass, backpropagation produces $\frac{\partial}{\partial x_\ell}
   \frac{\partial z_L}{\partial \alpha} = \nabla_{x_\ell, x} z_L \cdot v$, yielding
-a block of rows in in $\nabla_x^2 z_L \cdot v$.
+a block of rows in $\nabla_x^2 z_L \cdot v$.
 
 To see that this generates the same operations as applying Equation (\ref{eq:hessian}) to $v$, we'll write the backprop
 operations from Equation (\ref{eq:backprop}) against $\frac{\partial z_L}{\partial \alpha}$ explicitly. We'll use again
 the fact that $z_\ell$ depends on $\alpha$ through both $z_{\ell-1}$ and $x_\ell + \alpha v_\ell$ to massage the
-backward recursion of for $\frac{\partial z_L}{\partial \alpha}$ into a format that matches Equation
+backward recursion for $\frac{\partial z_L}{\partial \alpha}$ into a format that matches Equation
 (\ref{eq:backprop}):
 \begin{align}
   b'_\ell & \equiv \frac{\partial}{\partial z_\ell} \frac{\partial z_L}{\partial \alpha}

@@ -15,13 +15,14 @@ Solving this system naively requires a number of operations that scales
 cubically with the number of parameters in the deep net, which is impractical
 for most modern networks.  The trick is to augment the system of equations
 $Hx=v$ with auxiliary variables, pivot the system into a block-tri-diagonal
-system, factor that system, and then solve it. These steps, in effect, ends up
+system, factor that system, and then solve it. These steps, in effect, end up
 looking like running propagation on a network that is the dual of the original
 network.
 
 The full idea is described in [hessian.pdf](hessian.pdf). For a demo, see
-[demo_hessian.ipynb](src/demo_hessian.ipynb). For a quick look at
-how algortihm is implemented, see the [hessian_inverse_product](src/hessian.py#L269).
+[demo_hessian.ipynb](src/demo_hessian.ipynb). For a quick look at how the
+algortihm is implemented, see the
+[hessian_inverse_product](src/hessian.py#L269).
 
 # Partitioned Matrix Library
 
