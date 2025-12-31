@@ -302,10 +302,6 @@ class Zero(Matrix):
         return isinstance(other, Zero) and self.shape == other.shape
 
     def __add__(self, other: Matrix) -> Matrix:
-        if (self.shape and other.shape) and (
-            other.width != self.width or other.height != self.height
-        ):
-            raise ValueError(f"Shape mismatch {self} vs {other.height} x {other.width}")
         return other
 
     def __sub__(self, other: Matrix) -> Matrix:

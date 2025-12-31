@@ -1,26 +1,28 @@
-# Cursor Rules for Hessian Project
+---
+description: Python code generation guidelines and environment setup
+globs: **/*.py
+---
 
-## Python Environment
+# Python Environment
+
 Always use the virtual environment located at `/Users/ali/hessian/.venv` when running Python code.
 
-- Use the Python interpreter directly: `/Users/ali/hessian/.venv/bin/python`
-- Or activate first: `source /Users/ali/hessian/.venv/bin/activate`
+- Use the Python interpreter directly: `hessian/.venv/bin/python`
+- Or activate first: `source hessian/.venv/bin/activate`
 
-## Running Python Commands
+When executing Python scripts, tests, or any Python code in this project, always
+use the virtual environment to ensure consistent dependencies and package
+versions.
 
-When executing Python scripts, tests, or any Python code in this project,
-always use the virtual environment to ensure consistent dependencies and
-package versions.
+# Code Generation Guidelines
 
-## Code Generation Guidelines
-
-### Coding standards
+## Coding standards
 
 * Prefer to inline variables. If a variable is only used once, inline it. Use
   keyword args to give the result a name. If the resulting expression is
   complex, write a comment to explain what the expression does.
 
-### Comments
+## Comments
 
 Comments that preceed a code block andexplain several lines of code are
 instructive and should be kept. But avoid comments that literally repeat in
@@ -35,7 +37,7 @@ a = b
 a.call_callback()
 ```
 
-The following comments are useful because theyadd some context:
+The following comments are useful because they add some context:
 
 ```
 # Save b. We're going to modify it and would like to keep it around.
@@ -45,7 +47,7 @@ a = b
 a.call_callback()
 ```
 
-### Tests
+## Tests
 
 * Test files don't need a main driver. They'll always be called through pytest.
   They'll never be called as standalone programs.
