@@ -32,6 +32,7 @@ Matrix
 ├── Zero
 └── Ragged
     ├── Generic
+    │   ├── Generic3x3
     │   ├── Vertical
     │   └── Horizontal
     ├── Symmetric2x2
@@ -95,26 +96,37 @@ class Tensor(torch.Tensor, Matrix):
         if self.ndim != 2:
             raise ValueError("Tensor must be a 2D tensor")
 
+    def __repr__(self) -> str:
+        return "bpm." + super().__repr__()
+
     def invert(self) -> "Tensor":
         return Tensor(torch.linalg.inv(self))
 
-    def solve(self, rhs: "Tensor") -> "Tensor":
-        return torch.linalg.solve(self, rhs)
+    @singledispatchmethod
+    def solve(self, rhs: Matrix) -> Matrix:
+        return Tensor(torch.linalg.solve(self, rhs.to_tensor()))
 
     def to_tensor(self) -> torch.Tensor:
-        return self
+        return torch.Tensor(self)
 
     @singledispatchmethod
     def __matmul__(self, other: Matrix) -> Matrix:
-        return Tensor.wrap(torch.Tensor.__matmul__(self, other))
+        return Tensor(torch.Tensor.__matmul__(self, other))
 
     @singledispatchmethod
     def __add__(self, other: Matrix) -> Matrix:
-        return Tensor.wrap(torch.Tensor.__add__(self, other))
+        return Tensor(torch.Tensor.__add__(self, other))
 
     @singledispatchmethod
     def __sub__(self, other: Matrix) -> Matrix:
-        return Tensor.wrap(torch.Tensor.__sub__(self, other))
+        return Tensor(torch.Tensor.__sub__(self, other))
+
+    @property
+    def T(self) -> "Tensor":
+        return Tensor(super(torch.Tensor, self).T)
+
+    def __neg__(self) -> "Tensor":
+        return Tensor(torch.Tensor.__neg__(self))
 
     @property
     def width(self) -> int:
@@ -135,11 +147,21 @@ class Tensor(torch.Tensor, Matrix):
         raise ValueError("Tensor must be a torch.Tensor or Matrix")
 
 
+# TODO: is this needed?
+@Tensor.solve.register
+def _(self, rhs: Tensor) -> Tensor:
+    return Tensor(torch.linalg.solve(self, rhs))
+
+
 class Identity(Matrix):
     def __init__(self, dimension: int = 0):
         self.dimension = dimension
 
     def __matmul__(self, other: Matrix) -> Matrix:
+        if self.dimension != 0 and other.height != self.dimension:
+            raise ValueError(
+                f"Dimension mismatch: Identity({self.dimension}) @ Matrix({other.height}x{other.width})"
+            )
         return other
 
     def solve(self, rhs: Matrix) -> Matrix:
@@ -156,6 +178,10 @@ class Identity(Matrix):
 
     def __add__(self, other: Matrix) -> Matrix:
         return other + self
+
+    @singledispatchmethod
+    def __sub__(self, other: Matrix) -> Matrix:
+        return Tensor(self.to_tensor() - other.to_tensor())
 
     @property
     def T(self) -> "Identity":
@@ -175,9 +201,21 @@ class Identity(Matrix):
     def __rmul__(self, scalar: float) -> "ScaledIdentity":
         return ScaledIdentity(scalar, self.dimension)
 
+    def __neg__(self) -> "ScaledIdentity":
+        return ScaledIdentity(-1.0, self.dimension)
+
+
+@Identity.__sub__.register
+def _(self, other: Tensor) -> Matrix:
+    return Tensor(self.to_tensor() - other)
+
 
 @Tensor.__matmul__.register
-def _(self, _: Identity) -> Tensor:
+def _(self, other: Identity) -> Tensor:
+    if other.dimension != 0 and self.width != other.dimension:
+        raise ValueError(
+            f"Dimension mismatch: Tensor({self.height}x{self.width}) @ Identity({other.dimension})"
+        )
     return self
 
 
@@ -197,7 +235,7 @@ class ScaledIdentity(Identity):
 
     @singledispatchmethod
     def __matmul__(self, other: Matrix) -> Matrix:
-        return super().__matmul__(other)
+        return self.scale * other
 
     def __add__(self, other: Matrix) -> Matrix:
         # Delegate to the other matrix.
@@ -208,6 +246,9 @@ class ScaledIdentity(Identity):
 
     def __rmul__(self, scalar: float) -> "ScaledIdentity":
         return self.__mul__(scalar)
+
+    def __neg__(self) -> "ScaledIdentity":
+        return ScaledIdentity(-self.scale, self.dimension)
 
     def __repr__(self):
         return f"ScaledIdentity(scale={self.scale}, dimension={self.dimension})"
@@ -238,15 +279,18 @@ class Zero(Matrix):
     def __init__(self, shape: tuple[int, int] = ()):
         self.shape = shape
 
-    def __matmul__(self, other: Matrix) -> Matrix:
+    def __matmul__(self, other: Matrix) -> "Zero":
         if not self.shape:
-            return Tensor(torch.tensor([[0.0]]))
+            return Zero(other.shape)
         if other.height != self.shape[1]:
             raise ValueError(f"Shape mismatch {self} vs {other.height} x {other.width}")
-        return torch.zeros(self.shape[0], other.width)
+        return Zero((self.height, other.width))
 
     def to_tensor(self) -> torch.Tensor:
         return torch.zeros(*self.shape)
+
+    def __neg__(self) -> "Zero":
+        return self
 
     def invert(self) -> "Zero":
         raise ValueError("Zero matrix is not invertible")
@@ -258,12 +302,14 @@ class Zero(Matrix):
         return isinstance(other, Zero) and self.shape == other.shape
 
     def __add__(self, other: Matrix) -> Matrix:
-        if other.width != self.width or other.height != self.height:
+        if (self.shape and other.shape) and (
+            other.width != self.width or other.height != self.height
+        ):
             raise ValueError(f"Shape mismatch {self} vs {other.height} x {other.width}")
         return other
 
     def __sub__(self, other: Matrix) -> Matrix:
-        return self.__add__(other)
+        return -other
 
     @property
     def width(self) -> int:
@@ -297,6 +343,11 @@ def _(self, other: Zero) -> Tensor:
 @Tensor.__sub__.register
 def _(self, other: Zero) -> Tensor:
     return self.__add__(other)
+
+
+@Tensor.solve.register
+def _(self, rhs: Zero) -> Zero:
+    return Zero((self.width, rhs.width))
 
 
 def reshape_to_2d_list(lst: Sequence[Any], shape: tuple[int, int]) -> list[list[Any]]:
@@ -354,15 +405,40 @@ class Ragged(Matrix):
 
         return self.__class__(Ragged(result_blocks))
 
+    @singledispatchmethod
+    def __mul__(self, scalar: Any) -> "Ragged":
+        return NotImplemented
+
+    @__mul__.register
+    def _(self, scalar: float) -> "Ragged":
+        return self.apply_unary_operation(lambda m: m * scalar)
+
+    @__mul__.register
+    def _(self, scalar: int) -> "Ragged":
+        return self.apply_unary_operation(lambda m: m * scalar)
+
+    def __rmul__(self, scalar: Any) -> "Ragged":
+        return self.__mul__(scalar)
+
 
 @Ragged.__add__.register
 def _(self, other: Ragged) -> Ragged:
     return self.apply_binary_operation(other, lambda m1, m2: m1 + m2)
 
 
+@Ragged.__add__.register
+def _(self, other: Zero) -> Ragged:
+    return self
+
+
 @Ragged.__sub__.register
 def _(self, other: Ragged) -> Ragged:
     return self.apply_binary_operation(other, lambda m1, m2: m1 - m2)
+
+
+@Ragged.__sub__.register
+def _(self, other: Zero) -> Ragged:
+    return self
 
 
 class Generic(Ragged):
@@ -378,6 +454,10 @@ class Generic(Ragged):
     @__init__.register
     def _(self, blocks: Ragged, validate=True):
         self.__init__(blocks.flat, validate)
+
+    @singledispatchmethod
+    def __matmul__(self, other: Matrix) -> Matrix:
+        raise NotImplementedError
 
     def validate(self):
         # Ensure the matrix isn't ragged.
@@ -396,6 +476,8 @@ class Generic(Ragged):
             widths = np.array([b.width for b in self[:, c].flatten()])
             if not np.all(widths == widths[0]):
                 raise ValueError("All blocks in column must have the same width")
+
+        return self
 
     def __getitem__(self, index: Any) -> Matrix | "Horizontal" | "Vertical" | "Generic":
         if not isinstance(index, tuple):
@@ -434,6 +516,166 @@ class Generic(Ragged):
     def height(self) -> int:
         # Sum up the height of the blocks of the first column.
         return sum(row[0].height for row in self.blocks)
+
+    @property
+    def T(self) -> "Generic":
+        return Generic(
+            [
+                [self.blocks[r][c].T for r in range(self.shape[0])]
+                for c in range(self.shape[1])
+            ]
+        )
+
+
+@Generic.__matmul__.register
+def _(self, other: Generic) -> Generic:
+    if self.shape[1] != other.shape[0]:
+        raise ValueError(f"Block dimension mismatch: {self.shape} vs {other.shape}")
+    return Generic(
+        [
+            [
+                sum(
+                    (
+                        self.blocks[i][j] @ other.blocks[j][k]
+                        for j in range(self.shape[1])
+                    ),
+                    start=Zero(),
+                )
+                for k in range(other.shape[1])
+            ]
+            for i in range(self.shape[0])
+        ]
+    )
+
+
+class Generic3x3(Generic):
+    """A 3x3 block matrix."""
+
+    @singledispatchmethod
+    def __init__(self, blocks: Sequence[Sequence[Matrix]]):
+        super().__init__(blocks)
+        if self.shape != (3, 3):
+            raise ValueError("Generic3x3 must be 3x3")
+
+    @__init__.register
+    def _(self, ragged: Ragged):
+        self.__init__(ragged.blocks)
+
+    @singledispatchmethod
+    def solve(self, other: Matrix) -> Matrix:
+        raise NotImplementedError
+
+    @property
+    def T(self) -> "Generic3x3":
+        return Generic3x3(super().T.blocks)
+
+    @singledispatchmethod
+    def __matmul__(self, other: Matrix) -> Matrix:
+        return super().__matmul__(other)
+
+
+@Generic3x3.__matmul__.register
+def _(self, other: Generic3x3) -> Generic3x3:
+    return Generic3x3(Generic.__matmul__(self, other).blocks)
+
+
+def check_torch_escape(x: Any):
+    assert isinstance(x, Matrix)
+    if isinstance(x, torch.Tensor):
+        assert isinstance(x, Tensor)
+
+
+def _generic3x3_solve(self, other: Generic) -> Generic:
+    if other.shape[0] != 3:
+        raise ValueError("Other must be a 3xN block matrix")
+
+    A = self.blocks
+    B = other.blocks
+
+    check_torch_escape(A[0][0])
+
+    # The Schur complement of A in its (0,0) block.
+    # We calculate U01 = A00^{-1} A01 and U02 = A00^{-1} A02 using solve()
+    # instead of explicit inversion.
+    U01 = A[0][0].solve(A[0][1])
+    U02 = A[0][0].solve(A[0][2])
+
+    S11 = A[1][1] - A[1][0] @ U01
+    S21 = A[2][1] - A[2][0] @ U01
+    S22_level1 = A[2][2] - A[2][0] @ U02
+    S12 = A[1][2] - A[1][0] @ U02
+
+    # Calculate U12_schur = S11^{-1} S12 using solve()
+    U12_schur = S11.solve(S12)
+    S22 = S22_level1 - S21 @ U12_schur
+
+    # The LDU decomposition of A is
+    #
+    # L = [ I             0            0 ]
+    #     [ A10 invA00    I            0 ]
+    #     [ A20 invA00    S21 invS11   I ]
+    #
+    # D = [ A00     0      0   ]
+    #     [ 0      S11     0   ]
+    #     [ 0       0     S22  ]
+    #
+    # U = [ I     invA00 A01     invA00 A02    ]
+    #     [ 0     I              invS11 S12    ]
+    #     [ 0     0              I             ]
+    #
+    # So that A = L D U.
+    #
+    # Define Z = U X so that A X = B becomes L D Z = B. We'll first solve for Z.
+    # To do that, we solve L Y = B followed by D Z = Y.
+
+    # --- Step 1: Forward substitution (solve for Z)
+    # Row 0 of Z:
+    # A00 * Z0 = B0  => Z0 = A00^{-1} B0
+    # In this first step, Y0 = B0 because L00 is Identity and L is lower triangular.
+    Z0 = [A[0][0].solve(b) for b in B[0]]
+
+    # Row 1 of Z
+    # Eliminate A10 using Z0.
+    # Effective equation: A11' * Z1 = B1 - A10 * Z0
+    Y1 = [b - A[1][0] @ z for b, z in zip(B[1], Z0)]
+    Z1 = [S11.solve(y) for y in Y1]
+
+    # Row 2:
+    # Eliminate A20 and A21.
+    # Effective equation: S22 * Z2 = B2 - A20 * Z0 - S21 * Z1
+    Y2 = [b - A[2][0] @ z0 - S21 @ z1 for b, z0, z1 in zip(B[2], Z0, Z1)]
+    Z2 = [S22.solve(y) for y in Y2]
+
+    # --- Step 3: Backward substitution (solve for X given Z)
+    # With Z computed, we solve U X = Z for X.
+    # U X = Z
+    # X2 = Z2
+    # X1 = Z1 - U12 * X2
+    # X0 = Z0 - U01 * X1 - U02 * X2
+
+    # We need U blocks:
+    # U01 = invA00 @ A01  (Already computed as U01)
+    # U02 = invA00 @ A02  (Already computed as U02)
+    # U12 = invS11 @ S12  (Already computed as U12_schur)
+
+    X2 = Z2
+
+    # Compute U12 term: U12_schur @ X2
+    U12_X2 = [U12_schur @ x for x in X2]
+    X1 = [z - u for z, u in zip(Z1, U12_X2)]
+
+    # Compute U01 and U02 terms
+    U01_X1 = [U01 @ x for x in X1]
+    U02_X2 = [U02 @ x for x in X2]
+
+    X0 = [z - u1 - u2 for z, u1, u2 in zip(Z0, U01_X1, U02_X2)]
+
+    return Generic([X0, X1, X2])
+
+
+@Generic3x3.solve.register
+def _(self, other: Generic3x3) -> Generic:
+    return Generic3x3(_generic3x3_solve(self, other).blocks)
 
 
 class Symmetric2x2(Ragged):
@@ -503,7 +745,7 @@ class Symmetric2x2(Ragged):
 
     def UDU_decomposition(
         self,
-    ) -> tuple[IdentityWithUpperDiagonal, Diagonal]:
+    ) -> tuple["IdentityWithUpperDiagonal", "Diagonal"]:
         b22_inv = self.block22.invert()
         U = IdentityWithUpperDiagonal([self.block12 @ b22_inv])
         D = Diagonal(
@@ -511,7 +753,7 @@ class Symmetric2x2(Ragged):
         )
         return U, D
 
-    def LDL_decomposition(self) -> tuple[IdentityWithLowerDiagonal, Diagonal]:
+    def LDL_decomposition(self) -> tuple["IdentityWithLowerDiagonal", "Diagonal"]:
         a11_inv = self.block11.invert()
         L = IdentityWithLowerDiagonal([self.block12.T @ a11_inv])
         D = Diagonal(
@@ -550,6 +792,10 @@ class Vertical(Generic):
             ]
         )
 
+    @property
+    def T(self) -> "Horizontal":
+        return Horizontal([b.T for b in self.flat])
+
 
 @Symmetric2x2.__matmul__.register
 def __matmul__(self, v: Vertical) -> Vertical:
@@ -561,6 +807,16 @@ def __matmul__(self, v: Vertical) -> Vertical:
             self.block21 @ v.flat[0] + self.block22 @ v.flat[1],
         ]
     )
+
+
+@Generic.__matmul__.register
+def _(self, other: Vertical) -> Vertical:
+    return Vertical(self @ Generic(other.blocks))
+
+
+@Generic3x3.solve.register
+def _(self, other: Vertical) -> Vertical:
+    return Vertical(_generic3x3_solve(self, other).flat)
 
 
 class Horizontal(Generic):
@@ -575,6 +831,28 @@ class Horizontal(Generic):
     @__init__.register
     def _(self, blocks: Ragged, validate=True):
         self.__init__(blocks.flat, validate=validate)
+
+    @property
+    def T(self) -> "Vertical":
+        return Vertical([b.T for b in self.flat])
+
+
+def zero_upper_blocks_from_diagonal_blocks(
+    diagonal_blocks: Sequence[Matrix],
+) -> list[Matrix]:
+    return [
+        Zero((D.height, Dnext.width))
+        for D, Dnext in zip(diagonal_blocks[:-1], diagonal_blocks[1:])
+    ]
+
+
+def zero_lower_blocks_from_diagonal_blocks(
+    diagonal_blocks: Sequence[Matrix],
+) -> list[Matrix]:
+    return [
+        Zero((Dnext.height, D.width))
+        for D, Dnext in zip(diagonal_blocks[:-1], diagonal_blocks[1:])
+    ]
 
 
 class Tridiagonal(Ragged):
@@ -607,10 +885,14 @@ class Tridiagonal(Ragged):
 
     @property
     def lower_blocks(self) -> Sequence[Matrix]:
+        if self.blocks[1] == []:
+            return zero_lower_blocks_from_diagonal_blocks(self.diagonal_blocks)
         return self.blocks[1]
 
     @property
     def upper_blocks(self) -> Sequence[Matrix]:
+        if self.blocks[2] == []:
+            return zero_upper_blocks_from_diagonal_blocks(self.diagonal_blocks)
         return self.blocks[2]
 
     @singledispatchmethod
@@ -632,32 +914,6 @@ class Tridiagonal(Ragged):
         )
         return L @ v + D @ v + U @ v
 
-    @staticmethod
-    def from_matrix(matrix: Matrix) -> "Tridiagonal":
-        if isinstance(matrix, Tridiagonal):
-            return matrix
-        if isinstance(matrix, Diagonal):
-            return Tridiagonal(
-                diagonal_blocks=matrix.blocks,
-                lower_blocks=[Zero()] * (len(matrix.blocks) - 1),
-                upper_blocks=[Zero()] * (len(matrix.blocks) - 1),
-            )
-        if isinstance(matrix, LowerBiDiagonal):
-            return Tridiagonal(
-                diagonal_blocks=matrix.diagonal_blocks,
-                lower_blocks=matrix.lower_blocks,
-                upper_blocks=[Zero()] * (len(matrix.diagonal_blocks) - 1),
-            )
-        if isinstance(matrix, UpperBiDiagonal):
-            return Tridiagonal(
-                diagonal_blocks=matrix.diagonal_blocks,
-                lower_blocks=[Zero()] * (len(matrix.diagonal_blocks) - 1),
-                upper_blocks=matrix.upper_blocks,
-            )
-        raise ValueError(
-            f"Input matrix must be subclass of a diagonal class. Got {type(matrix)}"
-        )
-
     @property
     def height(self) -> int:
         return sum(b.height for b in self.diagonal_blocks)
@@ -670,38 +926,38 @@ class Tridiagonal(Ragged):
     def blockwise_transpose(M: Generic) -> "Tridiagonal":
         """Compute the blockwise transpose of matrix whose blocks are tridiagonal.
 
-        M be a block matrix. Denote the uv'th element of its ij'th block by M_{ij, uv}.
-        The blockwise transpsoe of M is a block matrix whose uv'th element of its ij'th
-        block is M_{vu, ji}.
+        The blockwise transpose of a block matrix generalizes the transpose of a
+        2D matrix. For a block matrix M, denote the (u,v)'th element of its
+        (i,j)'th block by M_{ij, uv}.  The blockwise transpsoe of M is a block
+        matrix whose (u,v)'th element of its (i,j)'th block is M_{uv, ij}.
 
-        The blocks of M are presumbed to be tridiagonal. That means M_{ij, uv} = 0
-        whenever |u-v| > 1. That means the blockwise tranpose of M satisfies M_{ij} = 0
-        whenever |i-j| > 1. In other words, M is block-tridiagonal.
+        For this particular method, the blocks of M are presumbed to be
+        tridiagonal. That means M_{ij, uv} = 0 whenever |u-v| > 1. This implies
+        the blockwise tranpose of M satisfies M_{ij} = 0 whenever |i-j| > 1. In
+        other words, the blockwise transpose of M is block-tridiagonal.
         """
-        # Ensure all blocks are tridiagonal.
-        generic_tridiagonal_blocks = []
-        num_diags = None
-        for block in M.flatten():
-            if num_diags is None:
-                num_diags = len(block.diagonal_blocks)
-            if len(block.diagonal_blocks) != num_diags:
-                raise ValueError(
-                    "All diagonal blocks must have the same number of blocks"
-                )
-            generic_tridiagonal_blocks.append(Tridiagonal.from_matrix(block))
-        M = Generic([generic_tridiagonal_blocks]).reshape(M.shape)
+        # Validation: All blocks must have the same number of diagonal blocks.
+        num_diags = len(next(M.flatten()).diagonal_blocks)
+        if not all(len(block.diagonal_blocks) == num_diags for block in M.flatten()):
+            raise ValueError("All blocks must have the same number of diagonal blocks")
 
         return Tridiagonal(
             [
-                Generic([[b.diagonal_blocks[i] for b in M.flatten()]]).reshape(M.shape)
+                Generic([[b.diagonal_blocks[i] for b in M.flatten()]], validate=False)
+                .reshape(M.shape)
+                .validate()
                 for i in range(num_diags)
             ],
             lower_blocks=[
-                Generic([[b.lower_blocks[i] for b in M.flatten()]]).reshape(M.shape)
+                Generic([[b.lower_blocks[i] for b in M.flatten()]], validate=False)
+                .reshape(M.shape)
+                .validate()
                 for i in range(num_diags - 1)
             ],
             upper_blocks=[
-                Generic([[b.upper_blocks[i] for b in M.flatten()]]).reshape(M.shape)
+                Generic([[b.upper_blocks[i] for b in M.flatten()]], validate=False)
+                .reshape(M.shape)
+                .validate()
                 for i in range(num_diags - 1)
             ],
         )
@@ -864,14 +1120,7 @@ class LowerBiDiagonal(Tridiagonal):
             )
         diagonal_blocks = list(map(Tensor.wrap, diagonal_blocks))
 
-        super().__init__(
-            diagonal_blocks,
-            lower_blocks,
-            upper_blocks=[
-                Zero((D.height, Dnext.width))
-                for D, Dnext in zip(diagonal_blocks[:-1], diagonal_blocks[1:])
-            ],
-        )
+        super().__init__(diagonal_blocks, lower_blocks, upper_blocks=[])
 
     @singledispatchmethod
     def __matmul__(self, other: Matrix) -> Matrix:
@@ -962,14 +1211,7 @@ class UpperBiDiagonal(Tridiagonal):
                 "Number of upper blocks must be the number of diagonal blocks minus one"
             )
         diagonal_blocks = list(map(Tensor.wrap, diagonal_blocks))
-        super().__init__(
-            diagonal_blocks,
-            lower_blocks=[
-                Zero((Dnext.height, D.width))
-                for D, Dnext in zip(diagonal_blocks[:-1], diagonal_blocks[1:])
-            ],
-            upper_blocks=upper_blocks,
-        )
+        super().__init__(diagonal_blocks, lower_blocks=[], upper_blocks=upper_blocks)
 
     @singledispatchmethod
     def __matmul__(self, v: Matrix) -> Matrix:
@@ -1049,14 +1291,6 @@ class Diagonal(Tridiagonal):
     def _(self, diagonal_blocks: Ragged):
         self.__init__(diagonal_blocks.flat)
 
-    @property
-    def upper_blocks(self) -> list[Matrix]:
-        raise NotImplementedError
-
-    @property
-    def lower_blocks(self) -> list[Matrix]:
-        raise NotImplementedError
-
     def invert(self) -> "Diagonal":
         return Diagonal([b.invert() for b in self.diagonal_blocks])
 
@@ -1120,7 +1354,23 @@ def _(self, other: Diagonal) -> Diagonal:
 @Diagonal.__sub__.register
 def _(self, _: Identity) -> Diagonal:
     "Diagonal - I"
-    return Diagonal([b - torch.eye(b.shape[0]) for b in self.flatten()])
+    return Diagonal([b - torch.eye(b.shape[0]) for b in self.diagonal_blocks])
+
+
+@Diagonal.__add__.register
+def _(self, other: ScaledIdentity) -> Diagonal:
+    "Diagonal + sI"
+    return Diagonal(
+        [b + ScaledIdentity(other.scale, b.height) for b in self.diagonal_blocks]
+    )
+
+
+@Diagonal.__sub__.register
+def _(self, other: ScaledIdentity) -> Diagonal:
+    "Diagonal - sI"
+    return Diagonal(
+        [b - ScaledIdentity(other.scale, b.height) for b in self.diagonal_blocks]
+    )
 
 
 @SymmetricTriDiagonal.__add__.register
@@ -1153,10 +1403,6 @@ class LowerDiagonal(LowerBiDiagonal):
         super().__init__(diagonal_blocks=diagonal_blocks, lower_blocks=lower_blocks)
         self.height_leading_zeros = height_leading_zeros
         self.width_trailing_zeros = width_trailing_zeros
-
-    @property
-    def upper_blocks(self) -> list[Matrix]:
-        raise NotImplementedError
 
     @singledispatchmethod
     def __matmul__(self, other: Matrix) -> Matrix:
@@ -1192,6 +1438,13 @@ class LowerDiagonal(LowerBiDiagonal):
             height_trailing_zeros=self.width_trailing_zeros,
         )
 
+    def __neg__(self) -> "LowerDiagonal":
+        return LowerDiagonal(
+            height_leading_zeros=self.height_leading_zeros,
+            lower_blocks=[-b for b in self.lower_blocks],
+            width_trailing_zeros=self.width_trailing_zeros,
+        )
+
 
 @LowerDiagonal.__matmul__.register
 def _(self, other: Diagonal) -> "LowerDiagonal":
@@ -1220,7 +1473,7 @@ def _(self, other: LowerDiagonal) -> Diagonal:
 
 
 def downshifting_matrix(
-    height_leading_zeros, v_heights: Sequence[int]
+    height_leading_zeros: int, v_heights: Sequence[int]
 ) -> LowerDiagonal:
     return LowerDiagonal(
         height_leading_zeros=height_leading_zeros,
@@ -1238,7 +1491,6 @@ class UpperDiagonal(UpperBiDiagonal):
     ):
         upper_blocks = list(map(Tensor.wrap, upper_blocks))
 
-        # TODO: use list comprehension to make this tighter.
         diagonal_blocks = []
         w = width_leading_zeros
         for U in upper_blocks:
@@ -1306,6 +1558,13 @@ class UpperDiagonal(UpperBiDiagonal):
             width_trailing_zeros=self.height_trailing_zeros,
         )
 
+    def __neg__(self) -> "UpperDiagonal":
+        return UpperDiagonal(
+            width_leading_zeros=self.width_leading_zeros,
+            upper_blocks=[-b for b in self.upper_blocks],
+            height_trailing_zeros=self.height_trailing_zeros,
+        )
+
 
 @Diagonal.__matmul__.register
 def _(self, other: UpperDiagonal) -> Diagonal:
@@ -1343,10 +1602,23 @@ def _(self, other: ScaledIdentity) -> Tensor:
     return Tensor(self.to_tensor() + other.scale * torch.eye(self.height))
 
 
+@Tensor.__sub__.register
+def _(self, other: ScaledIdentity) -> Tensor:
+    if other.dimension > 0 and (
+        self.height != other.dimension or self.width != other.dimension
+    ):
+        raise ValueError(
+            f"Shape mismatch {self.shape} vs ScaledIdentity({other.dimension})"
+        )
+    return Tensor(self.to_tensor() - other.scale * torch.eye(self.height))
+
+
 @Diagonal.__add__.register
 def _(self, other: ScaledIdentity) -> Diagonal:
     # Distribute to blocks
-    return Diagonal([b + ScaledIdentity(other.scale, b.height) for b in self.flatten()])
+    return Diagonal(
+        [b + ScaledIdentity(other.scale, b.height) for b in self.diagonal_blocks]
+    )
 
 
 @SymmetricTriDiagonal.__add__.register
@@ -1354,5 +1626,5 @@ def _(self, other: ScaledIdentity) -> "SymmetricTriDiagonal":
     # T + sI = T + Diagonal(sI)
     return SymmetricTriDiagonal(
         lower_blocks=self.lower_blocks,
-        diagonal_blocks=(Diagonal(self.diagonal_blocks) + other).flat,
+        diagonal_blocks=(Diagonal(self.diagonal_blocks) + other).diagonal_blocks,
     )

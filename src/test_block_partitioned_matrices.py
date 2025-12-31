@@ -6,6 +6,7 @@ from block_partitioned_matrices import (
     Vertical,
     Diagonal,
     Generic,
+    Generic3x3,
     IdentityWithLowerDiagonal,
     IdentityWithUpperDiagonal,
     Symmetric2x2,
@@ -17,6 +18,7 @@ from block_partitioned_matrices import (
     LowerDiagonal,
     LowerBiDiagonal,
     Identity,
+    ScaledIdentity,
     Zero,
     reshape_to_2d_list,
     downshifting_matrix,
@@ -108,6 +110,131 @@ class TestGeneric:
         sub_block = M[1:, 1:]
         assert sub_block.shape == (1, 1)
         assert sub_block[0, 0] is blocks_all_same_widths[1][1]
+
+    def test_matmul(self):
+        # A: (2x2) blocks, block sizes:
+        A = Generic(
+            [
+                [Tensor(torch.randn(2, 2)), Tensor(torch.randn(2, 3))],
+                [Tensor(torch.randn(3, 2)), Tensor(torch.randn(3, 3))],
+            ]
+        )
+
+        # B: (2x2) blocks, block sizes:
+        B = Generic(
+            [
+                [Tensor(torch.randn(2, 4)), Tensor(torch.randn(2, 1))],
+                [Tensor(torch.randn(3, 4)), Tensor(torch.randn(3, 1))],
+            ]
+        )
+
+        C = A @ B
+
+        assert isinstance(C, Generic)
+        assert C.shape == (2, 2)
+
+        torch.testing.assert_close(C.to_tensor(), A.to_tensor() @ B.to_tensor())
+
+
+class TestGeneric3x3:
+    """Tests for Generic3x3 class."""
+
+    def test_init_raises_if_not_3x3(self):
+        with pytest.raises(ValueError, match="Generic3x3 must be 3x3"):
+            Generic3x3([[Tensor(1, 1), Tensor(1, 1)], [Tensor(1, 1), Tensor(1, 1)]])
+
+    def test_solve(self):
+        """Test that solve() implements A^-1 B."""
+        I = torch.eye(2)
+        # Use simple matrices to verify computation
+        # A = diag(2I, 2I, 2I)
+        # B = diag(3I, 3I, 3I)
+        # solve(A, B) -> A^-1 @ B = diag(0.5I, 0.5I, 0.5I) @ diag(3I, 3I, 3I) = diag(1.5I, 1.5I, 1.5I)
+
+        Z = torch.zeros(2, 2)
+        A = Generic3x3(
+            [
+                [Tensor(2 * I), Tensor(Z), Tensor(Z)],
+                [Tensor(Z), Tensor(2 * I), Tensor(Z)],
+                [Tensor(Z), Tensor(Z), Tensor(2 * I)],
+            ]
+        )
+        B = Generic3x3(
+            [
+                [Tensor(3 * I), Tensor(Z), Tensor(Z)],
+                [Tensor(Z), Tensor(3 * I), Tensor(Z)],
+                [Tensor(Z), Tensor(Z), Tensor(3 * I)],
+            ]
+        )
+
+        C = A.solve(B)
+
+        assert isinstance(C, Generic3x3)
+        for i in range(3):
+            for j in range(3):
+                if i == j:
+                    torch.testing.assert_close(C[i, j].to_tensor(), 1.5 * I)
+                else:
+                    torch.testing.assert_close(C[i, j].to_tensor(), Z)
+
+    def test_matmul_generic3x3(self):
+        """Test that matrix multiplication of Generic3x3 returns Generic3x3."""
+        # Create 3x3 block matrices with random tensors
+        # All blocks 2x2 for simplicity
+        A_blocks = [[Tensor(torch.randn(2, 2)) for _ in range(3)] for _ in range(3)]
+        B_blocks = [[Tensor(torch.randn(2, 2)) for _ in range(3)] for _ in range(3)]
+
+        A = Generic3x3(A_blocks)
+        B = Generic3x3(B_blocks)
+
+        C = A @ B
+
+        assert isinstance(C, Generic3x3)
+        assert C.shape == (3, 3)
+        torch.testing.assert_close(C.to_tensor(), A.to_tensor() @ B.to_tensor())
+
+    def test_matmul_with_vertical(self):
+        """Test matrix multiplication of Generic3x3 with Vertical."""
+        # A: 3x3 of 2x2 blocks
+        A = Generic3x3(
+            [[Tensor(torch.randn(2, 2)) for _ in range(3)] for _ in range(3)]
+        )
+        # v: 3x1 of 2x1 blocks, inlined into Vertical constructor
+        v = Vertical([Tensor(torch.randn(2, 1)) for _ in range(3)])
+
+        result = A @ v
+
+        assert isinstance(result, Vertical)
+        assert result.shape == (3, 1)
+        torch.testing.assert_close(result.to_tensor(), A.to_tensor() @ v.to_tensor())
+
+    def test_transpose_matches_tensor_transpose(self):
+        """Test that the transpose of Generic3x3 matches tensor transpose."""
+        torch.manual_seed(42)
+        M = Generic3x3(
+            [
+                [
+                    Tensor(torch.randn(2, 2)),
+                    Tensor(torch.randn(2, 3)),
+                    Tensor(torch.randn(2, 4)),
+                ],
+                [
+                    Tensor(torch.randn(3, 2)),
+                    Tensor(torch.randn(3, 3)),
+                    Tensor(torch.randn(3, 4)),
+                ],
+                [
+                    Tensor(torch.randn(4, 2)),
+                    Tensor(torch.randn(4, 3)),
+                    Tensor(torch.randn(4, 4)),
+                ],
+            ]
+        )
+
+        MT = M.T
+
+        assert isinstance(MT, Generic3x3)
+        torch.testing.assert_close(MT.to_tensor(), M.to_tensor().T)
 
 
 def col(*args) -> torch.Tensor:
@@ -697,12 +824,13 @@ class TestDownshift:
         torch.testing.assert_close(Pv.flat[2], v.flat[1])
 
     def test_upshift(self, v):
-        P = downshifting_matrix(2, [b.shape[0] for b in v.flatten()])
+        shapes = [b.shape[0] for b in v.flatten()]
+        P = downshifting_matrix(shapes[0], shapes[1:] + [shapes[-1]])
         PTv = P.T @ v
         assert PTv.num_blocks() == 3
         torch.testing.assert_close(PTv.flat[0], v.flat[1])
         torch.testing.assert_close(PTv.flat[1], v.flat[2])
-        assert PTv.flat[2] == Zero((4, 1))
+        assert PTv.flat[2] == Zero((shapes[-1], 1))
 
     def test_down_then_upshift(self, v):
         P = downshifting_matrix(10, [b.shape[0] for b in v.flatten()])
@@ -733,8 +861,11 @@ class TestDownshift:
 
     def test_PPT(self, v):
         P = downshifting_matrix(2, [b.shape[0] for b in v.flatten()])
-        r = P @ (P.T @ v)
-        rr = (P @ P.T) @ v
+        u_heights = [b.height for b in P.diagonal_blocks]
+        u = Vertical([torch.randn(h, 1) for h in u_heights])
+
+        r = P @ (P.T @ u)
+        rr = (P @ P.T) @ u
         assert r.num_blocks() == rr.num_blocks()
         for br, brr in zip(r.flatten(), rr.flatten()):
             torch.testing.assert_close(br.to_tensor(), brr.to_tensor())
@@ -1413,8 +1544,8 @@ class TestScaledIdentity:
 
     def test_add_diagonal(self):
         D = Diagonal([torch.eye(2), torch.eye(2)])
-        s = ScaledIdentity(2.0)  # implicit dimension
-        res = D + s
+        sI = ScaledIdentity(2.0)  # implicit dimension
+        res = D + sI
         assert isinstance(res, Diagonal)
         # Each block should be I + 2I = 3I
         for b in res.diagonal_blocks:

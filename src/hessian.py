@@ -267,31 +267,76 @@ class SequenceOfBlocks(nn.Module):
         )
 
     def hessian_inverse_product(
-        self, z_in: torch.Tensor, target: torch.Tensor, g: bpm.Vertical
+        self, z_in: torch.Tensor, target: torch.Tensor, b: bpm.Vertical, epsilon: float
     ) -> bpm.Vertical:
-        "Compute H^{-1} @ g using the algorithm the algorithm in hessian.tex."
+        "Solve (H + epsilon I) x = b using the algorithm in hessian.tex."
 
+        # Compute the terms we used to compute the hessian-vector product H x.
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
+        M = bpm.IdentityWithLowerDiagonal((-Dz).flat[1:])
+        P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.flatten()])
 
-        M = bpm.IdentityWithLowerDiagonal((-Dz).blocks[1:])
-        P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.blocks])
+        # Validate the input.
+        if b.num_blocks() != Dx.num_blocks():
+            raise ValueError(
+                "b must have as many Vertical blocks as there are layers. "
+                f"It has {b.num_blocks}"
+            )
+        for b_layer, Dx_layer in zip(b.flat, Dx.flatten()):
+            if b_layer.height != Dx_layer.width:
+                raise ValueError(
+                    f"b_layer has height {b_layer.height} "
+                    f"but the layer has width {Dx_layer.width} parameters"
+                )
 
+        zero_block = bpm.Diagonal(
+            [
+                bpm.Zero((d.height, mt.width))
+                for d, mt in zip(Dx.diagonal_blocks, M.T.diagonal_blocks)
+            ]
+        )
+
+        # Write (H + epsilon I) x = b as an augmented system K [x;y;z] = [b;0;0].  K is a 3x3
+        # block matrix. These  blocks are either diagonal, or bi-diagonal.
         K = bpm.Generic(
             [
-                [DD_Dxx, DD_Dzx @ P, Dx.T],
-                [-Dx, M, bpm.Zeros()],
+                [DD_Dxx + epsilon * bpm.Identity(DD_Dxx.height), DD_Dzx @ P, Dx.T],
+                [-Dx, M, zero_block],
                 [-P.T @ DD_Dzx.T, -P.T @ DM_Dzz @ P, M.T],
             ]
         )
-        K_pivoted = bpm.Tridiagonal.from_generic(K)
 
-        L, U, P = K_pivoted.LDU_decomposition()
+        zeros = bpm.Vertical([bpm.Zero((b.height, 1)) for b in M.diagonal_blocks])
+        b00 = bpm.Vertical([b, zeros, zeros])
 
-        y = L.solve(g)
-        z = U.solve(y)
-        x = P.solve(z)
+        # To solve K xyz = [b;0;0] for xyz efficiently, transform the equation
+        # by pivoting the rows and columns of K with a permutation π so that K' = π K π is a
+        # block-tridiagonal matrix. Such a permutation exists because the blocks of K
+        # have bandwidth no greater than 2.  The pivoted system is
+        #      π K π π⁻¹ xyz = π [b;0;0].
+        # We can solve K' xyz' = π [b;0;0] for xyz' by factorizing K' and
+        # applying the inverse of these factors, then report xyz = π⁻¹ xyz'. The paper shows
+        # that  π⁻¹ = π, so we can just report π xyz'.
+        K_pivoted = bpm.Tridiagonal.blockwise_transpose(K)
 
-        return x
+        # Confirm that all the blocks of the resulting tridiagonal matrix are 3x3 block matrices.
+        # Then cast these explicit to Generic3x3 blocks so we can use a fast solver for them.
+        assert all(b.shape == (3, 3) for b in K_pivoted.flatten())
+        K_pivoted = bpm.Tridiagonal(
+            [bpm.Generic3x3(b.blocks) for b in K_pivoted.diagonal_blocks],
+            lower_blocks=[bpm.Generic3x3(b.blocks) for b in K_pivoted.lower_blocks],
+            upper_blocks=[bpm.Generic3x3(b.blocks) for b in K_pivoted.upper_blocks],
+        )
+
+        b00_pivoted = b00.blockwise_transpose()
+
+        xyz_pivoted = K_pivoted.solve(b00_pivoted)
+
+        # Pivot back to the original order of x, y, z.
+        xyz = xyz_pivoted.blockwise_transpose()
+
+        # Just need the first block of xyz, which is x.
+        return xyz.blocks[0][0]
 
 
 class SequenceOfDenseBlocks(SequenceOfBlocks):

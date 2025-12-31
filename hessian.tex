@@ -531,9 +531,9 @@ dense. Nevertheless, this polynomial can be lifted into a higher order object
 whose inverse is easy to compute:
 
 \[
-  H  = D_D D_{xx}  + D_D D_{zx} P M^{-1} D_x + D_x^\top M^{-\top} P^\top D_M D_{xz} + D_x^\top M^{-\top} P^\top D_M D_{zz} P M^{-1} D_x
+  H  = D_D D_{xx}  + D_D D_{zx} P M^{-1} D_x + D_x^\top M^{-\top} P^\top D_M D_{xz} + D_x^\top M^{-\top} P^\top D_M D_{zz} P M^{-1} D_x.
 \]
-We wish to solve the system $H x = g$ for $x$. We can convert this dense system
+In general, $H$ is singular. We wish to solve the system $(H + \epsilon I ) x = g$ for $x$. We can convert this dense system
 involving inverses into a larger, sparse system by introducing auxiliary
 variables. Define
 \begin{equation}
@@ -544,18 +544,18 @@ which implies $M y - D_x x = 0$.  Define a second auxiliary variable
   z \equiv M^{-\top} \left( P^\top D_M D_{xz} x + P^\top D_M D_{zz} P y \right),
 \end{equation}
 which implies $M^\top z - P^\top D_M D_{xz} x - P^\top D_M D_{zz} P y = 0$.
-The original equation $H x = g$ becomes
+With these substitutions, $(H + \epsilon I) x = g$ becomes
 \begin{equation}
-  D_D D_{xx} x + D_D D_{zx} P y + D_x^\top z = g.
+  \left(D_D D_{xx} + \epsilon I\right) x + D_D D_{zx} P y + D_x^\top z = g.
 \end{equation}
 Collecting these three linear equations gives us a unified system
 
 \begin{equation}
   \underbrace{
     \begin{bmatrix}
-      D_D D_{xx}         & D_D D_{zx} P         & D_x^\top \\
-      -D_x               & M                    & 0        \\
-      -P^\top D_M D_{xz} & -P^\top D_M D_{zz} P & M^\top
+      D_D D_{xx} + \epsilon I & D_D D_{zx} P         & D_x^\top \\
+      -D_x                    & M                    & 0        \\
+      -P^\top D_M D_{xz}      & -P^\top D_M D_{zz} P & M^\top
     \end{bmatrix}
   }_{\K}
   \begin{bmatrix}
@@ -567,7 +567,7 @@ Collecting these three linear equations gives us a unified system
   \end{bmatrix}.
 \end{equation}
 
-Finding $x = H^{-1}g$ is equivalent to solving this block-linear system and
+Finding $x = \left(H+\epsilon I\right)^{-1}g$ is equivalent to solving this block-linear system and
 reporting the resulting $x$. The benefit of doing this is that
 this system can be pivoted into a block-tri-diagonal system, which can be solved more
 efficiently than Gaussian elimination on $\K$ or $H$.
