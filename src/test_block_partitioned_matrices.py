@@ -37,6 +37,12 @@ class TestTensor:
             Zero((2, 2)).to_tensor(), Tensor.wrap(torch.zeros(2, 2)).to_tensor()
         )
 
+    def test_add_identity_zero(self):
+        I = Identity(2)
+        Z = Zero((2, 2))
+        res = I + Z
+        torch.testing.assert_close(res.to_tensor(), torch.eye(2))
+
 
 class TestGeneric:
     @pytest.fixture
