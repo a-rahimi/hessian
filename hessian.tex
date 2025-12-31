@@ -8,6 +8,7 @@
 \newcommand{\R}{\mathop{\mathbb{R}}}
 \newcommand{\K}{\mathcal{K}}
 
+\newtheorem{claim}{Claim}
 \newtheorem{observation}{Observation}
 \newtheorem{example}{Example}
 
@@ -175,7 +176,7 @@ and
 \end{equation}
 
 Solving for $b$ and substituting back gives
-\begin{equation}
+\begin{equation}\label{eq:gradient-matrix-form}
   \frac{\partial z_L}{\partial x} =  e_L M^{-1} D_x.
 \end{equation}
 
@@ -186,12 +187,233 @@ spectrum of a triangular matrix can be read off its diagonal, which in this case
 
 \section{The Hessian}
 
-The gradient we computed above is the unique vector $v$ such that $d z_L \equiv z_L(x+dx) - z_L(dx) \to v(x) \cdot dx$
-as $dx\to 0$. In this section, we compute the Hessian $H$ of $z_L$ with respect to the parameters. This is the unique
-matrix $H(x)$ such that $dv^\top \equiv v^\top(x+dx) - v^\top(x) \to H(x)\; dx$ as $dx \to 0$. We use the facts that
+To obtain the Hessian, we use similar techniques to compute the gradient of
+Equation (\ref{eq:gradient-matrix-form}) with respect to $x$.  The gradient we
+computed in Equation (\ref{eq:gradient-matrix-form}) is the unique vector $g$
+such that $d z_L \equiv z_L(x+dx) - z_L(dx) \to g(x)^\top dx$ as $dx\to 0$.
+Similarly, the Hessian $H$ of $z_L$ with respect to the parameters is the unique
+matrix $H(x)$ such that $dg\equiv g(x+dx)- g(x)\to H(x)\; dx$
+as $dx \to 0$. Appendix \ref{sec:hessian} shows that the Hessian has the following form:
+
+
+\begin{claim}
+  The Hessian of the loss $z_L$ with respect to the vector of parameters $x$ is given by
+  \begin{equation}
+    \label{eq:hessian}
+    H = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x,
+  \end{equation}
+  with the following matrices:
+  \begin{align*}
+    D_D    & \equiv
+    \begin{bmatrix}
+      \underbrace{I \otimes b_1}_{p \times ap} &        &               \\
+                                               & \ddots &               \\
+                                               &        & I \otimes b_L
+    \end{bmatrix}
+    ,
+    \qquad
+    D_M \equiv
+    \begin{bmatrix}
+      \underbrace{I \otimes b_1}_{a \times a^2} &        &               \\
+                                                & \ddots &               \\
+                                                &        & I \otimes b_L
+    \end{bmatrix}
+    ,               \\                                                                                     \\
+    P      & \equiv
+    \begin{bmatrix}
+      0 \\ I & 0 \\ &\ddots \\ &I&0
+    \end{bmatrix}
+    ,    \qquad
+    M       \equiv
+    \begin{bmatrix}
+      I                                                                                    \\
+      \underbrace{-\nabla_z f_2}_{a \times a} & I                                          \\
+                                              & -\nabla_z f_3 & I                          \\
+                                              &               & \ddots & \ddots            \\
+                                              &               &        & -\nabla_z f_L & 1 \\
+    \end{bmatrix}
+    ,               \\
+    D_x    & \equiv
+    \begin{bmatrix}
+      \underbrace{\nabla_x f_1}_{a\times p} &                       \\
+                                            & \ddots                \\
+                                            &        & \nabla_x f_L
+    \end{bmatrix}
+    , \qquad
+    D_{xx} \equiv
+    \begin{bmatrix}
+      \underbrace{\nabla_{xx} f_1}_{ap\times p} &        &                 \\
+                                                & \ddots &                 \\
+                                                &        & \nabla_{xx} f_L
+    \end{bmatrix}
+    , \qquad
+    D_{xz} \equiv
+    \begin{bmatrix}
+      \underbrace{\nabla_{xz} f_1}_{a^2 \times p} &        &                 \\
+                                                  & \ddots &                 \\
+                                                  &        & \nabla_{xz} f_L
+    \end{bmatrix}
+    ,               \\
+    D_{zx} & \equiv
+    \begin{bmatrix}
+      \underbrace{\nabla_{zx} f_1}_{ap \times a} &        &                 \\
+                                                 & \ddots &                 \\
+                                                 &        & \nabla_{zx} f_L
+    \end{bmatrix}
+    ,
+    \qquad
+    D_{zz}  \equiv
+    \begin{bmatrix}
+      \underbrace{\nabla_{zz} f_1}_{a^2\times a} &        &                 \\
+                                                 & \ddots &                 \\
+                                                 &        & \nabla_{zz} f_L
+    \end{bmatrix}
+    .
+  \end{align*}
+\end{claim}
+
+Given a vector $x \in \R^{Lp}$, the formula above allows us to compute $H x$ in
+$O\left(Lap^2 + L a^2p +La^3\right)$ operations without forming $H$. This cost
+is dominated by multiplying by the $D_{xx}$, $D_{zx}$, and $D_{zz}$ matrices.
+Appendix \ref{sec:pearlmutter} shows that these operations are exactly the are
+exactly  the operations performed in Pearlmutter's trick to compute the
+Hessian-vector product.
+
+To solve systems of the form $H x = b$, one could use Krylov methods to
+repeatedly multiply by $H$ without forming $H$ (a possibility Pearlmutter
+considered \cite{pearlmutter94}).  This would require applying $H$ some number
+of times that depends on the condition number of $H$. However, the next section
+shows how to solve systems of the form $H^{-1} x = b$ with only $\max(a,b)$
+times more operations than are needed to compute $H x$.
+
+\section{The inverse of the Hessian}
+
+The above shows that the Hessian is a second order matrix polynomial in
+$M^{-1}$. While $M$ itself is block-bidiagonal, $M^{-1}$ is dense, so $H$ is
+dense. Nevertheless, this polynomial can be lifted into a higher order object
+whose inverse is easy to compute:
+
+\[
+  H  = D_D D_{xx}  + D_D D_{zx} P M^{-1} D_x + D_x^\top M^{-\top} P^\top D_M D_{xz} + D_x^\top M^{-\top} P^\top D_M D_{zz} P M^{-1} D_x.
+\]
+In general, $H$ is singular. We wish to solve the system $(H + \epsilon I ) x = g$ for $x$. We can convert this dense system
+involving inverses into a larger, sparse system by introducing auxiliary
+variables. Define
+\begin{equation}
+  y \equiv M^{-1} D_x x,
+\end{equation}
+which implies $M y - D_x x = 0$.  Define a second auxiliary variable
+\begin{equation}
+  z \equiv M^{-\top} \left( P^\top D_M D_{xz} x + P^\top D_M D_{zz} P y \right),
+\end{equation}
+which implies $M^\top z - P^\top D_M D_{xz} x - P^\top D_M D_{zz} P y = 0$.
+With these substitutions, $(H + \epsilon I) x = g$ becomes
+\begin{equation}
+  \left(D_D D_{xx} + \epsilon I\right) x + D_D D_{zx} P y + D_x^\top z = g.
+\end{equation}
+Collecting these three linear equations gives us a unified system
+
+\begin{equation}
+  \underbrace{
+    \begin{bmatrix}
+      D_D D_{xx} + \epsilon I & D_D D_{zx} P         & D_x^\top \\
+      -D_x                    & M                    & 0        \\
+      -P^\top D_M D_{xz}      & -P^\top D_M D_{zz} P & M^\top
+    \end{bmatrix}
+  }_{\K}
+  \begin{bmatrix}
+    x \\ y \\ z
+  \end{bmatrix}
+  =
+  \begin{bmatrix}
+    g \\ 0 \\ 0
+  \end{bmatrix}.
+\end{equation}
+
+Finding $x = \left(H+\epsilon I\right)^{-1}g$ is equivalent to solving this block-linear system and
+reporting the resulting $x$. The benefit of doing this is that
+this system can be pivoted into a block-tri-diagonal system, which can be solved more
+efficiently than Gaussian elimination on $\K$ or $H$.
+
+The pivoting we'll apply reorders the blocks of the variables $x,y,z$ from
+$x_1,\ldots,x_L, y_1,\ldots, y_L, z_1,\ldots, z_L$ to
+$x_1,y_1,z_1,\dots,x_L,y_L,z_L$. This pivoting operation acts as a kind of
+transpose operation on block matrices. When appliekd to $\K$, it turns it into a
+block-tri-diagonal matrix.  To get a better feel for this operation, denote the
+$ij$th block of $\K$ by $\K_{ij}$ and the $uv$th sub-block of this block by
+$\K_{ij,uv}$.  Similarly, $x$ denote a vector conformant with $\K$, with $x_j$
+denoting the column vector that multiplies each block $\K_{\cdot j}$ and denote
+the $v$th sub-block of $x_j$ by $x_{jv}$, which multiplies $\K_{\cdot j,\cdot
+    v}$.  We say that $x$ is $j$-major because as we traverse the entries of $x$
+from top to bottom, the index $j$ increments more slowly than the $v$ index.
+
+Denote by $\Pi$ the permutation that transposes the
+blocks with the sub-blocks.  Applying this permutation matrix $\Pi$ to $x$ reorders
+it from $j$-major to $d$-major. Applying it to the rows and columns
+columns of $\K$ results in a block matrix $\K' \equiv \Pi
+  \K \Pi^\top$ that satisfies $\K_{ij,uv} = \K'_{uv,ij}$.
+Section \ref{sec:pivoting-examples} illustrates this operator with some examples.
+
+\begin{observation}
+  The permutation $\Pi$ is involutory, meaning $\Pi^{-1} =\Pi$.
+\end{observation}
+
+This implies that  to solve a system $\K x = b$, we can instead solve $\K' x' =
+  \Pi b$ for $x'$, then report $x = \Pi x'$.
+
+This permutation reduces the bandwidth of certain block matrices:
+
+\begin{observation} When  the block of $\K$ are banded with bandwidth $w$, $\K'$
+  is block-banded with bandwidth $w$.
+\end{observation}
+
+The blocks in $\K$ are either block-diagonal, block-upper-bi-diagonal, or
+block-lower-bi-diagonal, so $\K'$ is at most block-tri-diagonal. Denote the
+$ij$th block of $\K'$ as $B_{ij}$:
+\[
+  B_{ij} \equiv \begin{bmatrix}
+    K_{11,ij} & K_{12,ij} & K_{13,ij} \\
+    K_{21,ij} & K_{22,ij} & K_{23,ij} \\
+    K_{31,ij} & K_{32,ij} & K_{33,ij} \\
+  \end{bmatrix}.
+\]
+Then $\K'$ can be written as the block-tri-diagonal matrix
+\[
+  \K' = \begin{bmatrix}
+    B_{11} & B_{12} & 0      & \cdots &              &              & 0          \\
+    B_{21} & B_{22} & B_{23} & \ddots &              &              & \vdots     \\
+    0      & B_{32} & B_{33} & B_{34} & \ddots       &              &            \\
+    \vdots & \ddots & \ddots & \ddots & \ddots       & \ddots       & \vdots     \\
+    0      & \cdots & 0      & 0      & B_{L-1, L-2} & B_{L-1, L-1} & B_{L-1, L} \\
+    0      & \cdots & 0      & 0      & 0            & B_{L, L-1}   & B_{L, L}
+  \end{bmatrix}.
+\]
+
+That means we can solve the system $\K'x'=b'$ by first decomposing $\K'$ via
+block LDU decomposition into the product of a lower-block-bi-diagonal matrix, a
+block-diagonal matrix, and an upper-block-bi-diagonal matrix as $LDU x'=b'$,
+then solve for $L y = b'$  using back subustitution, and finally solve for
+$DUx'=y$ using forward substitution. Because these systems are
+block-bi-diagonal, solving them looks like forward and backward propagation on a
+chain. The running time for these solvers is linear in the depth of the network
+and cubic in the dimension of each block $B_{ij}$. Depending on the block, the
+dimension of each of these blocks is either in the number of parameters or the
+number of activations in the corresponding layer. In all,assuming $a$ and $p$
+are the largest activation and parameter count for a layer, the running time
+for solving this system is $O\left(L \max(a, p)^3\right)$ operations.
+
+
+\bibliographystyle{plain}
+\bibliography{hessian}
+
+\appendix
+
+\section{The Hessian}\label{sec:hessian}
+We use the facts that
 $dM^{-1} = -M^{-1} (dM) M^{-1}$ and $b=e_L M^{-1}$ to write
 \begin{align}
-  dv & = d(e_L M^{-1} D_x) \nonumber                               \\
+  dg & = g(x+dx)- g(x)                                             \\
+     & =d(e_L M^{-1} D_x) \nonumber                                \\
      & = e_L M^{-1} (dD_x)+ e_L \left(dM^{-1}\right) D_x \nonumber \\
      & = b \cdot dD_x  - e_L M^{-1} (dM) M^{-1} D_x \nonumber      \\
      & = b \cdot dD_x  - b \cdot (dM) M^{-1} D_x
@@ -437,225 +659,11 @@ We have just shown that the Hessian of the deep net has the form
 \begin{align}
   H \equiv \frac{\partial^2 z_L}{\partial x^2}
    & = D_D \left(D_{xx} + D_{zx} PM^{-1} D_x\right) + D_x^\top M^{-T}P^\top D_M \left(D_{xz}+D_{zz}P M^{-1}D_x\right)           \\
-  \label{eq:hessian}
    & = D_DD_{xx}  + D_DD_{zx} PM^{-1} D_x + D_x^\top M^{-\top}P^\top D_M D_{xz}+D_x^\top M^{-\top}P^\top D_M D_{zz}P M^{-1}D_x.
 \end{align}
 
-The various matrices involved are recapitulated below:
 
-\begin{align*}
-  D_D    & \equiv
-  \begin{bmatrix}
-    \underbrace{I \otimes b_1}_{p \times ap} &        &               \\
-                                             & \ddots &               \\
-                                             &        & I \otimes b_L
-  \end{bmatrix}
-  ,
-  \qquad
-  D_M \equiv
-  \begin{bmatrix}
-    \underbrace{I \otimes b_1}_{a \times a^2} &        &               \\
-                                              & \ddots &               \\
-                                              &        & I \otimes b_L
-  \end{bmatrix}
-  ,               \\                                                                                     \\
-  P      & \equiv
-  \begin{bmatrix}
-    0 \\ I & 0 \\ &\ddots \\ &I&0
-  \end{bmatrix}
-  ,    \qquad
-  M       \equiv
-  \begin{bmatrix}
-    I                                                                                    \\
-    \underbrace{-\nabla_z f_2}_{a \times a} & I                                          \\
-                                            & -\nabla_z f_3 & I                          \\
-                                            &               & \ddots & \ddots            \\
-                                            &               &        & -\nabla_z f_L & 1 \\
-  \end{bmatrix}
-  ,               \\
-  D_x    & \equiv
-  \begin{bmatrix}
-    \underbrace{\nabla_x f_1}_{a\times p} &                       \\
-                                          & \ddots                \\
-                                          &        & \nabla_x f_L
-  \end{bmatrix}
-  , \qquad
-  D_{xx} \equiv
-  \begin{bmatrix}
-    \underbrace{\nabla_{xx} f_1}_{ap\times p} &        &                 \\
-                                              & \ddots &                 \\
-                                              &        & \nabla_{xx} f_L
-  \end{bmatrix}
-  , \qquad
-  D_{xz} \equiv
-  \begin{bmatrix}
-    \underbrace{\nabla_{xz} f_1}_{a^2 \times p} &        &                 \\
-                                                & \ddots &                 \\
-                                                &        & \nabla_{xz} f_L
-  \end{bmatrix}
-  ,               \\
-  D_{zx} & \equiv
-  \begin{bmatrix}
-    \underbrace{\nabla_{zx} f_1}_{ap \times a} &        &                 \\
-                                               & \ddots &                 \\
-                                               &        & \nabla_{zx} f_L
-  \end{bmatrix}
-  ,
-  \qquad
-  D_{zz}  \equiv
-  \begin{bmatrix}
-    \underbrace{\nabla_{zz} f_1}_{a^2\times a} &        &                 \\
-                                               & \ddots &                 \\
-                                               &        & \nabla_{zz} f_L
-  \end{bmatrix}
-  .
-\end{align*}
-\subsection{Multiplying a vector by the Hessian}
 
-Given a vector $g \in \R^{Lp}$, the formula above allows us to compute $H g$ in
-$O\left(Lap^2 + L a^2p +La^3\right)$ operations without forming $H$. This cost
-is dominated by multiplying by the $D_{xx}$, $D_{zx}$, and $D_{zz}$ matrices.
-Appendix \ref{sec:pearlmutter} shows that these operations are exactly the
-operations involved in Pearlmutter's trick to compute the Hessian-vector
-product.
-
-It's tempting to use this insight to use Krylov methods to solve systems of the form $H x = b$ without forming $H$.
-This would require computing $H g$ some number of times that depends on the condition number of $H$. However, the next
-section shows how to compute $H^{-1} b$ with roughly only as many operations as are needed to compute $H g$.
-
-\section{The inverse of the Hessian}
-
-The above shows that the Hessian is a second order matrix polynomial in
-$M^{-1}$. While $M$ itself is block-bidiagonal, $M^{-1}$ is dense, so $H$ is
-dense. Nevertheless, this polynomial can be lifted into a higher order object
-whose inverse is easy to compute:
-
-\[
-  H  = D_D D_{xx}  + D_D D_{zx} P M^{-1} D_x + D_x^\top M^{-\top} P^\top D_M D_{xz} + D_x^\top M^{-\top} P^\top D_M D_{zz} P M^{-1} D_x.
-\]
-In general, $H$ is singular. We wish to solve the system $(H + \epsilon I ) x = g$ for $x$. We can convert this dense system
-involving inverses into a larger, sparse system by introducing auxiliary
-variables. Define
-\begin{equation}
-  y \equiv M^{-1} D_x x,
-\end{equation}
-which implies $M y - D_x x = 0$.  Define a second auxiliary variable
-\begin{equation}
-  z \equiv M^{-\top} \left( P^\top D_M D_{xz} x + P^\top D_M D_{zz} P y \right),
-\end{equation}
-which implies $M^\top z - P^\top D_M D_{xz} x - P^\top D_M D_{zz} P y = 0$.
-With these substitutions, $(H + \epsilon I) x = g$ becomes
-\begin{equation}
-  \left(D_D D_{xx} + \epsilon I\right) x + D_D D_{zx} P y + D_x^\top z = g.
-\end{equation}
-Collecting these three linear equations gives us a unified system
-
-\begin{equation}
-  \underbrace{
-    \begin{bmatrix}
-      D_D D_{xx} + \epsilon I & D_D D_{zx} P         & D_x^\top \\
-      -D_x                    & M                    & 0        \\
-      -P^\top D_M D_{xz}      & -P^\top D_M D_{zz} P & M^\top
-    \end{bmatrix}
-  }_{\K}
-  \begin{bmatrix}
-    x \\ y \\ z
-  \end{bmatrix}
-  =
-  \begin{bmatrix}
-    g \\ 0 \\ 0
-  \end{bmatrix}.
-\end{equation}
-
-Finding $x = \left(H+\epsilon I\right)^{-1}g$ is equivalent to solving this block-linear system and
-reporting the resulting $x$. The benefit of doing this is that
-this system can be pivoted into a block-tri-diagonal system, which can be solved more
-efficiently than Gaussian elimination on $\K$ or $H$.
-
-The pivoting we'll apply reorders the blocks of the variables $x,y,z$ from
-$x_1,\ldots,x_L, y_1,\ldots, y_L, z_1,\ldots, z_L$ to
-$x_1,y_1,z_1,\dots,x_L,y_L,z_L$.  To see why such a pivoting results in a
-simpler to solve system, denote the $ij$th block of $\K$ by $\K_{ij}$ and the
-$uv$th sub-block of this block by $\K_{ij,uv}$.  Let $x$ denote a vector
-conformant with $\K$, with $x_j$ denoting the column vector that multiplies each
-block $\K_{\cdot j}$ and $x_{jv}$ denoting the $v$th sub-block of $x_j$, which
-multiplies $\K_{\cdot j,\cdot v}$.  We say that $x$ is $j$-major because as we
-traverse the entries of $x$ from top to bottom, the index $j$ increments more
-slowly than the $v$ index.
-
-Denote by $\Pi$ the permutation that transposes the
-blocks with the sub-blocks.  Applying this permutation matrix $\Pi$ to $x$ reorders
-it from $j$-major to $d$-major. Applying it to the rows and columns
-columns of $\K$ results in a block matrix $\K' \equiv \Pi
-  \K \Pi^\top$ that satisfies $\K_{ij,uv} = \K'_{uv,ij}$.
-
-\begin{observation}
-  The permutation $\Pi$ is involutory, meaning $\Pi^{-1} =\Pi$.
-\end{observation}
-
-This implies that  to solve a system $\K x = b$, we can instead solve $\K' x' =
-  \Pi b$ for $x'$, then report $x = \Pi x'$.
-
-This permutation reduces the bandwidth of certain block matrices:
-
-\begin{observation}
-  Suppose each block of $\K$ is banded with bandwidth $w$. Then
-  $\K'$  is block-banded with bandwidth $w$.
-\end{observation}
-
-Notably, even when $\K$ has very large bandwidth, $\K'$ will have bandwidth no
-greater than that of the blocks of $\K$.  Section \ref{sec:pivoting-examples}
-illustrates this point with some examples.
-
-The blocks in $\K$ are either block-diagonal, block-upper-bi-diagonal, or
-block-lower-bi-diagonal, so $\K'$ is at most block-tri-diagonal:
-\[
-  \K' = \begin{bmatrix}
-    \begin{bmatrix}
-      K_{11,11} & K_{12,11} & K_{13,11} \\
-      K_{21,11} & K_{22,11} & K_{23,11} \\
-      K_{31,11} & K_{32,11} & K_{33,11} \\
-    \end{bmatrix} & \begin{bmatrix}
-                      K_{11,12} & K_{12,12} & K_{13,12} \\
-                      K_{21,12} & K_{22,12} & K_{23,12} \\
-                      K_{31,12} & K_{32,12} & K_{33,12} \\
-                    \end{bmatrix}                                                                           \\
-    \begin{bmatrix}
-      K_{11,21} & K_{12,21} & K_{13,21} \\
-      K_{21,21} & K_{22,21} & K_{23,21} \\
-      K_{31,21} & K_{32,21} & K_{33,21} \\
-    \end{bmatrix} & \begin{bmatrix}
-                      K_{11,22} & K_{12,22} & K_{13,22} \\
-                      K_{21,22} & K_{22,22} & K_{23,22} \\
-                      K_{31,22} & K_{32,22} & K_{33,22} \\
-                    \end{bmatrix} &
-    \begin{bmatrix}
-      K_{11,23} & K_{12,23} & K_{13,23} \\
-      K_{21,23} & K_{22,23} & K_{23,23} \\
-      K_{31,23} & K_{32,23} & K_{33,23} \\
-    \end{bmatrix}                                                                                           \\
-                                         & \begin{bmatrix}
-                                             K_{11,32} & K_{12,32} & K_{13,32} \\
-                                             K_{21,32} & K_{22,32} & K_{23,32} \\
-                                             K_{31,32} & K_{32,32} & K_{33,32} \\
-                                           \end{bmatrix} & \begin{bmatrix}
-                                                             K_{11,33} & K_{12,33} & K_{13,33} \\
-                                                             K_{21,33} & K_{22,33} & K_{23,33} \\
-                                                             K_{31,33} & K_{32,33} & K_{33,33} \\
-                                                           \end{bmatrix} & \begin{bmatrix}
-                                                                             K_{11,34} & K_{12,34} & K_{13,34} \\
-                                                                             K_{21,34} & K_{22,34} & K_{23,34} \\
-                                                                             K_{31,34} & K_{32,34} & K_{33,34} \\
-                                                                           \end{bmatrix}
-    \\
-                                         & \ddots                               & \ddots                               & \ddots \\
-  \end{bmatrix}
-\]
-
-\bibliographystyle{plain}
-\bibliography{hessian}
-
-\appendix
 \section{Equation (\ref{eq:hessian}) is Pearlmutter's Hessian-vector multiplication algorithm}
 \label{sec:pearlmutter}
 

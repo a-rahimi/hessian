@@ -12,8 +12,7 @@ system, factor that system, and then solve it. This, in effect, ends up looking
 like running propagation on a network that is the dual of the original network.
 
 The full idea is described in [hessian.pdf](hessian.pdf). For a quick look at
-the algortihm, see the [hessian_inverse_product](src/hessian.py#L269) (though
-the implementation under [src/](src/) is work in progress).  
+the algortihm, see the [hessian_inverse_product](src/hessian.py#L269).
 
 # Partitioned Matrix Library
 
