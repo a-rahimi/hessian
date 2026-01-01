@@ -89,12 +89,13 @@ activations and parameters in each layer is still cubic, but the dependence on
 the number of layers is only linear. This makes operating on the Hessian of tall
 and skinny networks more efficient than the Hessian of short and fat networks.
 
-In a followup article, we will investigate training deep networks with the help
-of the Hessian-inverse-vector product as a preconditioner. Based on the
-running-time of the method, we expect it to speed up training in a regime where
-networks are extruded layerwise: instead of having a few layers with many
-parameters and many activations, we expect the method to work better when the
-parameters and activations are spread over many layers.
+Although modern networks are typically short and wide, our method runs faster
+than the naive hessian-inverse-vector product algorithm on tall and skinny
+networks, since it amerliorates the naive algorithm's cubic dependence on depth
+to a mild linear dependence on depth.  A follow-up article will explore training
+tall-skinny networks using the Hessian-inverse-vector product as a
+preconditioner.  We expect that a significant training speedup will motivate a
+return to deeper network designs.
 
 
 \section{Overview}
