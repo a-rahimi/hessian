@@ -50,7 +50,7 @@ The Hessian-inverse-vector product can be computed in time and storage that
 scales linearly with the number of layers in the model, and cubically in the
 number of parameters and activations in each layer.
 
-Pearlmutter \cite{pearlmutter94}showed the product of the Hessian with a fixed
+Pearlmutter \cite{pearlmutter94} showed the product of the Hessian with a fixed
 vector (the so-called Hessian-vector product) can be computed in time and
 storage that scales linearly with the number of layers in the network.  The
 scaling behavior of Pearlmutter's method is much better than the cubic scaling
@@ -91,7 +91,7 @@ and skinny networks more efficient than the Hessian of short and fat networks.
 
 Although modern networks are typically short and wide, our method runs faster
 than the naive hessian-inverse-vector product algorithm on tall and skinny
-networks, since it amerliorates the naive algorithm's cubic dependence on depth
+networks, since it ameliorates the naive algorithm's cubic dependence on depth
 to a mild linear dependence on depth.  A follow-up article will explore training
 tall-skinny networks using the Hessian-inverse-vector product as a
 preconditioner.  We expect that a significant training speedup will motivate a
@@ -114,8 +114,13 @@ explicitly. To do this, we employ the following strategy:
   \item
         Lift this polynomial into a higher-dimensional matrix form. After pivoting, this matrix becomes block-tri-diagonal.
   \item
-        Solve the resulting block-tri-diagonal system using LDU factorization,
-        un-pivot the result, and report the un-lifted solution.
+        Factorize the resulting block-tri-diagonal into a lower bi-diagonal block matrix, a diagonal block matrix and an upper block-diagonal
+        matrix (the LDU factorization).
+  \item Solve the resulting system using forward and backward substitution.
+        This is similar to running backpropagation on a modified version of the
+        original network that's designed to compute the Hessian-inverse-vector
+        product.
+  \item Un-pivot the result, and report the un-lifted solution.
 \end{enumerate}
 
 Algorithm \ref{alg:hessian_inverse_product} summarizes the steps above.
@@ -333,7 +338,7 @@ To solve systems of the form $H x = b$, one could use Krylov methods to
 repeatedly multiply by $H$ without forming $H$ (a possibility Pearlmutter
 considered \cite{pearlmutter94}).  This would require applying $H$ some number
 of times that depends on the condition number of $H$. However, the next section
-shows how to solve systems of the form $H^{-1} x = b$ with only $\max(a,b)$
+shows how to solve systems of the form $H^{-1} x = b$ with only $\max(a,p)$
 times more operations than are needed to compute $H x$.
 
 \section{Applying the inverse of the Hessian}
@@ -390,7 +395,7 @@ The pivoting we'll apply reorders the blocks of the variables $x,y,z$ from
 $x_1,\ldots,x_L, y_1,\ldots, y_L, z_1,\ldots, z_L$ to
 $x_1,y_1,z_1,\dots,x_L,y_L,z_L$. This pivoting operation acts as a kind of
 transpose operation on block matrices (its generalization is called a
-"commutation matrix" in \cite{magnus-neudecker}). When applied to $\K$, it turns
+``commutation matrix'' in \cite{magnus-neudecker}). When applied to $\K$, it turns
 it into a block-tri-diagonal matrix.  To get a better feel for this operation,
 denote the $ij$th block of $\K$ by $\K_{ij}$ and the $uv$th sub-block of this
 block by $\K_{ij,uv}$.  Similarly, $x$ denote a vector conformant with $\K$,
@@ -415,7 +420,7 @@ This implies that  to solve a system $\K x = b$, we can instead solve $\K' x' =
 
 This permutation reduces the bandwidth of certain block matrices:
 
-\begin{observation} When  the block of $\K$ are banded with bandwidth $w$, $\K'$
+\begin{observation} When the blocks of $\K$ are banded with bandwidth $w$, $\K'$
   is block-banded with bandwidth $w$.
 \end{observation}
 
@@ -455,6 +460,27 @@ number of activations in the corresponding layer. In all,assuming $a$ and $p$
 are the largest activation and parameter count for a layer, the running time
 for solving this system is $O\left(L \max(a, p)^3\right)$ operations.
 
+\section{Conclusion}
+
+We have described a method to compute the product of the inverse Hessian of a
+deep neural network with a vector.  Compared to the naive method, which stores
+the Hessian and requires computation cubic in the depth of the
+network, this method does not store the Hessian and requires computation linear
+in the depth of the network.
+
+In its final stage, the method relies on a forward and backward substitution to
+solve a block tridiagonal system.  This step bears a similarity to Pearlmutter's
+method for computing the Hessian-vector product: It can be interpreted as
+running backpropagation on a modified version of the original network whose
+gradient is the desired Hessian-inverse-vector product.  The downside of this
+similarity is that solving large linear systems with LDU factorization is prone
+to numerical instability.  An improvement on the proposal is to solve the block
+tridiagonal system with an off-the-shelf banded solver.
+
+Our hope is to use this technique as a preconditioner to speed up stochastic
+gradient descent.  Since the method's speedup is greatest when the network is
+tall and skinny, we hope it might rekindle interest in extremely deep
+architectures.
 
 \bibliographystyle{plain}
 \bibliography{hessian}
