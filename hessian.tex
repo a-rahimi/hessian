@@ -4,6 +4,8 @@
 \usepackage{hyperref}
 \usepackage{mathtools}
 \usepackage{authblk}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 
 \newcommand{\R}{\mathop{\mathbb{R}}}
 \newcommand{\K}{\mathcal{K}}
@@ -114,6 +116,24 @@ explicitly. To do this, we employ the following strategy:
         Solve the resulting block-tri-diagonal system using LDU factorization,
         un-pivot the result, and report the un-lifted solution.
 \end{enumerate}
+
+Algorithm \ref{alg:hessian_inverse_product} summarizes the steps above.
+
+\begin{algorithm}\label{alg:hessian_inverse_product}
+  \caption{Compute the hessian-inverse-vector product by solving $(H+\epsilon I)x=b$}.
+  \label{alg:hessian_inverse}
+  \begin{algorithmic}[1]
+    \Require A vector $b$, damping constant $\epsilon$.
+    \Ensure $x = (H+\epsilon I)^{-1} b$
+    \State Define the sparse block matrix $\mathcal{K}$ and the augmented system as in Equation \ref{eq:unified-system}.
+    \State Pivot into permuted system $\mathcal{K}' x' = b'$ where $\mathcal{K}' = \Pi \mathcal{K} \Pi^\top$ is block-tri-diagonal following Equation (\ref{eq:K-pivoted}).
+    \State Solve $\mathcal{K}' x' = b'$ using block-LDU decomposition.
+    \State Recover the solution $x$ from the permuted vector $\Pi \left[\begin{smallmatrix}x \\ y \\ z\end{smallmatrix}'\right]$.
+  \end{algorithmic}
+\end{algorithm}
+
+The algorithm is straightforward to implement with a suitable library of
+block matrix operations.\footnote{\url{https://github.com/a-rahimi/hessian}}
 
 \section{Notation}
 
@@ -343,6 +363,7 @@ With these substitutions, $(H + \epsilon I) x = g$ becomes
 Collecting these three linear equations gives us a unified system
 
 \begin{equation}
+  \label{eq:unified-system}
   \underbrace{
     \begin{bmatrix}
       D_D D_{xx} + \epsilon I & D_D D_{zx} P         & D_x^\top \\
@@ -408,7 +429,8 @@ $ij$th block of $\K'$ as $B_{ij}$:
   \end{bmatrix}.
 \]
 Then $\K'$ can be written as the block-tri-diagonal matrix
-\[
+\begin{equation}
+  \label{eq:K-pivoted}
   \K' = \begin{bmatrix}
     B_{11} & B_{12} & 0      & \cdots &              &              & 0          \\
     B_{21} & B_{22} & B_{23} & \ddots &              &              & \vdots     \\
@@ -417,7 +439,7 @@ Then $\K'$ can be written as the block-tri-diagonal matrix
     0      & \cdots & 0      & 0      & B_{L-1, L-2} & B_{L-1, L-1} & B_{L-1, L} \\
     0      & \cdots & 0      & 0      & 0            & B_{L, L-1}   & B_{L, L}
   \end{bmatrix}.
-\]
+\end{equation}
 
 That means we can solve the system $\K'x'=b'$ by first decomposing $\K'$ via
 block LDU decomposition into the product of a lower-block-bi-diagonal matrix, a
