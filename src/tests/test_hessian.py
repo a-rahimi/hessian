@@ -490,9 +490,9 @@ class TestSequenceOfBlocks:
         """
         Test hessian_inverse_product by comparing it to torch.func.hessian.
 
-        Computes H explicitly using torch.func.hessian(...), and solve H \ g
+        Computes H explicitly using torch.func.hessian(...), and solve Hx=b
         using torch.linalg.solve.  Compare this result against that of
-        hessian_inverse_product(g).
+        hessian_inverse_product.
         """
         # Method 1: Use hessian_inverse_product
         hinv_g_result = model.hessian_inverse_product(
