@@ -1,4 +1,4 @@
-# The Hessian of very deep networks is easy to invert
+# The Hessian of tall-skinny networks is easy to invert
 
 This package shows how to multiply the inverse of the Hessian of a deep network
 with a vector.  If the Hessian-vector product is $H v$ for some fixed vector
@@ -6,9 +6,9 @@ $v$, we're interested in solving $H x = v$ for $x$.  The hope is to soon use
 this as a preconditioner to speed up stochastic gradient descent.
 
 [Pearlmutter](https://www.bcl.hamilton.ie/~barak/papers/nc-hessian.pdf) showed a
-clever way to compute the Hessian-vector-product for a deep net.  The paper and
-code in this repo shows how to compute the Hessian-inverse-product, the product
-of the
+clever way to compute the Hessian-vector-product for a deep net. By contrast,
+the paper and code in this repo shows how to compute the
+Hessian-inverse-product, the product of the
 **inverse** of the Hessian of a deep net with a vector.
 Solving this system naively requires a number of operations that scales
 cubically with the number of parameters in the deep net, which is impractical
