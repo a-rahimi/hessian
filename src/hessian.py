@@ -171,6 +171,20 @@ class LossLayer(DenseBlock):
         )
 
 
+def _validate_vector_is_Hessian_shaped(b: bpm.Vertical, Dx: bpm.Diagonal):
+    if b.num_blocks() != Dx.num_blocks():
+        raise ValueError(
+            "b must have as many Vertical blocks as there are layers. "
+            f"It has {b.num_blocks}"
+        )
+    for b_layer, Dx_layer in zip(b.flat, Dx.flatten()):
+        if b_layer.height != Dx_layer.width:
+            raise ValueError(
+                f"b_layer has height {b_layer.height} "
+                f"but the layer has width {Dx_layer.width} parameters"
+            )
+
+
 class SequenceOfBlocks(nn.Module):
     "A sequence of blocks for which mixed derivatives can be computed."
 
@@ -250,9 +264,10 @@ class SequenceOfBlocks(nn.Module):
         operations instead of backprop operations.
         """
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
-
         M = bpm.IdentityWithLowerDiagonal((-Dz).flat[1:])
         P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.flatten()])
+
+        _validate_vector_is_Hessian_shaped(v, Dx)
 
         # Compute equation \ref{eq:hessian} from hessian.tex:
         # H v = D_D D_xx v + D_D D_zx P M⁻¹ Dₓ v
@@ -276,18 +291,7 @@ class SequenceOfBlocks(nn.Module):
         M = bpm.IdentityWithLowerDiagonal((-Dz).flat[1:])
         P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.flatten()])
 
-        # Validate the input.
-        if b.num_blocks() != Dx.num_blocks():
-            raise ValueError(
-                "b must have as many Vertical blocks as there are layers. "
-                f"It has {b.num_blocks}"
-            )
-        for b_layer, Dx_layer in zip(b.flat, Dx.flatten()):
-            if b_layer.height != Dx_layer.width:
-                raise ValueError(
-                    f"b_layer has height {b_layer.height} "
-                    f"but the layer has width {Dx_layer.width} parameters"
-                )
+        _validate_vector_is_Hessian_shaped(b, Dx)
 
         zero_block = bpm.Diagonal(
             [

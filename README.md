@@ -21,7 +21,7 @@ the original network.
 The full idea is described in [hessian.pdf](hessian.pdf). For a demo, see
 [demo_hessian.ipynb](src/demo_hessian.ipynb). For a look at how the
 algortihm is implemented, see the
-[hessian_inverse_product](src/hessian.py#L269) function.
+[hessian_inverse_product](src/hessian.py#L284) function.
 
 ## The partitioned matrix library under the hood
 
