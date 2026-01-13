@@ -1,5 +1,6 @@
 # The Hessian of tall-skinny networks is easy to invert
 
+
 This package shows how to multiply the inverse of the Hessian of a deep network
 with a vector.  If the Hessian-vector product is $H v$ for some fixed vector
 $v$, we're interested in solving $H x = v$ for $x$.  The hope is to soon use
@@ -18,7 +19,7 @@ system, factor that system, and then solve it. These steps, in effect, end up
 looking like running propagation on a network that is an augmented version of
 the original network.
 
-The full idea is described in [hessian.pdf](hessian.pdf). For a demo, see
+The full idea is described in [this paper](https://arxiv.org/abs/2601.06096). For a demo, see
 [demo_hessian.ipynb](src/demo_hessian.ipynb). For a look at how the
 algortihm is implemented, see the
 [hessian_inverse_product](src/hessian.py#L284) function.
@@ -28,6 +29,6 @@ algortihm is implemented, see the
 The algorithm relies heavily on operations hierarchically nested, structured,
 block matrices. For example, it makes use of partitioned matrices whose blocks
 are block-diagonal, and tri-diagonal matrices whose blocks are partitiond
-matrices. The code includes a library toe manipuate such matrices in
+matrices. The code includes a library to manipulate such matrices in
 [block_partitioned_matrices.py](src/block_partitioned_matrices.py).
 See [its tutorial](src/tutorial_block_partitioned_matrices.ipynb).

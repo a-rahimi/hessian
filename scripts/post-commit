@@ -1,1 +1,19 @@
-../.git/hooks/post-commit
+#!/bin/sh
+set -e
+
+if [ "${HIERARCHY_POST_COMMIT:-}" = "1" ]; then
+    exit 0
+fi
+
+REPO_ROOT="/Users/ali/hessian"
+PYTHON="$REPO_ROOT/.venv/bin/python"
+
+cd "$REPO_ROOT"
+"$PYTHON" $REPO_ROOT/scripts/document_block_partitioned_matrices_hierarchy.py
+"$PYTHON" $REPO_ROOT/scripts/update_readme_lines.py
+
+# Check for changes in tracked files that might have been updated
+if ! git diff --quiet -- README.md src/block_partitioned_matrices.py; then
+    git add README.md src/block_partitioned_matrices.py
+    HIERARCHY_POST_COMMIT=1 git commit --amend --no-edit >/dev/null
+fi
