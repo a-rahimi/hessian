@@ -21,14 +21,15 @@
 
 \begin{document}
 
-\maketitle \begin{abstract} We describe an exact algorithm for solving linear
-  systems $Hx=b$ where $H$ is the Hessian of a deep net. The method computes
-  Hessian-inverse-vector products without storing the Hessian or its inverse in
-  time and storage that scale linearly in the number of layers.  Compared to the
-  naive approach of first computing the Hessian, then solving the linear system,
-  which takes storage that's quadratic in the number of parameters and cubically
-  many operations, our Hessian-inverse-vector product method scales roughly like
-  Pearlmutter's algorithm for computing Hessian-vector products.
+\maketitle \begin{abstract} We describe an exact algorithm to solve linear
+  systems of the form $Hx=b$ where $H$ is the Hessian of a deep net. The method
+  computes Hessian-inverse-vector products without storing the Hessian or its
+  inverse. It requires time and storage that scale linearly in the number of
+  layers.  This is in contrast to the naive approach of first computing the
+  Hessian, then solving the linear system, which takes time and storage that are
+  respectively quadratic and cubic in the number of layers.  The
+  Hessian-inverse-vector product method scales roughly like Pearlmutter's
+  algorithm for computing Hessian-vector products.
 \end{abstract}
 
 \section{Introduction}
@@ -100,22 +101,25 @@ return to deeper network designs.
 
 \section{Overview}
 
-Our objective is to efficiently solve linear systems of the form $H x = g$,
+Our objective is to efficiently solve linear systems of the form $H x = b$,
 where $H$ is the Hessian of a deep neural network, without forming $H$
 explicitly. To do this, we employ the following strategy:
 \begin{enumerate}
   \item
-        Write down the gradient of the deep net in matrix form, as a bi-diagonal system of linear
+        Write down the gradient of the deep net in matrix form, as a block bi-diagonal system of linear
         equations. Solving this system uses back-substitution, which in this case
         coincides exactly with the computations carried out by backpropagation.
   \item
         Differentiate this matrix form to obtain an expression for the Hessian. This expression
-        involves a second-order polynomial in the inverse of the aforementioned bi-diagonal matrix.
+        involves a second-order polynomial in the inverse of the aforementioned block bi-diagonal matrix.
   \item
-        Lift this polynomial into a higher-dimensional matrix form. After pivoting, this matrix becomes block-tri-diagonal.
+        Refactor the expression wit hthe help of auxiliarry variables. These
+        lift the polynomial into a higher-dimensional linear form. After
+        pivoting, this linear form becomes block tri-diagonal.
   \item
-        Factorize the resulting block-tri-diagonal into a lower bi-diagonal block matrix, a diagonal block matrix and an upper block-diagonal
-        matrix (the LDU factorization).
+        Factorize the resulting block-tri-diagonal into a lower block
+        bi-diagonal matrix, a block diagonal matrix, and an upper block diagonal
+        matrix using the LDU factorization.
   \item Solve the resulting system using forward and backward substitution.
         This is similar to running backpropagation on a modified version of the
         original network that's designed to compute the Hessian-inverse-vector
