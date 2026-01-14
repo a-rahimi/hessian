@@ -26,7 +26,7 @@
   computes Hessian-inverse-vector products without storing the Hessian or its
   inverse. It requires time and storage that scale linearly in the number of
   layers.  This is in contrast to the naive approach of first computing the
-  Hessian, then solving the linear system, which takes time and storage that are
+  Hessian, then solving the linear system, which takes storage and time that are
   respectively quadratic and cubic in the number of layers.  The
   Hessian-inverse-vector product method scales roughly like Pearlmutter's
   algorithm for computing Hessian-vector products.
@@ -38,60 +38,58 @@ The Hessian of a deep net is the matrix of second-order mixed partial
 derivatives of its loss with respect to its parameters. Decades ago, when deep
 nets had only hundreds or thousands of parameters, the Hessian matrix could be
 inverted to implement optimizers that converged much faster than gradient
-descent \cite{Watrous1987, Barnard1992}.  But for large modern deep nets, using the
-Hessian has become less practical: The Hessian of a model with a billion
+descent \cite{Watrous1987, Barnard1992}.  But for large modern deep nets, relying on the
+Hessian has become impractical: The Hessian of a model with a billion
 parameters would have a quintillion entries, which is far larger than can be
-stored, multiplied, factorized, or inverted, even in the largest data centers. A
+stored, multiplied, or inverted even in the largest data centers. A
 common workaround is to approximate the Hessian as a low-rank matrix
 \cite{Webb1988, lbfgs-deep-net} or as a diagonal matrix \cite{becker-lecun-89,
   adagrad, adam}. Such approximations make it easier to apply the inverse of the
 Hessian to a vector. This article shows how to compute and apply the inverse of
-the Hessian exactly without storing the Hessian and without storing its inverse.
+the Hessian exactly without storing the Hessian or its inverse.
 The Hessian-inverse-vector product can be computed in time and storage that
-scales linearly with the number of layers in the model, and cubically in the
+scale linearly with the number of layers in the model, and cubically in the
 number of parameters and activations in each layer.
 
-Pearlmutter \cite{pearlmutter94} showed the product of the Hessian with a fixed
-vector (the so-called Hessian-vector product) can be computed in time and
-storage that scales linearly with the number of layers in the network.  The
-scaling behavior of Pearlmutter's method is much better than the cubic scaling
-of the naive algorithm that first computes the Hessian matrix and then
-multiplies it by the vector.  The method  transforms the original network into a
-new network whose gradient is the desired Hessian-vector product. To compute the
-Hessian-vector product, one then just applies backpropagation to the new
-network.  Given a way to compute the Hessian-vector product, one can indirectly
-compute the Hessian-inverse-vector product via, say Krylov iterations like
-Conjugate Gradient. However, the quality of the result would then depend on the
-conditioning of the Hessian, which is notoriously poor for deep nets
-\cite{ying-behrooz-hessian-spectrum}. Unfortunately, there seems to exist no
-variant of Pearlmutter's trick to compute the Hessian-inverse-vector products
-directly.
+Pearlmutter \cite{pearlmutter94} showed how to compute the product of the
+Hessian with a fixed vector (the so-called Hessian-vector product) in time and
+storage that scale linearly with the number of layers in the network.  This is
+much faster than the cubic scaling of the naive algorithm that first computes
+the Hessian matrix and then multiplies it by the vector.  His method transforms
+the original network into a new network whose gradient is the desired
+Hessian-vector product. To compute the Hessian-vector product, one then just
+applies backpropagation to the new network.  Given a way to compute the
+Hessian-vector product, one can indirectly compute the Hessian-inverse-vector
+product via, say Krylov iterations like Conjugate Gradient as proposed by
+Pearlmutter and more recently re-investigated \cite{martens-hessian-free, krylov-subspace-descent}. However,
+the quality of the result would then depend on the conditioning of the Hessian,
+which is notoriously poor for deep nets \cite{ying-behrooz-hessian-spectrum}.
+Unfortunately, there seems to exist no variant of Pearlmutter's trick to compute
+the Hessian-inverse-vector products directly.
 
-This article offers a way to compute Hessian-inverse-vector products using
-roughly as much computation and storage as Pearlmutter's algorithm requires to
-compute the Hessian-vector product. The Hessian of a deep net has a regular
-structure that makes it possible to compute Hessian-inverse-vector products
-exactly and efficiently. Regardless of the specific operations in each layer,
-the Hessian of a layerwise deep net is a second order matrix polynomial that
-involves the first order and second order mixed derivatives of each layer, and
-the inverse of a block-bi-diagonal operator that represents the backpropagation
-algorithm.  Exploiting this structure offers a direct way to compute the
-Hessian-vector product using exactly the same operations as Pearlmutter's
-algorithm (see Appendix \ref{sec:pearlmutter}). It also leads to a way to
-compute Hessian-inverse-vector product that does not require forming or storing
-the full Hessian. Assume an oracle that offers the first order and second order
-mixed derivatives of each layer.  For an $L$-layer deep net where each layer has
-$p$ parameters and produces $a$ activations, naively storing the Hessian would
-require $O(L^2p^2)$ memory, and solving a linear system would require
-$O\left(L^3p^3\right)$  operations in addition to the oracle queries. In
-contrast, we will show how to perform these operations using only $O(L \max(a,
-  p)^3)$ additional computation. The dependence on the parameters on the number of
-activations and parameters in each layer is still cubic, but the dependence on
+The proposed Hessian-inverse-vector product algorithm takes advantage of a deep
+net's layerwise structure.  Regardless of the specific operations in each layer,
+the Hessian is a second order matrix polynomial that involves the first order
+and second order mixed derivatives of each layer, and the inverse of a block
+bi-diagonal operator that represents the backpropagation algorithm.  Multiplying
+a vector by this structure computes the Hessian-vector product using exactly the
+same operations as Pearlmutter's algorithm (see Appendix \ref{sec:pearlmutter}).
+It also leads to a way to compute Hessian-inverse-vector product that does not
+require forming or storing the full Hessian. To formally characterize the
+storage and running time of the algorithm, assume an oracle that offers the
+first order and second order mixed derivatives of each layer.  For an $L$-layer
+deep net where each layer has at most $p$ parameters and generates at most $a$
+activations, naively storing the Hessian would require $O(L^2p^2)$ memory, and
+solving a linear system would require $O\left(L^3p^3\right)$ operations in
+addition to the oracle queries. In contrast, we will show how to perform these
+operations using only $O(L \max(a, p)^2)$ storage and $O(L \max(a, p)^3)$
+computation in addition to the oracle queries. The dependence on the number of
+activations and parameters in each layer remains cubic, but the dependence on
 the number of layers is only linear. This makes operating on the Hessian of tall
 and skinny networks more efficient than the Hessian of short and fat networks.
 
 Although modern networks are typically short and wide, our method runs faster
-than the naive hessian-inverse-vector product algorithm on tall and skinny
+than the naive Hessian-inverse-vector product algorithm on tall and skinny
 networks, since it ameliorates the naive algorithm's cubic dependence on depth
 to a mild linear dependence on depth.  A follow-up article will explore training
 tall-skinny networks using the Hessian-inverse-vector product as a
