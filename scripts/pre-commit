@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Check that the notebook executes correctly.
+$REPO_ROOT/scripts/test_demo_notebook.sh
