@@ -1,5 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hessian"
+version = "0.1.0"
+description = "Inverse Hessian product tools for deep networks"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "matplotlib>=3.0.0",
+    "numpy>=1.0.0",
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["src/tests"]
 pythonpath = "src"
-
