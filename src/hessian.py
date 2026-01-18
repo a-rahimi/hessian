@@ -79,20 +79,21 @@ class BlockWithMixedDerivatives(nn.Module):
         return self.output
 
     def derivatives(self, dloss_dz: torch.Tensor, *forward_args) -> LayerDerivatives:
-        if not (self.input.ndim == 2 and self.input.shape[0] == 1):
-            raise ValueError("Input must be a 2D tensor with batch dimension=1")
-
         dloss_dz = dloss_dz.flatten()
         if dloss_dz.shape != (self.output.numel(),):
             raise ValueError(
                 f"dloss_dz must have {self.output.numel()} elements after flattening, got {dloss_dz.shape[0]}"
             )
 
+        # Flatten activations over their batch dimension to represent
+        # derivatives.  But we need to remember their shapes to call the layer,
+        # since layers have a notion of a batch.
+        input_shape = self.input.shape
         z_in = self.input.flatten()
         params = dict(self.named_parameters())
 
         def f(x, z):
-            return TF.functional_call(self, x, (z, *forward_args))
+            return TF.functional_call(self, x, (z.reshape(input_shape), *forward_args))
 
         def dloss_dz_f(x, z):
             return dloss_dz.flatten() @ f(x, z).flatten()
@@ -101,15 +102,17 @@ class BlockWithMixedDerivatives(nn.Module):
             Dx=reshape_pytree(
                 TF.jacrev(lambda x: f(x, z_in))(params),
                 starting_shape=self.output.shape,
+            ).reshape(self.output.numel(), -1),
+            Dz=torch.func.jacrev(lambda z: f(params, z))(z_in).reshape(
+                self.output.numel(), -1
             ),
-            Dz=torch.func.jacrev(lambda z: f(params, z))(z_in),
             DD_Dxx=flatten_2d_pytree(TF.hessian(lambda x: dloss_dz_f(x, z_in))(params)),
             DD_Dzx=torch.func.jacrev(
                 lambda z_in: reshape_pytree(
                     TF.jacrev(lambda x: dloss_dz_f(x, z_in))(params),
                     starting_shape=(),
                 ),
-            )(z_in),
+            )(z_in).reshape(-1, self.input.numel()),
             DM_Dzz=TF.hessian(lambda z: dloss_dz_f(params, z))(z_in),
         )
 
@@ -143,19 +146,19 @@ class LossLayer(DenseBlock):
     def derivatives(
         self, dloss_dz: torch.Tensor, targets: torch.Tensor
     ) -> LayerDerivatives:
-        if targets.numel() != 1 and targets.dtype != torch.int64:
+        if targets.dtype != torch.int64:
             raise ValueError("For the loss layer, targets must be an integer tensor")
 
         # Ignore dloss_dz. For the loss layer, it's always ∂z_L/∂z_L = 1.
-        derivs = super().derivatives(torch.tensor(1.0), targets.squeeze())
+        derivs = super().derivatives(torch.tensor(1.0), targets)
 
         # Sanity check the shapes of the derivatives.
         dim_out = self.output.numel()
         dim_in = self.input.numel()
         dim_params = sum(p.numel() for p in self.parameters())
         assert dim_out == 1
-        assert derivs.Dx.shape == (dim_params,)
-        assert derivs.Dz.shape == (dim_in,)
+        assert derivs.Dx.shape == (1, dim_params)
+        assert derivs.Dz.shape == (1, dim_in)
         assert derivs.DD_Dxx.shape == (dim_params, dim_params)
         assert derivs.DD_Dzx.shape == (dim_params, dim_in)
         assert derivs.DM_Dzz.shape == (dim_in, dim_in)
@@ -163,8 +166,8 @@ class LossLayer(DenseBlock):
         # Fixup the shape of the derivatives. Some of these are 1D tensors
         # because the loss is scalar. But we need them all to be 2D tensors.
         return LayerDerivatives(
-            Dx=derivs.Dx.reshape(1, -1),
-            Dz=derivs.Dz.reshape(1, -1),
+            Dx=derivs.Dx,
+            Dz=derivs.Dz,
             DD_Dxx=derivs.DD_Dxx,
             DD_Dzx=derivs.DD_Dzx,
             DM_Dzz=derivs.DM_Dzz,
@@ -175,7 +178,7 @@ def _validate_vector_is_Hessian_shaped(b: bpm.Vertical, Dx: bpm.Diagonal):
     if b.num_blocks() != Dx.num_blocks():
         raise ValueError(
             "b must have as many Vertical blocks as there are layers. "
-            f"It has {b.num_blocks}"
+            f"It has {b.num_blocks()}"
         )
     for b_layer, Dx_layer in zip(b.flat, Dx.flatten()):
         if b_layer.height != Dx_layer.width:

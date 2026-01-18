@@ -433,6 +433,18 @@ class TestSequenceOfBlocks:
         assert grad_flat.shape == grad_torch_flat.shape
         torch.testing.assert_close(grad_flat, grad_torch_flat)
 
+    @pytest.fixture
+    def z_in_batch(self, model_config):
+        """Create a fresh input tensor for each test with batch_size=3."""
+        batch_size = 3
+        return torch.randn(batch_size, model_config["input_dim"], requires_grad=True)
+
+    @pytest.fixture
+    def target_batch(self, model_config):
+        """Create a fresh target tensor for each test with batch_size=3."""
+        batch_size = 3
+        return torch.randint(0, model_config["num_classes"], (batch_size,))
+
     def test_hessian_vector_product_vs_torch_func(
         self, model, z_in, target, random_parameter_vector
     ):
@@ -452,6 +464,37 @@ class TestSequenceOfBlocks:
         # Method 2: Use torch.func.hessian
         def loss_fn(x):
             return torch.func.functional_call(model, x, (z_in, target))
+
+        hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
+        hvp_torch = (
+            hessian.flatten_2d_pytree(hessian_dict)
+            @ random_parameter_vector.to_tensor()
+        )
+
+        # Compare the two methods
+        torch.testing.assert_close(hvp_flat, hvp_torch, rtol=1e-4, atol=1e-5)
+
+    def test_hessian_vector_product_vs_torch_func_batch(
+        self, model, z_in_batch, target_batch, random_parameter_vector
+    ):
+        """
+        Test hessian_vector_product by comparing it to torch.func.hessian with batch_size=3.
+
+        Creates a random partitioned vector v with blocks matching the parameter
+        count of each layer, then compares:
+        1. Result from hessian_vector_product(v)
+        2. Result from torch.func.hessian(...) @ v.flatten()
+        """
+
+        # Method 1: Use hessian_vector_product
+        hvp_result = model.hessian_vector_product(
+            z_in_batch, target_batch, random_parameter_vector
+        )
+        hvp_flat = hvp_result.to_tensor()
+
+        # Method 2: Use torch.func.hessian
+        def loss_fn(x):
+            return torch.func.functional_call(model, x, (z_in_batch, target_batch))
 
         hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
         hvp_torch = (
@@ -511,6 +554,34 @@ class TestSequenceOfBlocks:
 
         # Compare the two methods
         torch.testing.assert_close(hinv_g_flat, hinv_g_torch, rtol=1e-4, atol=1e-4)
+
+    def test_hessian_inverse_product_vs_torch_func_batch(
+        self, model, z_in_batch, target_batch, epsilon, random_parameter_vector
+    ):
+        """
+        Test hessian_inverse_product by comparing it to torch.func.hessian with batch_size=3.
+
+        Computes H explicitly using torch.func.hessian(...), and solve Hx=b
+        using torch.linalg.solve.  Compare this result against that of
+        hessian_inverse_product.
+        """
+        # Method 1: Use hessian_inverse_product
+        hinv_g_result = model.hessian_inverse_product(
+            z_in_batch, target_batch, random_parameter_vector, epsilon
+        )
+        hinv_g_flat = hinv_g_result.to_tensor()
+
+        # Method 2: Use torch.func.hessian and explicit inversion
+        def loss_fn(x):
+            return torch.func.functional_call(model, x, (z_in_batch, target_batch))
+
+        hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
+        H = hessian.flatten_2d_pytree(hessian_dict)
+        H = H + epsilon * torch.eye(H.shape[0])
+        hinv_g_torch = torch.linalg.solve(H, random_parameter_vector.to_tensor())
+
+        # Compare the two methods
+        torch.testing.assert_close(hinv_g_flat, hinv_g_torch, rtol=1e-2, atol=1e-2)
 
     def test_hessian_inverse_is_inverse_of_hessian(
         self, model, z_in, target, epsilon, random_parameter_vector
