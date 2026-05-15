@@ -130,3 +130,72 @@ flags:
 code_patch: null
 predicted_outcome: probe_loss descends more smoothly than exp-001 with fewer upticks, ending near 2.05.
 ```
+
+---
+
+```yaml
+id: exp-005-small-lr-damped-newton
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Comparing exp-001 (epsilon=100, lr=1.0, zero rejections, descent to 2.38) against exp-002
+  (epsilon=1.0, lr=0.5, 20 percent rejections, drift to 2.49) suggests the bottleneck is that
+  at low epsilon the Newton step is large enough that the per-batch quadratic model is wrong
+  on its own batch, so LM rejects. Rather than fight this by raising epsilon, classical damped
+  Newton with line search shrinks the global step instead. If we hold epsilon at 1.0 but cut lr
+  to 0.1, the Newton direction still preconditions across well-conditioned directions, yet the
+  actual displacement per step is one-tenth as large, so the local quadratic model should remain
+  valid and rejections should drop. This isolates the step-size variable from exp-002: only lr
+  changes (0.5 to 0.1), with epsilon, batch-size, lm-up, and lm-down unchanged. If exp-005
+  outperforms exp-002, the issue at low epsilon was global step magnitude rather than damping
+  level; if rejection rate stays near 0.2, low epsilon itself is the problem and damping needs
+  to rise regardless of lr.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-005-small-lr-damped-newton
+  --log-every: 1
+code_patch: null
+predicted_outcome: probe_loss descends nearly monotonically with rejection rate below 0.1, ending near 2.15.
+```
+
+---
+
+```yaml
+id: exp-006-high-eps-fast-relax
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  exp-001 with epsilon=100 and lm-down=1.0 (no adaptation) descended cleanly but stalled at 2.38
+  because the effective step on well-conditioned directions was roughly lr/epsilon = 0.01, which
+  is too small to clear the random-guess plateau. The interpretation noted |g| collapsing from 6
+  to 1.2 indicates the trajectory entered a flat region with no remaining budget to escape. If
+  instead we start at the same safe epsilon=100 (so initial steps are scaled-SGD-like and never
+  rejected) but let LM aggressively relax damping after each accepted step via lm-down=0.5, the
+  effective epsilon halves every accepted step and reaches roughly 100 * 0.5^15 ~ 0.003 by step
+  15 in the best case, transitioning the run from scaled-SGD into true Newton once the iterate
+  is in a region where the quadratic model is reliable. This isolates the lm-down variable from
+  exp-001: only lm-down changes (1.0 to 0.5), with epsilon, lr, lm-up, and batch-size unchanged.
+  If exp-006 outperforms exp-001 with low rejection rate, the bottleneck was static over-damping
+  and LM adaptation can fix it without retuning epsilon; if rejection rate climbs sharply mid-run,
+  epsilon collapses faster than the iterate can absorb and lm-down=0.5 is too aggressive.
+flags:
+  --mode: newton
+  --epsilon: 100.0
+  --lr: 1.0
+  --lm-up: 2.0
+  --lm-down: 0.5
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-006-high-eps-fast-relax
+  --log-every: 1
+code_patch: null
+predicted_outcome: probe_loss starts descending like exp-001 then accelerates after step 8 as effective epsilon drops below 10, ending near 2.00.
+```
