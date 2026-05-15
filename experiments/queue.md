@@ -73,8 +73,8 @@ predicted_outcome: probe_loss drops sharply within each 3-step batch-reuse windo
 
 ```yaml
 id: exp-003-epsilon-sweep-down
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done
+commit_hash: e6adc8a7cf4238679d4a114b95aa249f7d70b417
 hypothesis: |
   exp-001 showed that epsilon=100 over-damps the Newton step, so the effective learning rate along
   well-conditioned directions is roughly lr/epsilon = 0.01, which is too small to clear the random-guess
