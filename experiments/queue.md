@@ -68,3 +68,65 @@ code_patch: |
   and add the argparse line.
 predicted_outcome: probe_loss drops sharply within each 3-step batch-reuse window, then plateaus on switch. Final near 2.10.
 ```
+
+---
+
+```yaml
+id: exp-003-epsilon-sweep-down
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  exp-001 showed that epsilon=100 over-damps the Newton step, so the effective learning rate along
+  well-conditioned directions is roughly lr/epsilon = 0.01, which is too small to clear the random-guess
+  plateau in 15 steps. The interpretation noted the trajectory flattens with |g| dropping from 6 to 1.2,
+  indicating stalling rather than convergence. Sweeping epsilon downward toward the natural Hessian
+  eigenvalue scale should give a larger effective step on well-conditioned directions while still
+  damping the ill-conditioned ones. To isolate the damping variable from exp-001, every other knob
+  (lr, lm-up, lm-down, batch-size) is held identical to exp-001; only epsilon changes from 100 to 10.
+  If descent improves, damping level was the bottleneck; if it gets noisier or LM rejection rate rises,
+  the natural Hessian scale is below 10 and we should sweep further.
+flags:
+  --mode: newton
+  --epsilon: 10.0
+  --lr: 1.0
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-003-epsilon-sweep-down
+  --log-every: 1
+code_patch: null
+predicted_outcome: probe_loss descends faster than exp-001 and ends near 2.10, with possibly one or two LM rejections appearing as small upticks.
+```
+
+---
+
+```yaml
+id: exp-004-large-batch-moderate-eps
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  exp-001's interpretation attributed the step-to-step bumpiness to per-batch Hessian/gradient mismatch
+  against the held-out probe, because we step on minibatch directions but measure on a fixed probe.
+  exp-002 attacks this by reusing the same small batch; this experiment attacks it from the other side
+  by enlarging the batch so a single step already averages over more samples, which should reduce both
+  the gradient variance and the Hessian estimation noise without requiring any code change. To isolate
+  the batch-size variable, lr, lm-up, and lm-down match exp-001, and epsilon is set to 10 rather than
+  100 so the step is not over-damped (otherwise larger batches would not help, since the bottleneck
+  would still be effective step size, not noise). If exp-004 outperforms exp-003 (same epsilon, smaller
+  batch), batch noise was a dominant contributor to bumpiness.
+flags:
+  --mode: newton
+  --epsilon: 10.0
+  --lr: 1.0
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 256
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-004-large-batch-moderate-eps
+  --log-every: 1
+code_patch: null
+predicted_outcome: probe_loss descends more smoothly than exp-001 with fewer upticks, ending near 2.05.
+```
