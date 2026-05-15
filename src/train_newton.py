@@ -207,14 +207,16 @@ def train(args: argparse.Namespace) -> None:
     step_idx = 0
     data_iter = iter(loader)
     epsilon = args.epsilon
+    x, y = None, None
     while step_idx < args.num_steps:
-        try:
-            x, y = next(data_iter)
-        except StopIteration:
-            data_iter = iter(loader)
-            x, y = next(data_iter)
-        x = x.to(device)
-        y = y.to(device)
+        if step_idx % args.reuse_batch == 0:
+            try:
+                x, y = next(data_iter)
+            except StopIteration:
+                data_iter = iter(loader)
+                x, y = next(data_iter)
+            x = x.to(device)
+            y = y.to(device)
 
         with logger.step(step_idx) as scalars:
             for p in model.parameters():
@@ -349,6 +351,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Stderr-print every N steps. Default 1 for newton, 10 for sgd.",
+    )
+    p.add_argument(
+        "--reuse-batch",
+        type=int,
+        default=1,
+        help="Reuse the same (x, y) minibatch for this many consecutive steps before drawing a new one.",
     )
     p.add_argument("--cpu", action="store_true")
     args = p.parse_args()

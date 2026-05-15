@@ -44,7 +44,7 @@ predicted_outcome: probe_loss should descend slowly but monotonically; final nea
 
 ```yaml
 id: exp-002-batch-reuse-K3
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   The LM accept/reject check is per-batch, but the Hessian and gradient on different batches disagree.
