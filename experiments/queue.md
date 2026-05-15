@@ -18,7 +18,7 @@ Each experiment is a top-level YAML frontmatter block followed by a hypothesis p
 
 ```yaml
 id: exp-001-very-high-eps
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   At random init the per-batch Hessian has many tiny eigenvalues whose inverses dominate the Newton step.
