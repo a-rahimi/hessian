@@ -18,8 +18,8 @@ Each experiment is a top-level YAML frontmatter block followed by a hypothesis p
 
 ```yaml
 id: exp-001-very-high-eps
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done
+commit_hash: 49c429ce21de99fd6aa6c737b78ca33619b44e54
 hypothesis: |
   At random init the per-batch Hessian has many tiny eigenvalues whose inverses dominate the Newton step.
   Heavy damping (epsilon ≫ typical Hessian eigenvalue) reduces Newton toward gradient descent along
