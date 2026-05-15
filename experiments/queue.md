@@ -104,7 +104,7 @@ predicted_outcome: probe_loss descends faster than exp-001 and ends near 2.10, w
 
 ```yaml
 id: exp-004-large-batch-moderate-eps
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   exp-001's interpretation attributed the step-to-step bumpiness to per-batch Hessian/gradient mismatch
