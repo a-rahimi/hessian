@@ -12,7 +12,9 @@ dependencies = [
     "matplotlib>=3.0.0",
     "numpy>=1.0.0",
     "pytest>=8.3.5",
+    "tensorboard>=2.14.0",
     "torch>=2.0.0",
+    "torchvision>=0.20.1",
 ]
 
 [tool.pytest.ini_options]

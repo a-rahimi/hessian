@@ -15,6 +15,14 @@ ENV/
 # VS Code
 .vscode/
 
+# Training artifacts
+data/
+runs/
+src/hessian.egg-info/
+
+# Local secrets
+.env
+
 # LaTeX / BibTeX
 *.aux
 *.bbl
