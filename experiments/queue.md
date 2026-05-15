@@ -44,8 +44,8 @@ predicted_outcome: probe_loss should descend slowly but monotonically; final nea
 
 ```yaml
 id: exp-002-batch-reuse-K3
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done
+commit_hash: 34aa5ec725a70513bf0f00a1ffaf1c6c311f581e
 hypothesis: |
   The LM accept/reject check is per-batch, but the Hessian and gradient on different batches disagree.
   Reusing the same batch for several consecutive Newton steps lets the optimizer converge on that batch's
