@@ -335,8 +335,15 @@ predicted_outcome: probe_loss descends past the 2.30 random-guess plateau and en
 
 ```yaml
 id: exp-010-width-newton
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done-truncated
+commit_hash: 9c44725a0b8c6ab11782bf16671dd610c6209f59
+truncation_note: |
+  Process was killed at step 45 of 60 when the spawning agent's subshell was reaped at
+  agent context exit. No NaN, no OOM, no Python exception — the process simply lost its
+  parent and was terminated. The trajectory up to step 45 is intact and is a reliable
+  read of Newton's behavior at this scale; the remaining 15 steps are missing. Final
+  recorded probe_loss at step 45 is 2.5870, well above SGD's 2.2839 at step 55 on the
+  paired exp-009 run, so the comparison is unambiguous even with truncation.
 hypothesis: |
   Paired with exp-009. Same model (hidden_dim=16, num_layers=8, image_size=16) and same
   training horizon (60 steps, batch=64), but Newton instead of SGD. Settings are the best
