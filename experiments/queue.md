@@ -300,7 +300,7 @@ predicted_outcome: probe_loss descends smoothly with rejection rate below 0.05, 
 
 ```yaml
 id: exp-009-width-sgd-baseline
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   Phase 1 established that at the small model (hidden_dim=8, num_layers=8, image_size=16) Newton
