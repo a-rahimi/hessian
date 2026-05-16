@@ -615,3 +615,143 @@ flags:
 code_patch: null
 predicted_outcome: probe_loss continues to descend past exp-012's step-55 endpoint of 2.3046 and ends at least 0.05 below exp-015's final, in the 2.18-2.28 range, with rejection rate similar to exp-012's 0.4 because the LM controller is doing its expected work.
 ```
+
+---
+
+```yaml
+id: exp-017-deep-long-horizon-sgd
+status: pending
+commit_hash: null
+hypothesis: |
+  The Phase 4 bar (probe_loss < 2.00 AND probe_accuracy > 0.20) has not been cleared by any SGD
+  run so far, and exp-015 showed that doubling the budget at depth=16 from 60 to 120 steps barely
+  moved the needle (2.3348 -> 2.2978). The interpretation of exp-011 and exp-015 attributed the
+  stall to vanishing-gradient saturation at depth=16 with tanh, where |g| collapses to 0.3-1.2
+  within the first 5 steps and stays there. If the bottleneck is mostly that we never give SGD
+  enough wall-clock to crawl out of the saturation regime, then quadrupling the budget at the
+  deepest configuration we have data for (depth=24, exp-013 stalled at 2.3103/0.141 after 60
+  steps) should let the slow descent compound. The trajectory of exp-013 was already nearly flat
+  at step 55, so going to 500 steps is a strong stress test: if SGD lands below 2.20 with
+  accuracy >0.18, the stall is partly budget-limited and a 2000-step run would likely clear the
+  bar; if it stays near 2.30/0.14, depth=24 is genuinely saturated and pushing horizon further
+  is wasted. SGD is fast (<1s/step), so 500 steps is ~5-8 min wall clock.
+flags:
+  --mode: sgd
+  --lr: 0.1
+  --batch-size: 64
+  --num-steps: 500
+  --logdir: runs/auto
+  --run-name: exp-017-deep-long-horizon-sgd
+  --log-every: 10
+  --hidden-dim: 8
+  --num-layers: 24
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss ends around 2.20-2.27 with probe_accuracy around 0.15-0.18, still short of the Phase 4 bar but with a measurable slope improvement over exp-013's stall, telling us depth=24 is partly saturation and partly budget.
+```
+
+---
+
+```yaml
+id: exp-018-extreme-deep-long-horizon-sgd
+status: pending
+commit_hash: null
+hypothesis: |
+  Pairs with exp-017 along the depth axis. exp-013 (depth=24, 60 steps) stalled at 2.3103/0.141
+  and exp-017 tests whether more budget rescues depth=24. This run instead asks whether even
+  deeper (depth=32) can clear the Phase 4 bar given the same long horizon. The deep-narrow
+  preferred shape from Phase 4 means we should push num_layers as far as we can; depth=32 has
+  not been explored yet and lies just outside the range exp-011/exp-013 covered. The theory is
+  ambiguous here. On one hand, deeper tanh networks have more representational capacity for the
+  CIFAR-10 probe and could in principle reach lower probe_loss given enough steps. On the other,
+  vanishing-gradient saturation gets sharply worse with depth at hidden_dim=8, so SGD might find
+  itself unable to escape the chance plateau at all. Comparing exp-018 against exp-017 isolates
+  depth-at-fixed-budget: if exp-018 beats exp-017, deeper helps even when saturated; if exp-018
+  is worse than exp-017, depth=24 is already past the optimum and the search should pivot back
+  to shallower configurations with bigger budgets.
+flags:
+  --mode: sgd
+  --lr: 0.1
+  --batch-size: 64
+  --num-steps: 500
+  --logdir: runs/auto
+  --run-name: exp-018-extreme-deep-long-horizon-sgd
+  --log-every: 10
+  --hidden-dim: 8
+  --num-layers: 32
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss ends around 2.25-2.32 with probe_accuracy around 0.13-0.16, slightly worse than exp-017 because vanishing-gradient saturation at depth=32 dominates the extra-capacity benefit at hidden_dim=8.
+```
+
+---
+
+```yaml
+id: exp-019-high-lr-depth16-sgd
+status: pending
+commit_hash: null
+hypothesis: |
+  Every prior SGD experiment fixed lr=0.1, which is the train_newton.py default. exp-015 showed
+  that at depth=16 with 120 steps and lr=0.1, SGD only crawls to 2.2978/0.145, which is barely
+  better than exp-011's 60-step run at the same lr (2.3348/0.141). If the bottleneck at depth=16
+  is that effective per-step displacement is too small once gradients have attenuated through 16
+  tanh stages (|g| in the 0.3-1.2 range per exp-011), then tripling lr should triple the step
+  magnitude in the saturated regime and let the trajectory escape the chance plateau in
+  comparable wall-clock. The risk is that early in training |g| is large (exp-011 logged 9.05 at
+  step 0) and lr=0.3 would produce a 3x-larger initial step that could blow up. To buffer against
+  that we also extend num_steps to 500 so the run has plenty of room to recover even if the first
+  few steps are erratic. This isolates the learning-rate axis at depth=16, which has been
+  underexplored: comparing against exp-015 (same depth, same hidden_dim, lr=0.1, 120 steps)
+  tells us whether lr is the dominant lever or just a multiplier.
+flags:
+  --mode: sgd
+  --lr: 0.3
+  --batch-size: 64
+  --num-steps: 500
+  --logdir: runs/auto
+  --run-name: exp-019-high-lr-depth16-sgd
+  --log-every: 10
+  --hidden-dim: 8
+  --num-layers: 16
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss ends around 2.10-2.20 with probe_accuracy around 0.17-0.22, brushing or just clearing the Phase 4 accuracy bar while staying above the 2.00 loss bar, because higher lr lets the iterate descend past the chance plateau but cannot escape the underlying saturation noise.
+```
+
+---
+
+```yaml
+id: exp-020-aggressive-lr-stress-sgd
+status: pending
+commit_hash: null
+hypothesis: |
+  exp-019 takes a moderate step up the lr ladder (0.1 -> 0.3). This run takes the aggressive
+  end of that ladder (lr=0.5) at depth=16 with a 300-step budget, to flank the search from the
+  high-lr side and find out whether the optimizer simply diverges at this lr on this model. The
+  reasoning is that if exp-019 at lr=0.3 lands at probe ~ 2.15 and exp-020 at lr=0.5 either
+  lands lower (say ~2.05) or diverges, then we have a sharp upper bound on the useful lr range
+  for this configuration. If exp-020 actually clears the Phase 4 bar (probe < 2.00, acc > 0.20)
+  while exp-019 does not, lr was the dominant lever all along and Phase 4 has a clean answer.
+  If exp-020 diverges (probe_loss climbing above the chance plateau or NaN), then lr=0.5 is too
+  large at this depth and the useful range is in [0.1, 0.3]. The 300-step budget is shorter
+  than exp-019's 500 so the experiments are not redundant: this is a stress test on lr, not a
+  long-horizon run. Pairs informatively with exp-019: same depth, same hidden_dim, only lr and
+  budget differ.
+flags:
+  --mode: sgd
+  --lr: 0.5
+  --batch-size: 64
+  --num-steps: 300
+  --logdir: runs/auto
+  --run-name: exp-020-aggressive-lr-stress-sgd
+  --log-every: 10
+  --hidden-dim: 8
+  --num-layers: 16
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss ends around 1.95-2.10 with probe_accuracy around 0.20-0.25, narrowly clearing the Phase 4 bar if the optimizer stays stable, or alternatively the run diverges with probe oscillating above 2.35 because lr=0.5 is past the stability boundary at depth=16 with tanh.
+```
