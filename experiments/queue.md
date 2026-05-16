@@ -254,7 +254,12 @@ predicted_outcome: probe_loss ends in [2.30, 2.40], roughly tied with the best N
 
 ```yaml
 id: exp-008-tiny-lr-large-batch
-status: pending
+status: skipped
+skip_reason: |
+  Predates Phase 2 framing. Holds Phase 1 model fixed (hidden_dim=8, num_layers=8, num_steps=15),
+  so its result would only re-sample the [2.33, 2.49] noise floor that exp-001 through exp-007
+  already established. Phase 2 is about scaling up the model, not refining hyperparameters at
+  the Phase 1 scale.
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   exp-005 is the current best because cutting lr from 0.5 to 0.1 at epsilon=1.0 kept the per-step
