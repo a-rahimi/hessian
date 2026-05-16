@@ -412,8 +412,8 @@ predicted_outcome: probe_loss descends more slowly than exp-009 because deeper-b
 
 ```yaml
 id: exp-012-depth-newton
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done
+commit_hash: 7f0991f88a4189edbcd4ef8ec455d4eee806927d
 hypothesis: |
   Paired with exp-011. Same model (hidden_dim=8, num_layers=16, image_size=16) and same
   horizon (60 steps, batch=64), but Newton with Phase 1's best recipe (epsilon=1.0, lr=0.1,
