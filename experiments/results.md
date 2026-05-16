@@ -146,3 +146,24 @@ hypothesis_supported: yes
 ```
 
 At hidden_dim=16 (double Phase 1's width) and num_steps=60 (4x Phase 1's budget), plain SGD does clear the 2.30 random-guess plateau, ending at probe_loss=2.2839 with a minimum of 2.2474 at step 50 and a probe_accuracy that climbs from 0.121 at init to a peak of 0.152, so the configuration is no longer pinned to the chance-level noise floor that bracketed exp-001 through exp-007 in [2.33, 2.49]. The descent is also not just a one-shot drop into the plateau and a flat tail, because the last-five logged points slope -0.0123 per logged step (roughly -0.0025 per actual step) while still wobbling by 0.04 step-to-step, which says the trajectory is making real but noisy progress at step 55 rather than asymptoting. This matters for exp-010 in two ways. First, it confirms the Phase 2 framing was right: the previous study had been measuring optimizer noise floor, and the wider-and-longer regime gives Newton a real target to beat instead of a coin-flip band to wobble around in. Second, it sets a concrete and non-trivial Phase 2 success bar: Newton at the same (hidden_dim=16, num_steps=60) configuration must reach probe_loss <= 2.2339 (=2.2839 - 0.05) to beat SGD by the required >=0.05 margin, and probe_loss <= 2.1974 to beat SGD's minimum by that same margin, which is meaningfully below anything any optimizer has shown in this study so far. If exp-010 lands inside the [2.23, 2.29] band, the right read is "Newton matches SGD at this scale" rather than a win, and the case for the Newton machinery being worth its per-step cost would need a larger model or a different metric to be made.
+
+---
+
+```yaml
+id: exp-010-width-newton
+run_name: exp-010-width-newton
+commit_hash: 9c44725a0b8c6ab11782bf16671dd610c6209f59
+truncated: true
+steps_completed: 45
+probe_loss_initial: 2.8510
+probe_loss_final: 2.5870
+probe_loss_min: 2.3442
+probe_accuracy_final: 0.125
+probe_accuracy_max: 0.141
+descent_slope: 0.0465  # last 4 logged points (steps 30, 35, 40, 45), positive = ascending
+rejection_rate: 0.2  # 2 REJ markers across 10 logged step lines
+rank_among_prior_runs: 8/8  # worst final probe_loss among all Phase 1 + Phase 2 successful runs
+hypothesis_supported: no  # predicted >=0.05 below exp-009 (2.2839); actual is 0.30 ABOVE exp-009
+```
+
+At hidden_dim=16 with num_steps=60, Newton run at the best Phase 1 recipe (epsilon_init=1.0, lr=0.1, LM enabled) is substantially worse than SGD at the same scale, ending at probe_loss=2.5870 versus exp-009's 2.2839, a gap of +0.30 in the wrong direction relative to the prediction that Newton should land at least 0.05 below SGD. The trajectory tells a specific failure story rather than a generic noise story. Newton actually reached a low of 2.3442 at step 25, which is within 0.10 of SGD's plateau and would have made a "matches SGD" reading defensible, but it then drifted back up through steps 30 to 45 (2.4141, 2.5345, 2.4808, 2.5870) for a positive last-four-point slope of +0.0465 per logged step, which is the opposite sign from exp-009's -0.0123 over the same regime. The mechanism is visible in the LM trace: epsilon decayed from 1.00 at step 0 to 0.06 at step 45, and once epsilon dropped below about 0.2 the proposed Newton steps blew up in magnitude (|Delta| values of 4.55, 6.84, 9.55 at steps 30, 35, 40, versus 0.12 to 0.85 in the descent phase before step 25), so the optimizer was taking large under-damped steps into regions where the per-batch quadratic model was unreliable. The rejection rate of 0.2 is double exp-001's clean zero and matches exp-002's pattern, so LM caught some of the bad steps but accepted enough of the merely-mediocre ones to push the iterate uphill. The width-axis hypothesis (wider Hessian -> Newton helps more) is rejected at this scale, because Newton is not just failing to beat SGD by 0.05, it is actively finding worse parameters as training progresses while SGD continues to descend.
