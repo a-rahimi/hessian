@@ -690,8 +690,8 @@ predicted_outcome: probe_loss ends around 2.25-2.32 with probe_accuracy around 0
 
 ```yaml
 id: exp-019-high-lr-depth16-sgd
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 67d2fa0e98f22975d7967e69565fd2673013d740
 hypothesis: |
   Every prior SGD experiment fixed lr=0.1, which is the train_newton.py default. exp-015 showed
   that at depth=16 with 120 steps and lr=0.1, SGD only crawls to 2.2978/0.145, which is barely
