@@ -487,8 +487,8 @@ predicted_outcome: probe_loss stalls higher than exp-011, ending in the 2.32-2.4
 
 ```yaml
 id: exp-014-deeper-newton
-status: pending
-commit_hash: null  # filled by Executor at run start
+status: running
+commit_hash: TBD
 hypothesis: |
   Paired with exp-013. Same model (hidden_dim=8, num_layers=24, image_size=16) and same horizon
   (60 steps, batch=64), but Newton with the recipe that has produced every Newton win so far
