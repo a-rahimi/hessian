@@ -444,3 +444,163 @@ flags:
 code_patch: null
 predicted_outcome: probe_loss descends visibly past exp-011's trajectory after roughly step 15 and ends at least 0.05 below exp-011's final, in the 2.05-2.20 range.
 ```
+
+---
+
+```yaml
+id: exp-013-deeper-sgd-baseline
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Phase 2 closed with exp-012 beating exp-011 by 0.0302 on probe_loss at depth=16, which is
+  directionally correct for the Newton-helps-on-depth thesis but below the 0.05 success
+  threshold. The interpretation argued the preconditioning advantage should grow monotonically
+  with depth, because deeper tanh stacks have more severe Jacobian-product attenuation along
+  small-curvature directions that Newton rescales but SGD cannot. This run is the SGD half of
+  the paired deeper-depth comparison against exp-014: it holds hidden_dim=8 (the Phase 1 width
+  where Newton's recipe is well-tuned) and bumps num_layers from 16 to 24 with the same
+  60-step budget. Memory remains fine because inner-layer Hessian blocks scale as hidden_dim^2
+  and only the augmented system in hessian_inverse_product grows linearly with depth. The
+  prediction is that SGD's stall on probe_loss should worsen relative to exp-011 (2.3348)
+  because gradients have to propagate through 24 tanh stages instead of 16, so |g| should
+  collapse even faster than exp-011's 9.05 -> 0.3-1.2 trajectory. If SGD lands above 2.35 at
+  depth=24, the Newton advantage in exp-014 has a wider gap to open up; if SGD still reaches
+  the 2.28-2.34 band, depth=24 is not appreciably harder for SGD than depth=16 and the
+  depth-axis scaling story needs revisiting.
+flags:
+  --mode: sgd
+  --lr: 0.1
+  --batch-size: 64
+  --num-steps: 60
+  --logdir: runs/auto
+  --run-name: exp-013-deeper-sgd-baseline
+  --log-every: 5
+  --hidden-dim: 8
+  --num-layers: 24
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss stalls higher than exp-011, ending in the 2.32-2.42 range with |g| collapsing below 1.0 by step 5 and the trajectory oscillating around the 2.30 plateau without sustained descent.
+```
+
+---
+
+```yaml
+id: exp-014-deeper-newton
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Paired with exp-013. Same model (hidden_dim=8, num_layers=24, image_size=16) and same horizon
+  (60 steps, batch=64), but Newton with the recipe that has produced every Newton win so far
+  (epsilon=1.0, lr=0.1, lm-up=1.1, lm-down=0.9). The depth axis is the only axis in this study
+  where Newton has beaten SGD at all, and exp-012's interpretation predicts the gap widens with
+  depth because the vanishing-gradient regime that Newton's preconditioner fixes intensifies as
+  more tanh nonlinearities are stacked. If exp-014 beats exp-013 by at least 0.05 in final
+  probe_loss, the Phase 3 success criterion is cleanly met and the Newton-helps-on-depth story
+  is no longer a partial-support reading. If the gap is between 0.03 and 0.05, the trend is
+  real but slow and we need either more depth (exp-015/016 would need a deeper follow-up) or a
+  longer horizon (which exp-016 already tests). If exp-014 fails to beat exp-013 at all, the
+  exp-012 gap was an artifact and the depth axis is no better than the width axis was.
+  EXECUTION NOTE: Newton at depth=24, batch=64, 60 steps is estimated at ~8 min wall clock
+  (50 percent longer per step than depth=16 because the augmented system in
+  hessian_inverse_product carries 50 percent more layer blocks). This exceeds the agent
+  context-window for foreground execution; exp-010 was killed mid-run at the agent boundary
+  for exactly this reason. The Executor must launch this run via Bash with run_in_background
+  and use Monitor to wait for completion, or hand the run to the user.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --logdir: runs/auto
+  --run-name: exp-014-deeper-newton
+  --log-every: 5
+  --hidden-dim: 8
+  --num-layers: 24
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss descends past exp-013's stall band and ends at least 0.05 below exp-013's final, in the 2.20-2.30 range, with |g| holding in the 0.3-3.0 band rather than collapsing the way SGD's does.
+```
+
+---
+
+```yaml
+id: exp-015-longer-horizon-sgd-baseline
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  The exp-012 interpretation also predicted that a longer budget at depth=16 should widen the
+  Newton gap purely from the slope differential, because exp-012's last-four slope was -0.00427
+  per logged step (still descending) while exp-011's was +0.011 (already ascending). If both
+  slopes hold over an additional 60 steps, the gap at step 119 would be roughly
+  0.0302 + (0.011 - (-0.00427)) * 12 = 0.0302 + 0.185 = 0.215, comfortably above the 0.05
+  threshold. That estimate is almost certainly optimistic because both trajectories will flatten,
+  but even a 30 percent realization of it (0.06-0.07) would clear the threshold. This run is the
+  SGD half of the paired longer-horizon comparison against exp-016: it keeps the exp-011
+  configuration (hidden_dim=8, num_layers=16, batch=64) exactly identical and only doubles the
+  step budget to 120. If SGD's final probe_loss at step 119 is meaningfully higher than its
+  exp-011 step-55 final (2.3348), the stall hypothesis is reinforced because more budget cannot
+  recover what saturated gradients have already lost; if SGD descends further on the longer
+  budget, the depth=16 plateau is partly a budget issue rather than a pure vanishing-gradient
+  ceiling. Either way, this run gives exp-016 a clean SGD target to beat.
+flags:
+  --mode: sgd
+  --lr: 0.1
+  --batch-size: 64
+  --num-steps: 120
+  --logdir: runs/auto
+  --run-name: exp-015-longer-horizon-sgd-baseline
+  --log-every: 5
+  --hidden-dim: 8
+  --num-layers: 16
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss ends in the 2.30-2.40 range, similar to or slightly worse than exp-011's 2.3348, because vanishing-gradient stall is not a budget problem and extra steps mostly oscillate around the plateau.
+```
+
+---
+
+```yaml
+id: exp-016-longer-horizon-newton
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Paired with exp-015. Same model as exp-012 (hidden_dim=8, num_layers=16, image_size=16) and
+  same Newton recipe (epsilon=1.0, lr=0.1, lm-up=1.1, lm-down=0.9), but the horizon doubles to
+  120 steps. The exp-012 trajectory was still descending at step 55 (last-four slope -0.00427),
+  so extending the horizon should let Newton continue past its 2.3046 final while SGD on
+  exp-015 stays parked near 2.33. The success criterion has two readings. First, if exp-016's
+  final probe_loss is at least 0.05 below exp-015's final, the Phase 3 criterion is met along
+  the horizon axis. Second, if exp-016 beats exp-012's 2.3046 by 0.05 or more, the slope
+  differential prediction is validated and the right way to surface Newton's advantage on this
+  problem is simply to train longer rather than to scale model size further. Comparing exp-016
+  against exp-014 then tells us whether width-of-depth-axis (more layers) or length-of-horizon
+  (more steps) is the more cost-effective lever for surfacing Newton's edge.
+  EXECUTION NOTE: Newton at depth=16, batch=64, 120 steps is estimated at ~11 min wall clock
+  (twice exp-012's ~5.5 min). This is the largest single-experiment cost in Phase 3 and is
+  well past the agent context-window foreground budget. The Executor MUST launch this run
+  via Bash with run_in_background and use Monitor to wait for completion, or hand the run to
+  the user. Foreground execution will produce a truncation like exp-010's.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 120
+  --logdir: runs/auto
+  --run-name: exp-016-longer-horizon-newton
+  --log-every: 5
+  --hidden-dim: 8
+  --num-layers: 16
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss continues to descend past exp-012's step-55 endpoint of 2.3046 and ends at least 0.05 below exp-015's final, in the 2.18-2.28 range, with rejection rate similar to exp-012's 0.4 because the LM controller is doing its expected work.
+```
