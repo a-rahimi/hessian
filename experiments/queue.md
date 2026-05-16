@@ -175,7 +175,7 @@ predicted_outcome: probe_loss descends nearly monotonically with rejection rate 
 
 ```yaml
 id: exp-006-high-eps-fast-relax
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   exp-001 with epsilon=100 and lm-down=1.0 (no adaptation) descended cleanly but stalled at 2.38
