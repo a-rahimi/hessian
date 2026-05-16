@@ -104,8 +104,14 @@ predicted_outcome: probe_loss descends faster than exp-001 and ends near 2.10, w
 
 ```yaml
 id: exp-004-large-batch-moderate-eps
-status: running
-commit_hash: null  # filled by Executor at run start
+status: failed
+commit_hash: 147f050ae787a492b8e0a05aeba46e4a55ed545e
+failure_reason: |
+  OOM at step 0 on three attempts. Hessian intermediates at batch_size=256 exceeded
+  available RAM (~10 GB RSS, SIGKILL by jetsam). batch_size=128 had already been
+  observed earlier in this project to push step time to ~22s; 256 is not runnable on
+  this machine. Future plans should keep batch_size <= 128 (and probably <= 64 for
+  fast iteration).
 hypothesis: |
   exp-001's interpretation attributed the step-to-step bumpiness to per-batch Hessian/gradient mismatch
   against the held-out probe, because we step on minibatch directions but measure on a fixed probe.
