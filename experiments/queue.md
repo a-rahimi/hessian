@@ -1381,8 +1381,8 @@ predicted_outcome: probe ends in 2.05-2.20 if the monotonic slope holds, or 2.20
 
 ```yaml
 id: exp-041-newton-clip1.0-60steps
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 6815e62217938d1e16e89ce3110525f3088350c9
 hypothesis: |
   Cap the step magnitude at |lr*update|<=1.0 via --max-step-norm. exp-039 (epsilon=0.5,
   lr=0.1, num-steps=60) reached probe min 2.1551 at step 32 but bounced back to 2.41
@@ -1412,4 +1412,43 @@ code_patch: |
   the update, cap effective_lr = lr * max_step_norm / |lr*update| when |lr*update| >
   max_step_norm. Apply/undo with effective_lr. Default None preserves existing behavior.
 predicted_outcome: probe final 2.05-2.20, no large bounces, monotonic-ish descent past 2.16. If the bounce still happens, the failure mode is not just "step too large".
+```
+
+---
+
+```yaml
+id: exp-042-newton-fresh-lm-check
+status: running
+commit_hash: TBD
+hypothesis: |
+  Switch the LM accept check from same-batch to fresh-batch. The current LM check
+  measures trial loss on the same batch the Newton step came from, so the check is
+  almost guaranteed to pass any reasonable step (the Newton step IS what minimizes
+  that batch's local quadratic). exp-039's step 37 was accepted by the same-batch
+  check (|Delta|=1.73, training loss 2.18 to about 2.0 on the same batch) but then
+  training loss on the next batch jumped to 2.57 and probe jumped to 2.53. A
+  fresh-batch check would have rejected step 37 and prevented the bounce.
+  Configuration matches exp-041 (epsilon=0.5, lr=0.1, num-steps=60, no clip).
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 60
+  --lm-check-batch: fresh
+  --logdir: runs/auto
+  --run-name: exp-042-newton-fresh-lm-check
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: |
+  Add --lm-check-batch flag with choices {same, fresh}. When 'fresh', draw a separate
+  batch from the loader after taking the Newton step, measure trial loss on that
+  batch, undo and measure baseline loss on that same batch, accept iff trial <
+  baseline. 'same' preserves existing behavior.
+predicted_outcome: rejection rate jumps to 40-70% (vs 50% in exp-039), probe descent is more monotonic with no large bounces, final probe in 2.05-2.18.
 ```

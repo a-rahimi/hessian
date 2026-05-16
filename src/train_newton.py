@@ -266,9 +266,25 @@ def train(args: argparse.Namespace) -> None:
                     effective_lr = args.lr
                 scalars.step_norm = effective_lr * vertical_norm(update)
                 apply_update(model, update, effective_lr)
-                with torch.no_grad():
-                    trial_loss = float(model(x, y).item())
-                if trial_loss < scalars.loss:
+                if args.lm_check_batch == "fresh":
+                    try:
+                        check_x, check_y = next(data_iter)
+                    except StopIteration:
+                        data_iter = iter(loader)
+                        check_x, check_y = next(data_iter)
+                    check_x = check_x.to(device)
+                    check_y = check_y.to(device)
+                    with torch.no_grad():
+                        trial_loss = float(model(check_x, check_y).item())
+                        apply_update(model, update, -effective_lr)
+                        baseline_check_loss = float(model(check_x, check_y).item())
+                        apply_update(model, update, effective_lr)
+                    accept = trial_loss < baseline_check_loss
+                else:
+                    with torch.no_grad():
+                        trial_loss = float(model(x, y).item())
+                    accept = trial_loss < scalars.loss
+                if accept:
                     epsilon = max(epsilon * args.lm_down, args.lm_eps_min)
                     scalars.accepted = 1.0
                 else:
@@ -374,6 +390,13 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="If set, cap |lr * update| at this value. Newton mode only.",
+    )
+    p.add_argument(
+        "--lm-check-batch",
+        choices=["same", "fresh"],
+        default="same",
+        help="LM accept check: 'same' uses the training batch the step came from; "
+        "'fresh' draws a separate batch from the loader and checks loss there.",
     )
     p.add_argument("--cpu", action="store_true")
     args = p.parse_args()
