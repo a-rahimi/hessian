@@ -175,8 +175,8 @@ predicted_outcome: probe_loss descends nearly monotonically with rejection rate 
 
 ```yaml
 id: exp-006-high-eps-fast-relax
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done
+commit_hash: 7e875d3b8bdb5324852e2eae506e019fdcc7d652
 hypothesis: |
   exp-001 with epsilon=100 and lm-down=1.0 (no adaptation) descended cleanly but stalled at 2.38
   because the effective step on well-conditioned directions was roughly lr/epsilon = 0.01, which
