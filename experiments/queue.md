@@ -764,8 +764,8 @@ predicted_outcome: probe_loss ends around 1.95-2.10 with probe_accuracy around 0
 
 ```yaml
 id: exp-021-newton-anchor-sgd-control
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 8e58f3936bf8084256d26ea39b4fbf88adecf003
 hypothesis: |
   SGD control at the Phase 5 anchor model and the same num-steps Newton will use (30).
   Phase 4 showed SGD needs ~1000 steps to clear probe_loss=2.0 at this config, so 30 steps
