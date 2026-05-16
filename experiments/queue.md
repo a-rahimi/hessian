@@ -19,6 +19,10 @@ Sensible scaling axes:
 
 **Success criterion (Phase 2):** Newton's `probe_loss` at the final step is at least 0.05 lower than SGD's `probe_loss` at the final step, on the same model and training horizon. Tie or worse means Newton offers no benefit at that scale.
 
+**Phase 3 outcome:** Newton beat SGD by 0.030 at (h8, l16, 60 steps) and by 0.021 at (h8, l24, 60 steps). Direction correct, magnitudes below the 0.05 threshold. Deeper did NOT widen the gap as predicted.
+
+**Phase 4 — find the smallest SGD-trainable model (new goal, replaces the Phase 3 path).** Before more Newton experiments, find a (hidden_dim, num_layers, num_steps, lr) where SGD reaches `probe_loss < 2.00` AND `probe_accuracy > 0.20` — meaningfully above chance (probe_loss = log(10) = 2.3026, probe_accuracy = 0.10). Preferred shape: deep and narrow (`hidden_dim = 8` stays fixed). Tune by growing `num_layers` and `num_steps`, possibly with higher `lr`. Newton runs resume only after we land in this regime.
+
 **Git workflow:**
 - Working tree must be clean before the Executor runs an experiment (only `experiments/queue.md` may be dirty due to status flip).
 - Executor commits any `code_patch` + the queue status update before running, captures `git rev-parse HEAD`, and records it as `commit_hash` on the entry.
@@ -567,8 +571,15 @@ predicted_outcome: probe_loss ends in the 2.30-2.40 range, similar to or slightl
 
 ```yaml
 id: exp-016-longer-horizon-newton
-status: pending
-commit_hash: null  # filled by Executor at run start
+status: deferred
+commit_hash: null
+defer_reason: |
+  Phase 3 redirect (user direction): before pairing more Newton runs, find the SMALLEST
+  model where SGD clearly beats chance (probe_loss < 2.00 AND probe_accuracy > 0.20).
+  Without that anchor, every paired Newton run is competing against an SGD that barely
+  learned, so the comparison can't tell us whether Newton helps in the regime that matters.
+  exp-016 can be re-queued (status flipped back to pending) once Phase 4 finds the right
+  model size.
 hypothesis: |
   Paired with exp-015. Same model as exp-012 (hidden_dim=8, num_layers=16, image_size=16) and
   same Newton recipe (epsilon=1.0, lr=0.1, lm-up=1.1, lm-down=0.9), but the horizon doubles to
