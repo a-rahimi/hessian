@@ -77,3 +77,20 @@ failure_reason: |
 
 This failure invalidates the planned batch-noise isolation test, because exp-004 was designed to attack batch-to-batch Hessian/gradient mismatch from the large-batch-averaging side as a complement to exp-002's batch-reuse approach, and we now have no data point at batch_size=256 to compare against exp-003. The question "is the step-to-step bumpiness driven by batch noise?" therefore remains open on the large-batch axis, although the batch-reuse direction has already been explored: exp-002 showed that freezing the batch for three consecutive steps did not produce visible within-window descent and instead made the trajectory worse than exp-001, which is evidence against batch noise being the dominant problem. The aggregate picture across exp-001 through exp-003 still points to damping level rather than batch noise as the limiting factor. Future plans should constrain `batch-size <= 128` on this machine, and probably `<= 64` for fast iteration, because batch_size=128 was previously observed to push step time to roughly 22s and batch_size=256 is not runnable at all.
 
+---
+
+```yaml
+id: exp-005-small-lr-damped-newton
+run_name: exp-005-small-lr-damped-newton
+commit_hash: f453954ed2221b25c1d798d90f58001e5a865b62
+probe_loss_initial: 2.7178
+probe_loss_final: 2.3302
+probe_loss_min: 2.3302
+descent_slope: -0.06088
+rejection_rate: 0.1333
+rank_among_prior_runs: 1/4
+hypothesis_supported: yes
+```
+
+Holding epsilon=1.0 fixed and shrinking lr to 0.1 produced the best final probe_loss of any run so far, 2.3302, which beats exp-003's previous best of 2.3525 and is also the run's own minimum, so unlike exp-001 and exp-003 the trajectory ended on its low point rather than drifting back up. The last-five-step slope of about -0.061 per step is roughly forty times steeper than exp-003's -0.0016 and is the first run where the trajectory is still meaningfully descending at step 14 rather than flattening into the 2.30 plateau, which is exactly what the small-lr-damped-Newton hypothesis predicted. The comparison against exp-002 is the cleanest piece of evidence about what was wrong before: exp-002 used the same epsilon=1.0 with the default lr and ended at 2.4906 with a +0.044 ascending slope, while exp-005 with the same epsilon=1.0 but lr=0.1 ended at 2.3302 with a -0.061 descending slope, so at this damping level the natural Newton step is simply too large and lr=0.1 brings it back inside the trust region of the per-batch quadratic. The comparison against exp-003 says something different but consistent: exp-003 got most of the way there with epsilon=10 and lr=1.0, reaching min 2.2846 before LM rejections at steps 6 and 13 knocked it back to 2.3525, whereas exp-005 reaches a similar final region via a smoother path, with the same 0.1333 rejection rate but with rejections clustered early (steps 5 and 11) rather than at the end. Taken together, exp-002 and exp-005 isolate global step size as a real lever on its own and not just a proxy for damping, because cutting lr by 10x at fixed epsilon moved the run from rank 4/4 to rank 1/4; meanwhile exp-001 and exp-003 already showed that damping level is also a real lever in its own right. The bottleneck is therefore not solely one or the other: both global step size and damping control how often the per-batch quadratic model is trustworthy, and exp-005 shows that even at low damping you can recover good behavior by paying for it with a smaller global step.
+
