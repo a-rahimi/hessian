@@ -23,6 +23,10 @@ Sensible scaling axes:
 
 **Phase 4 — find the smallest SGD-trainable model (new goal, replaces the Phase 3 path).** Before more Newton experiments, find a (hidden_dim, num_layers, num_steps, lr) where SGD reaches `probe_loss < 2.00` AND `probe_accuracy > 0.20` — meaningfully above chance (probe_loss = log(10) = 2.3026, probe_accuracy = 0.10). Preferred shape: deep and narrow (`hidden_dim = 8` stays fixed). Tune by growing `num_layers` and `num_steps`, possibly with higher `lr`. Newton runs resume only after we land in this regime.
 
+**Phase 4 outcome:** ReLU with hidden-dim=8 is dead at every depth tested (ReLU saturation at narrow width). The smallest SGD-trainable config is `--num-layers 8 --hidden-dim 24 --activation relu --lr 0.1 --num-steps 1000`, reaching probe_loss=1.9712 / probe_accuracy=0.281. Phase 5 anchors on this model.
+
+**Phase 5 — Newton tuning on the Phase 4 anchor.** Model: `--num-layers 8 --hidden-dim 24 --image-size 16 --activation relu`. SGD wall-clock to reach probe_loss < 2.0 is ~3 seconds at num-steps=1000. Newton step time at this config is ~27 s/step (measured smoke), so Newton experiments use shorter horizons (num-steps=30 → ~13 min per run). Comparison metric: probe_loss at the final step at the same num-steps. Phase 5 success: Newton at num-steps=30 reaches probe_loss at least 0.05 lower than SGD's probe_loss at num-steps=30.
+
 **Git workflow:**
 - Working tree must be clean before the Executor runs an experiment (only `experiments/queue.md` may be dirty due to status flip).
 - Executor commits any `code_patch` + the queue status update before running, captures `git rev-parse HEAD`, and records it as `commit_hash` on the entry.
@@ -754,4 +758,124 @@ flags:
   --activation: tanh
 code_patch: null
 predicted_outcome: probe_loss ends around 1.95-2.10 with probe_accuracy around 0.20-0.25, narrowly clearing the Phase 4 bar if the optimizer stays stable, or alternatively the run diverges with probe oscillating above 2.35 because lr=0.5 is past the stability boundary at depth=16 with tanh.
+```
+
+---
+
+```yaml
+id: exp-021-newton-anchor-sgd-control
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  SGD control at the Phase 5 anchor model and the same num-steps Newton will use (30).
+  Phase 4 showed SGD needs ~1000 steps to clear probe_loss=2.0 at this config, so 30 steps
+  should leave it well above that. The point is to know exactly what bar Newton needs to
+  clear at the same step budget. Predicted probe_loss in the 2.20-2.30 band based on the
+  Phase 4 scan's intermediate readings (at scan-l8-h24-relu, step 250 ≈ 2.13).
+flags:
+  --mode: sgd
+  --lr: 0.1
+  --batch-size: 64
+  --num-steps: 30
+  --logdir: runs/auto
+  --run-name: exp-021-newton-anchor-sgd-control
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 2.20-2.30, probe_accuracy around 0.10-0.15.
+```
+
+---
+
+```yaml
+id: exp-022-newton-anchor-baseline
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Newton at the Phase 5 anchor with the Phase 1 best recipe (epsilon=1.0, lr=0.1, lm-up=1.1,
+  lm-down=0.9). Smoke test showed probe drops 3.02 → 2.42 in 5 steps with this recipe, which
+  is a much steeper slope than SGD at the same step count. If the trend holds, 30 steps should
+  put Newton well under SGD's same-step probe_loss. ~13 min wall clock.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 30
+  --logdir: runs/auto
+  --run-name: exp-022-newton-anchor-baseline
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 2.05-2.15, beating SGD-at-same-num-steps by >= 0.05.
+```
+
+---
+
+```yaml
+id: exp-023-newton-anchor-low-eps
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Sweep epsilon downward from 1.0 to 0.1. Lower damping means the Newton step is closer to the
+  pure inverse-Hessian direction, which should help more when the per-batch Hessian is reasonably
+  well-conditioned. At hidden-dim=24 with ReLU, the active subnetwork is less narrow than Phase 1
+  so the Hessian's small eigenvalues are less likely to be near zero. Risk: low epsilon at this
+  scale could produce huge |Δ| values like exp-002/exp-003 did at small models.
+flags:
+  --mode: newton
+  --epsilon: 0.1
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 30
+  --logdir: runs/auto
+  --run-name: exp-023-newton-anchor-low-eps
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 2.00-2.10 if stable; alternatively jumps above 2.5 with high rejection rate if the lower damping over-amplifies small eigenvalues.
+```
+
+---
+
+```yaml
+id: exp-024-newton-anchor-high-lr
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Tripling lr from 0.1 to 0.3 at the Phase 1 best epsilon=1.0. Newton's |Δ| in exp-022's smoke
+  was 0.3-1.3 at lr=0.1, so lr=0.3 should produce ~3x larger displacement per step. The Phase 4
+  ReLU-SGD scan showed lr=0.3 KILLED SGD (gradient went to zero) on the narrow tanh model, but
+  the wider ReLU model here may be more robust. If lr=0.3 helps without blowing up, the
+  step-size axis is the dominant lever and the next round should push further.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.3
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 30
+  --logdir: runs/auto
+  --run-name: exp-024-newton-anchor-high-lr
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 1.95-2.10 if stable, beating exp-022. Alternatively diverges with probe rising above 2.5 if lr=0.3 is past stability.
 ```
