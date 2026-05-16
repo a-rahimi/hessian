@@ -1232,8 +1232,8 @@ predicted_outcome: rejection_rate <= 0.3 with very small |Delta|. probe likely e
 
 ```yaml
 id: exp-036-newton-eps0.3
-status: running
-commit_hash: TBD
+status: done
+commit_hash: b98c2e2b65ef136eb37753518c8d862cd5ccfdfc
 hypothesis: |
   Tighten Newton direction by lowering epsilon from 0.5 (exp-028 anchor) to 0.3 while
   holding lr=0.1 and batch=64. exp-028 sits at 47% reject and probe 2.2679. Lowering
@@ -1263,8 +1263,8 @@ predicted_outcome: reject rate 50-70%, probe 2.24-2.28.
 
 ```yaml
 id: exp-037-newton-eps1.0
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Raise epsilon from 0.5 (exp-028 anchor) to 1.0 while holding lr=0.1 and batch=64.
   Test whether slightly more damping gains in accept rate enough to beat exp-028's
