@@ -335,7 +335,7 @@ predicted_outcome: probe_loss descends past the 2.30 random-guess plateau and en
 
 ```yaml
 id: exp-010-width-newton
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   Paired with exp-009. Same model (hidden_dim=16, num_layers=8, image_size=16) and same
