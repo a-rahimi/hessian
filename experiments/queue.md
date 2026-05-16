@@ -290,3 +290,145 @@ flags:
 code_patch: null
 predicted_outcome: probe_loss descends smoothly with rejection rate below 0.05, ending near 2.20 with the trajectory still descending at step 14.
 ```
+
+---
+
+```yaml
+id: exp-009-width-sgd-baseline
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Phase 1 established that at the small model (hidden_dim=8, num_layers=8, image_size=16) Newton
+  and SGD are indistinguishable inside a 15-step budget, because both saturate the same noise
+  floor near probe_loss=2.36 set by held-out probe variance against single-batch updates. The
+  Phase 2 hypothesis is that Newton's preconditioning matters more in larger or deeper models
+  with worse-conditioned Hessians, so we need to grow the model before re-comparing. This run
+  doubles the width to hidden_dim=16 while holding num_layers=8 and image_size=16 fixed, so the
+  first-layer Hessian block stays at the memory budget (768*16)^2*4 = 600 MB. We also extend
+  num_steps to 60 (4x Phase 1) so any optimizer has room to clear the random-guess plateau
+  before the comparison is made; exp-007 showed that 15 steps is too short for the SGD
+  trajectory to separate from the plateau on this dataset. This is the SGD half of the paired
+  width-scale comparison against exp-010; the gap exp-010.probe_loss_final - exp-009.probe_loss_final
+  is the Phase 2 success metric for the width axis.
+flags:
+  --mode: sgd
+  --lr: 0.1
+  --batch-size: 64
+  --num-steps: 60
+  --logdir: runs/auto
+  --run-name: exp-009-width-sgd-baseline
+  --log-every: 5
+  --hidden-dim: 16
+  --num-layers: 8
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss descends past the 2.30 random-guess plateau and ends in the 2.05-2.20 range, giving Newton a real target to beat.
+```
+
+---
+
+```yaml
+id: exp-010-width-newton
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Paired with exp-009. Same model (hidden_dim=16, num_layers=8, image_size=16) and same
+  training horizon (60 steps, batch=64), but Newton instead of SGD. Settings are the best
+  recipe from Phase 1: epsilon=1.0, lr=0.1, lm-up=1.1, lm-down=0.9 (exp-005's configuration),
+  which on the small model gave the lowest final probe_loss of any Newton run with a -0.061
+  end-of-run slope still descending at step 14. The Phase 2 hypothesis is that doubling width
+  worsens Hessian conditioning enough that Newton's preconditioning produces a measurable gap
+  over SGD: with 60 steps Newton should clear the plateau faster than SGD because it scales
+  steps along ill-conditioned directions, whereas SGD uses one global lr. If exp-010 beats
+  exp-009 by at least 0.05 in final probe_loss, the Phase 2 success criterion is met at the
+  width axis; if the gap is smaller or reversed, width alone does not surface Newton's edge
+  and we should pivot to depth (exp-012) or to longer horizons.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --logdir: runs/auto
+  --run-name: exp-010-width-newton
+  --log-every: 5
+  --hidden-dim: 16
+  --num-layers: 8
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss descends faster than exp-009 in the first 30 steps and ends at least 0.05 below exp-009's final, in the 1.95-2.10 range.
+```
+
+---
+
+```yaml
+id: exp-011-depth-sgd-baseline
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  The other natural scaling axis is depth rather than width. This run holds hidden_dim=8 (the
+  Phase 1 width) but doubles num_layers from 8 to 16, with image_size=16 and 60 training steps.
+  Deeper networks at fixed width have worse-conditioned loss surfaces because gradients and
+  curvature compound through more nonlinearities, so the Hessian's condition number grows
+  faster with depth than with width at the small scales we can afford here. Memory is fine
+  because inner-layer Hessian blocks scale as hidden_dim^2 (only the first layer carries the
+  input_dim factor), so 16 layers at hidden_dim=8 cost roughly the same memory as 8 layers at
+  hidden_dim=8 plus a slightly larger augmented system in hessian_inverse_product. This is the
+  SGD half of the paired depth-scale comparison against exp-012; pairing the two lets the
+  Interpreter compute the gap directly without depending on cross-experiment baselines.
+flags:
+  --mode: sgd
+  --lr: 0.1
+  --batch-size: 64
+  --num-steps: 60
+  --logdir: runs/auto
+  --run-name: exp-011-depth-sgd-baseline
+  --log-every: 5
+  --hidden-dim: 8
+  --num-layers: 16
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss descends more slowly than exp-009 because deeper-but-thinner SGD struggles with vanishing gradients through tanh; ends in the 2.20-2.35 range, possibly stuck near the plateau.
+```
+
+---
+
+```yaml
+id: exp-012-depth-newton
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Paired with exp-011. Same model (hidden_dim=8, num_layers=16, image_size=16) and same
+  horizon (60 steps, batch=64), but Newton with Phase 1's best recipe (epsilon=1.0, lr=0.1,
+  lm-up=1.1, lm-down=0.9). The depth axis is where Newton's preconditioning is most likely
+  to pay off, because as depth grows with fixed tanh activation the per-layer Jacobian
+  products shrink and the Hessian's small eigenvalues dominate the SGD direction, leaving
+  most coordinates under-stepped. Newton rescales each direction by its inverse curvature,
+  so directions that SGD cannot move should still be reachable in 60 steps. If exp-012 beats
+  exp-011 by at least 0.05 in final probe_loss, the Phase 2 success criterion is met at the
+  depth axis. Comparing the (exp-012 - exp-011) gap against the (exp-010 - exp-009) gap then
+  tells us which scaling axis surfaces Newton's preconditioning advantage more strongly,
+  which is the next decision point for Phase 3.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --logdir: runs/auto
+  --run-name: exp-012-depth-newton
+  --log-every: 5
+  --hidden-dim: 8
+  --num-layers: 16
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss descends visibly past exp-011's trajectory after roughly step 15 and ends at least 0.05 below exp-011's final, in the 2.05-2.20 range.
+```
