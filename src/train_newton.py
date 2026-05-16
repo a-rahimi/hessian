@@ -259,15 +259,20 @@ def train(args: argparse.Namespace) -> None:
                 # iteration still makes progress along a descent direction,
                 # and increase ε so the next Newton attempt is better damped.
                 update = model.hessian_inverse_product(x, y, grad_vec, epsilon)
-                scalars.step_norm = args.lr * vertical_norm(update)
-                apply_update(model, update, args.lr)
+                raw_step_norm = args.lr * vertical_norm(update)
+                if args.max_step_norm is not None and raw_step_norm > args.max_step_norm:
+                    effective_lr = args.lr * args.max_step_norm / raw_step_norm
+                else:
+                    effective_lr = args.lr
+                scalars.step_norm = effective_lr * vertical_norm(update)
+                apply_update(model, update, effective_lr)
                 with torch.no_grad():
                     trial_loss = float(model(x, y).item())
                 if trial_loss < scalars.loss:
                     epsilon = max(epsilon * args.lm_down, args.lm_eps_min)
                     scalars.accepted = 1.0
                 else:
-                    apply_update(model, update, -args.lr)
+                    apply_update(model, update, -effective_lr)
                     apply_update(model, grad_vec, args.sgd_fallback_lr)
                     scalars.step_norm = args.sgd_fallback_lr * vertical_norm(grad_vec)
                     epsilon = min(epsilon * args.lm_up, args.lm_eps_max)
@@ -363,6 +368,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Reuse the same (x, y) minibatch for this many consecutive steps before drawing a new one.",
+    )
+    p.add_argument(
+        "--max-step-norm",
+        type=float,
+        default=None,
+        help="If set, cap |lr * update| at this value. Newton mode only.",
     )
     p.add_argument("--cpu", action="store_true")
     args = p.parse_args()

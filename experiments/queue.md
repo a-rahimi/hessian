@@ -1376,3 +1376,40 @@ flags:
 code_patch: null
 predicted_outcome: probe ends in 2.05-2.20 if the monotonic slope holds, or 2.20-2.28 if it flattens.
 ```
+
+---
+
+```yaml
+id: exp-041-newton-clip1.0-60steps
+status: running
+commit_hash: TBD
+hypothesis: |
+  Cap the step magnitude at |lr*update|<=1.0 via --max-step-norm. exp-039 (epsilon=0.5,
+  lr=0.1, num-steps=60) reached probe min 2.1551 at step 32 but bounced back to 2.41
+  at step 39 after an accepted Newton step of |Delta|=1.73 at step 37. Max |Delta|
+  in the run was 3.71. The bounce is in BOTH training and probe loss simultaneously,
+  so it is a step-too-large failure mode, not slow per-batch over-fitting. Capping
+  |Delta| at 1.0 should prevent the large excursions while leaving the early descent
+  phase (where |Delta| is mostly < 1.0) untouched.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 60
+  --max-step-norm: 1.0
+  --logdir: runs/auto
+  --run-name: exp-041-newton-clip1.0-60steps
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: |
+  Add --max-step-norm flag in train_newton.py. In the Newton branch, after computing
+  the update, cap effective_lr = lr * max_step_norm / |lr*update| when |lr*update| >
+  max_step_norm. Apply/undo with effective_lr. Default None preserves existing behavior.
+predicted_outcome: probe final 2.05-2.20, no large bounces, monotonic-ish descent past 2.16. If the bounce still happens, the failure mode is not just "step too large".
+```
