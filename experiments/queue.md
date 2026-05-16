@@ -620,8 +620,8 @@ predicted_outcome: probe_loss continues to descend past exp-012's step-55 endpoi
 
 ```yaml
 id: exp-017-deep-long-horizon-sgd
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   The Phase 4 bar (probe_loss < 2.00 AND probe_accuracy > 0.20) has not been cleared by any SGD
   run so far, and exp-015 showed that doubling the budget at depth=16 from 60 to 120 steps barely
