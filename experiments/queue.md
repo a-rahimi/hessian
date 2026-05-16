@@ -1011,8 +1011,8 @@ predicted_outcome: probe_loss ends around 2.05-2.20 if the lower damping helps w
 
 ```yaml
 id: exp-029-newton-bug-check
-status: running
-commit_hash: TBD
+status: done
+commit_hash: aee8d763daef50ba95df5538874650c2402d7b15
 hypothesis: |
   Diagnostic check that Newton plumbing works. If the algorithm is correct, then on a
   single batch held fixed for 15 steps with small damping (epsilon=0.01) and lr=1.0, the
@@ -1043,8 +1043,8 @@ predicted_outcome: training loss falls to <0.05 within 15 steps if Newton is imp
 
 ```yaml
 id: exp-030-newton-lr1-eps0.5
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Newton with the full step (lr=1.0) at moderate damping (epsilon=0.5), frozen LM. Up
   to now I have been running lr in {0.1, 0.3} which scales the Newton step. The textbook
