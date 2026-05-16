@@ -412,7 +412,7 @@ predicted_outcome: probe_loss descends more slowly than exp-009 because deeper-b
 
 ```yaml
 id: exp-012-depth-newton
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   Paired with exp-011. Same model (hidden_dim=8, num_layers=16, image_size=16) and same
