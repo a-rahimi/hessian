@@ -1321,8 +1321,8 @@ predicted_outcome: reject rate 35-55%, probe 2.24-2.28.
 
 ```yaml
 id: exp-039-newton-28config-60steps
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 548a2d4e876c9b75980315c679426a6b9d817c81
 hypothesis: |
   Take the exp-028 anchor (epsilon=0.5, lr=0.1, batch=64) and extend num-steps from 15 to
   60. At step 14 exp-028 ended at probe=2.2679 with the trajectory in the LM-reject /
@@ -1351,8 +1351,8 @@ predicted_outcome: probe ends in 2.15-2.25 if descent continues, or stays around
 
 ```yaml
 id: exp-040-newton-38config-60steps
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Take the exp-038 anchor (epsilon=0.5, lr=0.05, batch=64) and extend num-steps from 15
   to 60. exp-038 had clean monotonic descent ending at probe=2.2941 with slope of
