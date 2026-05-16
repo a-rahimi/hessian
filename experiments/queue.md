@@ -655,8 +655,8 @@ predicted_outcome: probe_loss ends around 2.20-2.27 with probe_accuracy around 0
 
 ```yaml
 id: exp-018-extreme-deep-long-horizon-sgd
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Pairs with exp-017 along the depth axis. exp-013 (depth=24, 60 steps) stalled at 2.3103/0.141
   and exp-017 tests whether more budget rescues depth=24. This run instead asks whether even
