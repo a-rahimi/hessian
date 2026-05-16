@@ -725,8 +725,8 @@ predicted_outcome: probe_loss ends around 2.10-2.20 with probe_accuracy around 0
 
 ```yaml
 id: exp-020-aggressive-lr-stress-sgd
-status: running
-commit_hash: TBD
+status: done
+commit_hash: df47aac33aea811b33507296072d9fe300951398
 hypothesis: |
   exp-019 takes a moderate step up the lr ladder (0.1 -> 0.3). This run takes the aggressive
   end of that ladder (lr=0.5) at depth=16 with a 300-step budget, to flank the search from the
