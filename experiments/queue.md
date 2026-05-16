@@ -888,8 +888,8 @@ predicted_outcome: probe_loss ends around 1.95-2.10 if stable, beating exp-022. 
 
 ```yaml
 id: exp-025-newton-15-baseline
-status: running
-commit_hash: TBD
+status: done
+commit_hash: fbc4aacdd99e8d6e04434bb93cf03d30c9168fac
 hypothesis: |
   Phase 5 retry. The Phase 5 best recipe (epsilon=1.0, lr=0.1, lm-up=1.1, lm-down=0.9)
   is re-run at num-steps=15 instead of 30. exp-022's trajectory at this recipe touched
