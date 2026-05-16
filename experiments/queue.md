@@ -300,8 +300,8 @@ predicted_outcome: probe_loss descends smoothly with rejection rate below 0.05, 
 
 ```yaml
 id: exp-009-width-sgd-baseline
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done
+commit_hash: ef0cf50e49d38144eff41b606a4b982d2d41e69b
 hypothesis: |
   Phase 1 established that at the small model (hidden_dim=8, num_layers=8, image_size=16) Newton
   and SGD are indistinguishable inside a 15-step budget, because both saturate the same noise
