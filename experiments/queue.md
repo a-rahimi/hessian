@@ -205,3 +205,78 @@ flags:
 code_patch: null
 predicted_outcome: probe_loss starts descending like exp-001 then accelerates after step 8 as effective epsilon drops below 10, ending near 2.00.
 ```
+
+---
+
+```yaml
+id: exp-007-sgd-baseline-15-steps
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  Every Newton run so far settles in the narrow band [2.33, 2.49] regardless of damping or step
+  size, which is suspiciously close to the random-guess plateau of 2.30 and well above the 2.20
+  target. The earlier project note that SGD reached ~1.9 in 1000 steps tells us nothing about
+  what SGD can achieve in 15 steps on this exact hidden-dim 8, num-layers 8, image-size 16, tanh
+  configuration. If a 15-step SGD baseline also lands in the [2.33, 2.49] band, the plateau is a
+  property of the model+budget pair (a true noise floor at this depth and batch size) rather than
+  a failure of Newton, and chasing further Newton hyperparameters is wasted effort. If SGD clears
+  2.20 in 15 steps, Newton genuinely lags scaled gradient descent here and the question becomes
+  why the Hessian preconditioning is not buying us anything. Either way the result tightly bounds
+  the rest of the search. We use lr=0.1 (the SGD default in train_newton.py) and batch-size=64
+  to match exp-001/003/005/006 so the only difference from the Newton runs is the optimizer.
+flags:
+  --mode: sgd
+  --lr: 0.1
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-007-sgd-baseline-15-steps
+  --log-every: 1
+  --hidden-dim: 8
+  --num-layers: 8
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss ends in [2.30, 2.40], roughly tied with the best Newton runs, confirming the band is a budget-imposed noise floor.
+```
+
+---
+
+```yaml
+id: exp-008-tiny-lr-large-batch
+status: pending
+commit_hash: null  # filled by Executor at run start
+hypothesis: |
+  exp-005 is the current best because cutting lr from 0.5 to 0.1 at epsilon=1.0 kept the per-step
+  displacement inside the per-batch quadratic trust region, and it was the only run still descending
+  at step 14 (slope -0.061). That run's rejection rate of 0.133 (two rejections clustered early)
+  shows the step is still slightly too large for some early-iterate batches; cutting lr another 10x
+  to 0.01 should drive rejection rate to near zero. At the same time, exp-002, exp-003, and exp-006
+  all showed that the trajectory bounces by 0.1 to 0.34 between adjacent steps, which is the
+  signature of single-batch Hessian/gradient noise dominating the signal on the held-out probe.
+  exp-004 tried to attack this with batch-size=256 and OOM'd, but batch-size=128 is the hardware
+  ceiling and has never been tried, so doubling batch size from 64 to 128 should roughly halve the
+  per-step noise. Combining the two changes (lr 0.1 -> 0.01 to keep the step inside the trust
+  region without help from LM, and batch 64 -> 128 to denoise both gradient and Hessian) isolates
+  whether the exp-005 plateau is set by step size or by batch noise: if lr=0.01 at batch=128 beats
+  exp-005's 2.3302, both knobs were still active at exp-005's setting; if it stalls higher because
+  the step is too small to clear the random-guess region in 15 steps, lr=0.1 was already at the
+  right magnitude and the binding constraint is something else (likely batch noise alone).
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.01
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 128
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-008-tiny-lr-large-batch
+  --log-every: 1
+  --hidden-dim: 8
+  --num-layers: 8
+  --image-size: 16
+  --activation: tanh
+code_patch: null
+predicted_outcome: probe_loss descends smoothly with rejection rate below 0.05, ending near 2.20 with the trajectory still descending at step 14.
+```
