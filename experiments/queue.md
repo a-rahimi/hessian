@@ -1137,8 +1137,8 @@ predicted_outcome: probe_loss ends around 2.10-2.20 if batch noise is the domina
 
 ```yaml
 id: exp-033-newton-high-eps
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 22ba3987335909899540ce6cb48b19bd61aa33e2
 hypothesis: |
   Raise epsilon 10x (from 0.5 in exp-028 to 5.0) while keeping lr=0.1 and batch=64. The
   exp-028 / exp-030 baseline had 100% rejection at batch=64. epsilon=5.0 should both
@@ -1170,8 +1170,8 @@ predicted_outcome: rejection_rate drops to 0.3-0.6, probe_loss ends in 2.25-2.30
 
 ```yaml
 id: exp-034-newton-low-lr
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Drop lr 10x (from 0.1 in exp-028 to 0.01) while keeping epsilon=0.5 and batch=64.
   Tests the |Delta|-is-too-large hypothesis alone. lr scales |Delta| uniformly without
