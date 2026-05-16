@@ -530,8 +530,8 @@ predicted_outcome: probe_loss descends past exp-013's stall band and ends at lea
 
 ```yaml
 id: exp-015-longer-horizon-sgd-baseline
-status: running
-commit_hash: TBD
+status: done
+commit_hash: e2a2f2d9a421a2d61f9f16a63824d97a7c8152f9
 hypothesis: |
   The exp-012 interpretation also predicted that a longer budget at depth=16 should widen the
   Newton gap purely from the slope differential, because exp-012's last-four slope was -0.00427
