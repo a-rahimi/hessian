@@ -141,7 +141,7 @@ predicted_outcome: probe_loss descends more smoothly than exp-001 with fewer upt
 
 ```yaml
 id: exp-005-small-lr-damped-newton
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   Comparing exp-001 (epsilon=100, lr=1.0, zero rejections, descent to 2.38) against exp-002
