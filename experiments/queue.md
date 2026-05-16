@@ -210,7 +210,7 @@ predicted_outcome: probe_loss starts descending like exp-001 then accelerates af
 
 ```yaml
 id: exp-007-sgd-baseline-15-steps
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   Every Newton run so far settles in the narrow band [2.33, 2.49] regardless of damping or step
