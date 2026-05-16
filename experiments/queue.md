@@ -1105,8 +1105,8 @@ predicted_outcome: probe_loss ends either around 1.90-2.05 if low damping is the
 
 ```yaml
 id: exp-032-newton-batch128-eps0.5
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 4cd33af3269ffdf9e6692251877498aada132c1e
 hypothesis: |
   Larger batch (batch-size=128) reduces per-batch Hessian noise. The Hessian estimated
   on 64 samples is noisy, and Newton amplifies low-curvature directions, so any noise

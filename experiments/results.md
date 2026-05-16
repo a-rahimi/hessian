@@ -224,3 +224,75 @@ hypothesis_supported: yes  # this is the Phase 4 anchor, achieves probe_loss < 2
 ```
 
 This is the Phase 4 anchor model — `--num-layers 8 --hidden-dim 24 --image-size 16 --activation relu --lr 0.1 --num-steps 1000`. It was selected after a scan of ReLU-activated configurations during Phase 4 because every SGD run at `hidden-dim 8` (the Phase 1 narrow width) with ReLU collapsed to dead ReLUs within the first few steps, so the Phase 4 search was forced to widen to `hidden-dim 24`, which is the smallest ReLU width that produces non-saturated gradients deep into the network. The final probe_loss 1.9712 clears the Phase 4 loss bar of 2.00 and the probe_accuracy 0.281 clears the accuracy bar of 0.20. Wall clock for the full 1000-step run is approximately 3.2 seconds because SGD costs about 3 ms per step on this configuration. Phase 5 uses this exact model and same Phase 1 best Newton recipe as the starting point for Newton hyperparameter tuning, with the explicit comparison being Newton at num-steps=30 (about 13 minutes wall clock per Newton run because the Hessian solve at hidden-dim=24 costs about 27 seconds per step) against SGD at num-steps=30 (exp-021, which finished at probe_loss=2.2934 in about 100 milliseconds total wall clock), so the success threshold for any Phase 5 Newton run is final probe_loss strictly less than 2.2434.
+
+---
+
+```yaml
+id: exp-029-newton-bug-check
+run_name: exp-029-newton-bug-check
+commit_hash: aee8d763daef50ba95df5538874650c2402d7b15
+probe_loss_initial: 3.0188
+probe_loss_final: 2.3061
+probe_loss_min: 2.3028
+probe_accuracy_final: 0.094
+probe_accuracy_max: 0.156
+training_loss_final: 2.2653  # on the held-fixed batch of 64
+training_loss_initial: 3.0098
+rejection_rate: 1.0  # 15 of 15 Newton steps REJ
+hypothesis_supported: partial  # the diagnostic itself: training loss did NOT collapse to zero on the held-fixed batch, but it did fall ~0.74 and every step was rejected so the descent is SGD-fallback, not Newton
+```
+
+This is a diagnostic run with `--reuse-batch 15` so all 15 steps see the same batch of 64 samples; if the Newton plumbing produces a step that overshoots the local quadratic, the LM trial check should reject it, and if it produces a good step, the training-batch loss should fall close to zero in 15 iterations. With frozen ε=0.01 and lr=1.0, every single step was rejected (`REJ`). The training loss fell from 3.0098 to 2.2653 over the 15 steps, but that descent is entirely the SGD-fallback step that fires after each rejection (sgd-fallback-lr defaults to 0.05). The diagnostic signal is therefore that on the held-fixed batch at this model, the Newton trial step with ε=0.01 produces a trial loss that is *always worse* than the current loss, so LM never accepts. This rules out the "Newton would work if only we kept the batch fixed" hypothesis: even on the very batch the Hessian was computed on, the Newton step at this low damping does not improve the loss.
+
+---
+
+```yaml
+id: exp-030-newton-lr1-eps0.5
+run_name: exp-030-newton-lr1-eps0.5
+commit_hash: 39cd3b738bb7ab0c6ab3ed039b25528115ee0a26
+probe_loss_initial: 3.0188
+probe_loss_final: 2.3031
+probe_loss_min: 2.3026
+probe_accuracy_final: 0.156
+probe_accuracy_max: 0.156
+rejection_rate: 1.0  # 15 of 15 Newton steps REJ
+hypothesis_supported: no  # lr=1.0 with ε=0.5 frozen produced zero accepted Newton steps and ended at 2.3031, the same noise floor as every other recent Newton run
+```
+
+This tested H4 (the textbook Newton step uses lr=1.0). At ε=0.5 lr=1.0 with frozen LM, every Newton step was rejected on its first batch. probe_loss fell from 3.0188 to 2.3031 entirely through the SGD-fallback step. The result rules out H4 for this model: lr=1.0 does not turn into accepted Newton steps when the damping is moderate; the Newton direction itself, at any lr, is being rejected by LM on every batch.
+
+---
+
+```yaml
+id: exp-031-newton-lr1-eps0.1
+run_name: exp-031-newton-lr1-eps0.1
+commit_hash: 326b0cc46f407bd26ab10f3498544cc14aecba18
+probe_loss_initial: 3.0188
+probe_loss_final: 2.3026
+probe_loss_min: 2.3012
+probe_accuracy_final: 0.094
+probe_accuracy_max: 0.152
+rejection_rate: 0.933  # 14 of 15 steps REJ; step 2 accepted with |Δ|=3.220
+hypothesis_supported: partial  # one accepted step (|Δ|=3.22, loss 2.3042 -> 2.2584) shows the low-damping Newton step occasionally lands well; the next 12 steps all got rejected so probe ends at 2.3026 unchanged from the higher-damping variants
+```
+
+The first interesting Newton-acceptance signal of the four-experiment batch. At ε=0.1 lr=1.0 frozen, step 2 was accepted with |Δ|=3.220 (vs the rejected step sizes of 0.02-0.08), and the training loss fell from 2.3042 to 2.2584 on that step. Every subsequent step was rejected. The interpretation is that the low-damping Newton direction is occasionally well-aligned with the local quadratic and produces a large, accepted step, but most batches produce a Newton step that LM rejects. Single accepted steps do not compound across batches because the next batch resets the local quadratic. probe ends at 2.3026, indistinguishable from the all-rejected ε=0.5 variants on the probe set.
+
+---
+
+```yaml
+id: exp-032-newton-batch128-eps0.5
+run_name: exp-032-newton-batch128-eps0.5
+commit_hash: 4cd33af3269ffdf9e6692251877498aada132c1e
+probe_loss_initial: 3.0188
+probe_loss_final: 2.2922
+probe_loss_min: 2.2922
+probe_accuracy_final: 0.102
+probe_accuracy_max: 0.148
+rejection_rate: 0.467  # 7 of 15 steps REJ; 8 accepted (steps 0, 1, 6, 7, 9, 11, 14)
+hypothesis_supported: yes  # doubling the batch from 64 to 128 raised the LM accept rate from ~0% to ~53% and produced the best Newton probe_loss of the four-experiment batch
+```
+
+This is the cleanest positive Newton signal in the four-experiment batch. Doubling batch size from 64 to 128 (with everything else matching exp-028) raised the Newton accept rate from 0% to 53% and dropped probe_loss to 2.2922, beating every batch=64 Newton variant in this study. The accepted steps have |Δ| in the 0.19-0.55 range, an order of magnitude larger than the rejected steps that hover at 0.02-0.03 (those are the LM-triggered SGD-fallback updates). H2 is supported: the Hessian computed on 64 samples is too noisy for the LM trial check at this model, so most batches produce Newton directions that LM correctly classifies as worse-than-current. Doubling the batch halves the Hessian-estimator variance and that is enough to flip the accept rate from ~0% to ~50%. probe_loss 2.2922 still misses the 1.97 bar by 0.32, but the slope is the right sign: more batch -> more accepts -> lower probe.
+
+The combined interpretation across exp-029, exp-030, exp-031, exp-032 is that the binding constraint at this model is not damping (ε) or step scaling (lr) but per-batch Hessian noise. At batch=64, the LM trial check rejects essentially every Newton step regardless of ε in {0.01, 0.1, 0.5, 1.0} or lr in {0.1, 1.0}, and the apparent descent in those runs is entirely SGD fallback at lr=0.05. At batch=128, the accept rate jumps to ~50% and Newton actually contributes to the descent. The natural next step is to push batch up further (192, 256 if memory allows) and to test whether the accept-rate improvement at batch=128 compounds with longer horizons (num-steps=30, 60) into a probe_loss below 1.97.
