@@ -1418,8 +1418,8 @@ predicted_outcome: probe final 2.05-2.20, no large bounces, monotonic-ish descen
 
 ```yaml
 id: exp-042-newton-fresh-lm-check
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 6aaf2bbcb7538d8c6dda5db78960425e9e4f43b0
 hypothesis: |
   Switch the LM accept check from same-batch to fresh-batch. The current LM check
   measures trial loss on the same batch the Newton step came from, so the check is
@@ -1451,4 +1451,81 @@ code_patch: |
   batch, undo and measure baseline loss on that same batch, accept iff trial <
   baseline. 'same' preserves existing behavior.
 predicted_outcome: rejection rate jumps to 40-70% (vs 50% in exp-039), probe descent is more monotonic with no large bounces, final probe in 2.05-2.18.
+```
+
+---
+
+```yaml
+id: exp-043-newton-lr-adapt
+status: running
+commit_hash: TBD
+hypothesis: |
+  Adapt lr only, leaving epsilon frozen at 0.5. Every 10 steps, compare the mean
+  training loss over the last 10 batches to the mean over the previous 10 batches; if
+  no improvement, multiply lr by 0.5 (down to floor 0.001). Fresh-batch LM check.
+  Tests whether lr adaptation alone can drive training loss past the 2.20 floor that
+  exp-042 plateaued at.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 60
+  --lm-check-batch: fresh
+  --adapt-lr-on-plateau: true
+  --lr-decay-window: 10
+  --lr-decay-factor: 0.5
+  --lr-min: 0.001
+  --logdir: runs/auto
+  --run-name: exp-043-newton-lr-adapt
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: |
+  Add trailing-loss window (deque of last 2*window training losses). Add CLI flags
+  --adapt-lr-on-plateau, --lr-decay-window (default 10), --lr-decay-factor (default 0.5),
+  --lr-min (default 1e-3). At step boundaries where step_idx+1 is a multiple of window,
+  if window is full and recent mean of last `window` losses >= mean of the previous `window`
+  losses, multiply lr by --lr-decay-factor down to --lr-min. Log lr and train_loss_avg10
+  per step. Existing behavior preserved when --adapt-lr-on-plateau is not set.
+predicted_outcome: trailing-avg training loss drops below 2.20 (vs ~2.25 floor in exp-042); lr halves at the first plateau (likely step 30-40), maybe again near the end. probe_loss follows but is incidental.
+```
+
+---
+
+```yaml
+id: exp-044-newton-lr-adapt-eps-adapt
+status: pending
+commit_hash: null
+hypothesis: |
+  Adapt both lr (training-loss-plateau decay) and epsilon (LM up/down 1.1/0.9). Tests
+  whether epsilon adaptation on top of lr adaptation extracts more descent than lr
+  adaptation alone. If exp-044 beats exp-043 on trailing-avg training loss, both knobs
+  contribute; if they tie, lr adaptation alone is enough.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --lm-check-batch: fresh
+  --adapt-lr-on-plateau: true
+  --lr-decay-window: 10
+  --lr-decay-factor: 0.5
+  --lr-min: 0.001
+  --logdir: runs/auto
+  --run-name: exp-044-newton-lr-adapt-eps-adapt
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: if both knobs matter, trailing-avg training loss ends below exp-043's. If only lr matters, the two end at similar trailing-avg.
 ```

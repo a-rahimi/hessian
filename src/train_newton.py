@@ -15,6 +15,7 @@ Launch tensorboard against the parent directory to overlay runs:
 from __future__ import annotations
 
 import argparse
+import collections
 import contextlib
 import dataclasses
 import datetime as dt
@@ -49,12 +50,14 @@ class StepScalars:
     """
 
     loss: float = 0.0
+    train_loss_avg10: float = 0.0
     probe_loss: float = 0.0
     probe_accuracy: float = 0.0
     batch_accuracy: float = 0.0
     grad_norm: float = 0.0
     step_norm: float = 0.0
     epsilon: float = 0.0
+    lr: float = 0.0
     accepted: float = 1.0
     step_seconds: float = 0.0
     wall_clock_s: float = 0.0
@@ -208,6 +211,8 @@ def train(args: argparse.Namespace) -> None:
     step_idx = 0
     data_iter = iter(loader)
     epsilon = args.epsilon
+    lr = args.lr
+    loss_window = collections.deque(maxlen=2 * args.lr_decay_window)
     x, y = None, None
     while step_idx < args.num_steps:
         if step_idx % args.reuse_batch == 0:
@@ -226,7 +231,11 @@ def train(args: argparse.Namespace) -> None:
 
             loss = model(x, y)
             scalars.loss = float(loss.item())
+            loss_window.append(scalars.loss)
+            window = args.lr_decay_window
+            scalars.train_loss_avg10 = sum(loss_window) / len(loss_window)
             scalars.epsilon = epsilon
+            scalars.lr = lr
             with torch.no_grad():
                 scalars.probe_loss = float(model(probe_x, probe_y).item())
                 probe_features = model.layers(probe_x)
@@ -250,8 +259,8 @@ def train(args: argparse.Namespace) -> None:
 
             if args.mode == "sgd":
                 update = grad_vec
-                scalars.step_norm = args.lr * vertical_norm(update)
-                apply_update(model, update, args.lr)
+                scalars.step_norm = lr * vertical_norm(update)
+                apply_update(model, update, lr)
             elif args.mode == "newton":
                 # Levenberg-Marquardt: try the step at the current damping. If
                 # loss decreased on the same batch, accept and decrease ε. Else
@@ -259,11 +268,11 @@ def train(args: argparse.Namespace) -> None:
                 # iteration still makes progress along a descent direction,
                 # and increase ε so the next Newton attempt is better damped.
                 update = model.hessian_inverse_product(x, y, grad_vec, epsilon)
-                raw_step_norm = args.lr * vertical_norm(update)
+                raw_step_norm = lr * vertical_norm(update)
                 if args.max_step_norm is not None and raw_step_norm > args.max_step_norm:
-                    effective_lr = args.lr * args.max_step_norm / raw_step_norm
+                    effective_lr = lr * args.max_step_norm / raw_step_norm
                 else:
-                    effective_lr = args.lr
+                    effective_lr = lr
                 scalars.step_norm = effective_lr * vertical_norm(update)
                 apply_update(model, update, effective_lr)
                 if args.lm_check_batch == "fresh":
@@ -296,6 +305,17 @@ def train(args: argparse.Namespace) -> None:
             else:
                 raise ValueError(f"unknown mode: {args.mode}")
 
+        if (
+            args.adapt_lr_on_plateau
+            and len(loss_window) == 2 * window
+            and (step_idx + 1) % window == 0
+            and lr > args.lr_min
+        ):
+            recent = sum(list(loss_window)[-window:]) / window
+            prev = sum(list(loss_window)[:window]) / window
+            if recent >= prev:
+                lr = max(lr * args.lr_decay_factor, args.lr_min)
+
         if step_idx % args.log_every == 0:
             extra = ""
             if args.mode == "newton":
@@ -304,8 +324,8 @@ def train(args: argparse.Namespace) -> None:
                 )
             print(
                 f"[{args.mode}] step={step_idx:4d} "
-                f"loss={scalars.loss:.4f} probe={scalars.probe_loss:.4f} probe_acc={scalars.probe_accuracy:.3f} bacc={scalars.batch_accuracy:.3f} "
-                f"|g|={scalars.grad_norm:.3e} |Δ|={scalars.step_norm:.3e}{extra} "
+                f"loss={scalars.loss:.4f} avg10={scalars.train_loss_avg10:.4f} probe={scalars.probe_loss:.4f} probe_acc={scalars.probe_accuracy:.3f} bacc={scalars.batch_accuracy:.3f} "
+                f"lr={scalars.lr:.3e} |g|={scalars.grad_norm:.3e} |Δ|={scalars.step_norm:.3e}{extra} "
                 f"t={scalars.wall_clock_s:.2f}s (step {scalars.step_seconds * 1000:.0f}ms)",
                 file=sys.stderr,
             )
@@ -397,6 +417,25 @@ def parse_args() -> argparse.Namespace:
         default="same",
         help="LM accept check: 'same' uses the training batch the step came from; "
         "'fresh' draws a separate batch from the loader and checks loss there.",
+    )
+    p.add_argument(
+        "--lr-decay-window",
+        type=int,
+        default=10,
+        help="Width of the trailing-loss window for lr plateau detection.",
+    )
+    p.add_argument(
+        "--adapt-lr-on-plateau",
+        action="store_true",
+        help="If set, halve lr (down to --lr-min) whenever the trailing-loss mean over the last "
+        "--lr-decay-window steps does not improve over the previous window of the same length.",
+    )
+    p.add_argument("--lr-min", type=float, default=1e-3)
+    p.add_argument(
+        "--lr-decay-factor",
+        type=float,
+        default=0.5,
+        help="Multiplicative factor applied to lr on a plateau decay event.",
     )
     p.add_argument("--cpu", action="store_true")
     args = p.parse_args()
