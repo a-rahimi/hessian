@@ -792,8 +792,8 @@ predicted_outcome: probe_loss ends around 2.20-2.30, probe_accuracy around 0.10-
 
 ```yaml
 id: exp-022-newton-anchor-baseline
-status: pending
-commit_hash: null  # filled by Executor at run start
+status: running
+commit_hash: TBD
 hypothesis: |
   Newton at the Phase 5 anchor with the Phase 1 best recipe (epsilon=1.0, lr=0.1, lm-up=1.1,
   lm-down=0.9). Smoke test showed probe drops 3.02 → 2.42 in 5 steps with this recipe, which
