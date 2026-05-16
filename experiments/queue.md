@@ -379,7 +379,7 @@ predicted_outcome: probe_loss descends faster than exp-009 in the first 30 steps
 
 ```yaml
 id: exp-011-depth-sgd-baseline
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   The other natural scaling axis is depth rather than width. This run holds hidden_dim=8 (the
