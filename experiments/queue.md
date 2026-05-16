@@ -919,8 +919,8 @@ predicted_outcome: probe_loss ends around 2.25-2.35, well above the 1.97 bar.
 
 ```yaml
 id: exp-026-newton-15-frozen-eps
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Freeze epsilon at 1.0 (set lm-up=lm-down=1.0). In exp-022 the LM decay let epsilon drop
   to 0.05 by step 18 and triggered cycle of rejections that drove probe back up from 2.25
