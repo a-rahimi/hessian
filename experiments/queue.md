@@ -1132,3 +1132,98 @@ flags:
 code_patch: null
 predicted_outcome: probe_loss ends around 2.10-2.20 if batch noise is the dominant issue. If not, it should be comparable to exp-028 (2.27).
 ```
+
+---
+
+```yaml
+id: exp-033-newton-high-eps
+status: running
+commit_hash: TBD
+hypothesis: |
+  Raise epsilon 10x (from 0.5 in exp-028 to 5.0) while keeping lr=0.1 and batch=64. The
+  exp-028 / exp-030 baseline had 100% rejection at batch=64. epsilon=5.0 should both
+  shrink |Delta| by roughly 10x in the high-curvature directions and rotate the step
+  toward the gradient direction, which is what we should do if the per-batch Hessian
+  estimate at batch=64 is too noisy to support the pure-Newton direction. Predicts a
+  moderate accept rate (30-60%) and a probe_loss in the same band as exp-032
+  (2.27-2.29).
+flags:
+  --mode: newton
+  --epsilon: 5.0
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-033-newton-high-eps
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: rejection_rate drops to 0.3-0.6, probe_loss ends in 2.25-2.30 range. If rejection stays >0.9, direction-noise hypothesis is wrong.
+```
+
+---
+
+```yaml
+id: exp-034-newton-low-lr
+status: pending
+commit_hash: null
+hypothesis: |
+  Drop lr 10x (from 0.1 in exp-028 to 0.01) while keeping epsilon=0.5 and batch=64.
+  Tests the |Delta|-is-too-large hypothesis alone. lr scales |Delta| uniformly without
+  changing direction, so if rejections are caused purely by overshoot, this should
+  accept; if rejections are caused by direction noise, this will still reject because
+  the direction is unchanged.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.01
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-034-newton-low-lr
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: if direction noise dominates, rejection stays high (>0.8) and probe is around 2.30. If overshoot dominates, rejection falls to <0.5 but the step magnitude is small so probe ends higher than exp-032, around 2.30-2.35.
+```
+
+---
+
+```yaml
+id: exp-035-newton-high-eps-low-lr
+status: pending
+commit_hash: null
+hypothesis: |
+  Both knobs moved: epsilon=5.0 and lr=0.01 at batch=64. This is the most conservative
+  Newton step (small magnitude, gradient-mixed direction). If neither exp-033 nor
+  exp-034 alone gets the accept rate into the 30-60% band, this combination should.
+  The risk is that the step becomes so small (and so gradient-like) that probe ends
+  higher than the SGD-fallback runs we've seen.
+flags:
+  --mode: newton
+  --epsilon: 5.0
+  --lr: 0.01
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-035-newton-high-eps-low-lr
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: rejection_rate <= 0.3 with very small |Delta|. probe likely ends 2.28-2.32 because the conservative step descends slowly within 15 steps.
+```
