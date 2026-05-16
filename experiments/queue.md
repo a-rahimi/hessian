@@ -2,12 +2,22 @@
 
 Each experiment is a top-level YAML frontmatter block followed by a hypothesis paragraph. Status transitions: `pending` → `running` → `done`.
 
-**Fixed config across all experiments (do not change):**
-- model: `--hidden-dim 8 --num-layers 8 --image-size 16 --activation tanh`
-- training budget: `--num-steps 15`
-- probe loss metric: `probe_loss` from a 256-sample held-out batch (seeded fixed)
+**Starting model config (Phase 1, exp-001 through exp-007):** `--hidden-dim 8 --num-layers 8 --image-size 16 --activation tanh --num-steps 15`. All Phase 1 runs reached probe_loss in [2.33, 2.49] at step 14 — Newton and SGD indistinguishable inside this budget.
 
-**Success criterion:** `probe_loss` at step 14 < 2.20 (decisively below the random-guess 2.30 plateau). Stretch: < 1.95 (matches SGD's long-run number).
+**Phase 2 — model-scale sweep (this section onwards):** the Planner may now vary model architecture AND training params. The goal is to find a model + hyperparameter combination where the optimizers actually separate on the metric. Vary one knob per experiment when possible.
+
+Hard constraints (machine limits):
+- `--batch-size <= 128` (256 OOMs).
+- First-layer Hessian block memory = (input_dim × hidden_dim)² × 4 bytes must stay under ~600 MB. At image_size=16 this caps `hidden_dim <= ~32`. At image_size=8 it caps `hidden_dim <= ~50`. Increasing image_size beyond 16 forces hidden_dim downward.
+- Newton step time scales super-linearly with batch_size; batch=64 is fast (~1 s/step), batch=128 ~10 s/step.
+
+Sensible scaling axes:
+- Wider: bump `--hidden-dim` from 8 → 16 → 24 (mind the memory cap).
+- Deeper: bump `--num-layers` from 8 → 16 → 24 (inner-layer Hessian blocks are cheap since they scale as `hidden_dim²`, but more layers mean a bigger augmented system in `hessian_inverse_product`).
+- Longer training horizon: `--num-steps` from 15 → 60 → 200. At 60 steps Newton runs take ~2 min, still tractable.
+- Probe-batch metric is now `probe_accuracy` as well as `probe_loss` (committed in this round).
+
+**Success criterion (Phase 2):** Newton's `probe_loss` at the final step is at least 0.05 lower than SGD's `probe_loss` at the final step, on the same model and training horizon. Tie or worse means Newton offers no benefit at that scale.
 
 **Git workflow:**
 - Working tree must be clean before the Executor runs an experiment (only `experiments/queue.md` may be dirty due to status flip).

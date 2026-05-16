@@ -50,6 +50,7 @@ class StepScalars:
 
     loss: float = 0.0
     probe_loss: float = 0.0
+    probe_accuracy: float = 0.0
     batch_accuracy: float = 0.0
     grad_norm: float = 0.0
     step_norm: float = 0.0
@@ -228,6 +229,11 @@ def train(args: argparse.Namespace) -> None:
             scalars.epsilon = epsilon
             with torch.no_grad():
                 scalars.probe_loss = float(model(probe_x, probe_y).item())
+                probe_features = model.layers(probe_x)
+                probe_logits = model.loss_layer.linear(probe_features)
+                scalars.probe_accuracy = float(
+                    (probe_logits.argmax(dim=1) == probe_y).float().mean().item()
+                )
 
             # Batch accuracy uses the loss layer's pre-loss logits. Re-run the
             # cheap forward up to the loss layer to read them.
@@ -277,7 +283,7 @@ def train(args: argparse.Namespace) -> None:
                 )
             print(
                 f"[{args.mode}] step={step_idx:4d} "
-                f"loss={scalars.loss:.4f} probe={scalars.probe_loss:.4f} acc={scalars.batch_accuracy:.3f} "
+                f"loss={scalars.loss:.4f} probe={scalars.probe_loss:.4f} probe_acc={scalars.probe_accuracy:.3f} bacc={scalars.batch_accuracy:.3f} "
                 f"|g|={scalars.grad_norm:.3e} |Δ|={scalars.step_norm:.3e}{extra} "
                 f"t={scalars.wall_clock_s:.2f}s (step {scalars.step_seconds * 1000:.0f}ms)",
                 file=sys.stderr,
