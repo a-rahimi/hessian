@@ -449,7 +449,7 @@ predicted_outcome: probe_loss descends visibly past exp-011's trajectory after r
 
 ```yaml
 id: exp-013-deeper-sgd-baseline
-status: pending
+status: running
 commit_hash: null  # filled by Executor at run start
 hypothesis: |
   Phase 2 closed with exp-012 beating exp-011 by 0.0302 on probe_loss at depth=16, which is
