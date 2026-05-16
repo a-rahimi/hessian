@@ -1292,8 +1292,8 @@ predicted_outcome: reject rate 25-45%, probe 2.27-2.30.
 
 ```yaml
 id: exp-038-newton-lr0.05
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 4e2a560098af406fb998bb5c6d8d51be960b3c41
 hypothesis: |
   Halve lr from 0.1 (exp-028 anchor) to 0.05 while holding epsilon=0.5 and batch=64.
   Smaller |Delta| in the same Newton direction. Tests whether the exp-028 step was
@@ -1315,4 +1315,64 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: reject rate 35-55%, probe 2.24-2.28.
+```
+
+---
+
+```yaml
+id: exp-039-newton-28config-60steps
+status: running
+commit_hash: TBD
+hypothesis: |
+  Take the exp-028 anchor (epsilon=0.5, lr=0.1, batch=64) and extend num-steps from 15 to
+  60. At step 14 exp-028 ended at probe=2.2679 with the trajectory in the LM-reject /
+  SGD-fallback regime (steps 5-11 all REJ; minimum 2.2424 at step 11). The question is
+  whether the trajectory keeps descending past step 14 or has already hit a floor.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 60
+  --logdir: runs/auto
+  --run-name: exp-039-newton-28config-60steps
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe ends in 2.15-2.25 if descent continues, or stays around 2.22-2.27 if it has plateaued.
+```
+
+---
+
+```yaml
+id: exp-040-newton-38config-60steps
+status: pending
+commit_hash: null
+hypothesis: |
+  Take the exp-038 anchor (epsilon=0.5, lr=0.05, batch=64) and extend num-steps from 15
+  to 60. exp-038 had clean monotonic descent ending at probe=2.2941 with slope of
+  about -0.005/step at step 14. Extrapolating naively at the same slope gives probe at
+  step 59 of about 2.07. The question is whether the slope holds or flattens out.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.05
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 60
+  --logdir: runs/auto
+  --run-name: exp-040-newton-38config-60steps
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe ends in 2.05-2.20 if the monotonic slope holds, or 2.20-2.28 if it flattens.
 ```
