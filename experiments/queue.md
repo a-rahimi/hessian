@@ -949,8 +949,8 @@ predicted_outcome: probe_loss ends around 2.10-2.25, closer to the 1.97 bar than
 
 ```yaml
 id: exp-027-newton-15-frozen-high-lr
-status: running
-commit_hash: TBD
+status: done
+commit_hash: d4db15e0fc9624700d68acbba7d2e2175045eb6c
 hypothesis: |
   Frozen epsilon=1.0 plus lr=0.3 (3x exp-026). The frozen-epsilon stability check from
   exp-026 may make a higher lr safe. exp-024 already tried lr=0.3 with LM on at num-steps=30
