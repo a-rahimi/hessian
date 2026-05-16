@@ -979,8 +979,8 @@ predicted_outcome: probe_loss ends around 2.00-2.15 if the larger step stays sta
 
 ```yaml
 id: exp-028-newton-15-frozen-low-eps
-status: running
-commit_hash: TBD
+status: done
+commit_hash: f4ff03eb417346e4543fb56007e6a2bfb6706851
 hypothesis: |
   Frozen epsilon at 0.5 (half of exp-026), lr=0.1. exp-023 tried epsilon=0.1 with LM on and
   blew up to probe=2.38 with |Delta| up to 8.2. epsilon=0.5 is a milder lowering and the
