@@ -27,6 +27,10 @@ Sensible scaling axes:
 
 **Phase 5 — Newton tuning on the Phase 4 anchor.** Model: `--num-layers 8 --hidden-dim 24 --image-size 16 --activation relu`. SGD wall-clock to reach probe_loss < 2.0 is ~3 seconds at num-steps=1000. Newton step time at this config is ~27 s/step (measured smoke), so Newton experiments use shorter horizons (num-steps=30 → ~13 min per run). Comparison metric: probe_loss at the final step at the same num-steps. Phase 5 success: Newton at num-steps=30 reaches probe_loss at least 0.05 lower than SGD's probe_loss at num-steps=30.
 
+**Phase 5 attempted with wrong framing.** exp-021 through exp-024 paired Newton against SGD at num-steps=30. At 30 SGD steps SGD itself sits at probe=2.29 (chance plateau), so the comparison only re-samples the noise floor that Phase 4 already escaped. exp-022 transiently reached probe=2.25 at step 23 before drifting back. None of these say anything useful about Newton's value.
+
+**Phase 5 retry — Newton against SGD's 1000-step number.** The right framing per user: Newton runs for at most num-steps=15. SGD's 1000-step probe_loss=1.97 (Phase 4 anchor) is the bar. Any Newton recipe whose final probe_loss < 1.97 at num-steps=15 is a clear win, because Newton would have matched SGD's 1000-step result in 1/66 the steps. Each Newton 15-step run takes ~7 min wall clock.
+
 **Git workflow:**
 - Working tree must be clean before the Executor runs an experiment (only `experiments/queue.md` may be dirty due to status flip).
 - Executor commits any `code_patch` + the queue status update before running, captures `git rev-parse HEAD`, and records it as `commit_hash` on the entry.
@@ -878,4 +882,127 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: probe_loss ends around 1.95-2.10 if stable, beating exp-022. Alternatively diverges with probe rising above 2.5 if lr=0.3 is past stability.
+```
+
+---
+
+```yaml
+id: exp-025-newton-15-baseline
+status: pending
+commit_hash: null
+hypothesis: |
+  Phase 5 retry. The Phase 5 best recipe (epsilon=1.0, lr=0.1, lm-up=1.1, lm-down=0.9)
+  is re-run at num-steps=15 instead of 30. exp-022's trajectory at this recipe touched
+  probe_loss=2.42 at step 5 and 2.31 by step 10, so at step 15 it should land somewhere
+  in the 2.25-2.35 band. Far above SGD's 1.97 bar, but useful as a sanity baseline for
+  the other three runs.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-025-newton-15-baseline
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 2.25-2.35, well above the 1.97 bar.
+```
+
+---
+
+```yaml
+id: exp-026-newton-15-frozen-eps
+status: pending
+commit_hash: null
+hypothesis: |
+  Freeze epsilon at 1.0 (set lm-up=lm-down=1.0). In exp-022 the LM decay let epsilon drop
+  to 0.05 by step 18 and triggered cycle of rejections that drove probe back up from 2.25
+  to 2.30. Freezing epsilon should preserve the early descent slope without that cycling.
+  Same epsilon and lr as exp-025, so the only knob that changes is LM activity.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-026-newton-15-frozen-eps
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 2.10-2.25, closer to the 1.97 bar than exp-025 but still above.
+```
+
+---
+
+```yaml
+id: exp-027-newton-15-frozen-high-lr
+status: pending
+commit_hash: null
+hypothesis: |
+  Frozen epsilon=1.0 plus lr=0.3 (3x exp-026). The frozen-epsilon stability check from
+  exp-026 may make a higher lr safe. exp-024 already tried lr=0.3 with LM on at num-steps=30
+  and ended at 2.42 because LM decayed epsilon at the wrong moments; with epsilon held at
+  1.0, the per-step step magnitude becomes 3x exp-026 without the destabilizing decay.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.3
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-027-newton-15-frozen-high-lr
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 2.00-2.15 if the larger step stays stable, possibly clearing the 1.97 bar.
+```
+
+---
+
+```yaml
+id: exp-028-newton-15-frozen-low-eps
+status: pending
+commit_hash: null
+hypothesis: |
+  Frozen epsilon at 0.5 (half of exp-026), lr=0.1. exp-023 tried epsilon=0.1 with LM on and
+  blew up to probe=2.38 with |Delta| up to 8.2. epsilon=0.5 is a milder lowering and the
+  frozen schedule prevents the late-stage instability. The hypothesis is that the natural
+  scale of the Hessian eigenvalues at this model lies between 0.5 and 1.0, so epsilon=0.5
+  preserves Newton's preconditioning more cleanly than 1.0 without amplifying noise the
+  way 0.1 did.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-028-newton-15-frozen-low-eps
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 2.05-2.20 if the lower damping helps without amplifying noise; otherwise comparable to exp-026.
 ```
