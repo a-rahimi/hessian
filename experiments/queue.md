@@ -853,8 +853,8 @@ predicted_outcome: probe_loss ends around 2.00-2.10 if stable; alternatively jum
 
 ```yaml
 id: exp-024-newton-anchor-high-lr
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 874a9bea80ebf6bcf55ef02653da07b36d8cb70f
 hypothesis: |
   Tripling lr from 0.1 to 0.3 at the Phase 1 best epsilon=1.0. Newton's |Δ| in exp-022's smoke
   was 0.3-1.3 at lr=0.1, so lr=0.3 should produce ~3x larger displacement per step. The Phase 4
