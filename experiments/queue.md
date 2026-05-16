@@ -1170,8 +1170,8 @@ predicted_outcome: rejection_rate drops to 0.3-0.6, probe_loss ends in 2.25-2.30
 
 ```yaml
 id: exp-034-newton-low-lr
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 85179eb01d842056d5d44d36b0e4d681217825b8
 hypothesis: |
   Drop lr 10x (from 0.1 in exp-028 to 0.01) while keeping epsilon=0.5 and batch=64.
   Tests the |Delta|-is-too-large hypothesis alone. lr scales |Delta| uniformly without
@@ -1201,8 +1201,8 @@ predicted_outcome: if direction noise dominates, rejection stays high (>0.8) and
 
 ```yaml
 id: exp-035-newton-high-eps-low-lr
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Both knobs moved: epsilon=5.0 and lr=0.01 at batch=64. This is the most conservative
   Newton step (small magnitude, gradient-mixed direction). If neither exp-033 nor
