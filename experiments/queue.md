@@ -141,8 +141,8 @@ predicted_outcome: probe_loss descends more smoothly than exp-001 with fewer upt
 
 ```yaml
 id: exp-005-small-lr-damped-newton
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done
+commit_hash: f453954ed2221b25c1d798d90f58001e5a865b62
 hypothesis: |
   Comparing exp-001 (epsilon=100, lr=1.0, zero rejections, descent to 2.38) against exp-002
   (epsilon=1.0, lr=0.5, 20 percent rejections, drift to 2.49) suggests the bottleneck is that
