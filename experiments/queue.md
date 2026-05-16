@@ -379,8 +379,8 @@ predicted_outcome: probe_loss descends faster than exp-009 in the first 30 steps
 
 ```yaml
 id: exp-011-depth-sgd-baseline
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done
+commit_hash: 03823d792a4ed5c59daac4661a3b31de84f1da17
 hypothesis: |
   The other natural scaling axis is depth rather than width. This run holds hidden_dim=8 (the
   Phase 1 width) but doubles num_layers from 8 to 16, with image_size=16 and 60 training steps.
