@@ -822,8 +822,8 @@ predicted_outcome: probe_loss ends around 2.05-2.15, beating SGD-at-same-num-ste
 
 ```yaml
 id: exp-023-newton-anchor-low-eps
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 8be6c1fddc58cf3d77d55195d065ba330d8d979e
 hypothesis: |
   Sweep epsilon downward from 1.0 to 0.1. Lower damping means the Newton step is closer to the
   pure inverse-Hessian direction, which should help more when the per-batch Hessian is reasonably
@@ -853,8 +853,8 @@ predicted_outcome: probe_loss ends around 2.00-2.10 if stable; alternatively jum
 
 ```yaml
 id: exp-024-newton-anchor-high-lr
-status: pending
-commit_hash: null  # filled by Executor at run start
+status: running
+commit_hash: TBD
 hypothesis: |
   Tripling lr from 0.1 to 0.3 at the Phase 1 best epsilon=1.0. Newton's |Δ| in exp-022's smoke
   was 0.3-1.3 at lr=0.1, so lr=0.3 should produce ~3x larger displacement per step. The Phase 4
