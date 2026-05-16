@@ -1201,8 +1201,8 @@ predicted_outcome: if direction noise dominates, rejection stays high (>0.8) and
 
 ```yaml
 id: exp-035-newton-high-eps-low-lr
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 7a7b9ecf1b2a5ef70c04432a50d5705f341cb04c
 hypothesis: |
   Both knobs moved: epsilon=5.0 and lr=0.01 at batch=64. This is the most conservative
   Newton step (small magnitude, gradient-mixed direction). If neither exp-033 nor
@@ -1226,4 +1226,93 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: rejection_rate <= 0.3 with very small |Delta|. probe likely ends 2.28-2.32 because the conservative step descends slowly within 15 steps.
+```
+
+---
+
+```yaml
+id: exp-036-newton-eps0.3
+status: running
+commit_hash: TBD
+hypothesis: |
+  Tighten Newton direction by lowering epsilon from 0.5 (exp-028 anchor) to 0.3 while
+  holding lr=0.1 and batch=64. exp-028 sits at 47% reject and probe 2.2679. Lowering
+  epsilon should sharpen the Newton direction and increase |Delta| in low-curvature
+  directions. If the per-batch Hessian is reliable enough, the reject rate stays in the
+  30-60% band and probe improves; if not, reject rate jumps closer to exp-031's 93%.
+flags:
+  --mode: newton
+  --epsilon: 0.3
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-036-newton-eps0.3
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: reject rate 50-70%, probe 2.24-2.28.
+```
+
+---
+
+```yaml
+id: exp-037-newton-eps1.0
+status: pending
+commit_hash: null
+hypothesis: |
+  Raise epsilon from 0.5 (exp-028 anchor) to 1.0 while holding lr=0.1 and batch=64.
+  Test whether slightly more damping gains in accept rate enough to beat exp-028's
+  probe, or whether the direction is already too gradient-like at epsilon=1.0.
+flags:
+  --mode: newton
+  --epsilon: 1.0
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-037-newton-eps1.0
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: reject rate 25-45%, probe 2.27-2.30.
+```
+
+---
+
+```yaml
+id: exp-038-newton-lr0.05
+status: pending
+commit_hash: null
+hypothesis: |
+  Halve lr from 0.1 (exp-028 anchor) to 0.05 while holding epsilon=0.5 and batch=64.
+  Smaller |Delta| in the same Newton direction. Tests whether the exp-028 step was
+  slightly overshooting on average and a more conservative magnitude lands better.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.05
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-038-newton-lr0.05
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: reject rate 35-55%, probe 2.24-2.28.
 ```
