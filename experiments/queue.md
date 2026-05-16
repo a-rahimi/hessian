@@ -1074,8 +1074,8 @@ predicted_outcome: probe_loss ends around 1.95-2.10. If lr=1.0 holds without div
 
 ```yaml
 id: exp-031-newton-lr1-eps0.1
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 326b0cc46f407bd26ab10f3498544cc14aecba18
 hypothesis: |
   Push damping further down with the full Newton step. epsilon=0.1, lr=1.0, frozen LM.
   exp-023 tried epsilon=0.1 with lr=0.1 and LM on, and it blew up because the LM decay
@@ -1105,8 +1105,8 @@ predicted_outcome: probe_loss ends either around 1.90-2.05 if low damping is the
 
 ```yaml
 id: exp-032-newton-batch128-eps0.5
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Larger batch (batch-size=128) reduces per-batch Hessian noise. The Hessian estimated
   on 64 samples is noisy, and Newton amplifies low-curvature directions, so any noise
