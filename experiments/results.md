@@ -57,3 +57,23 @@ hypothesis_supported: partial
 
 Dropping epsilon from 100 to 10 did improve the final probe_loss versus exp-001, from 2.3839 down to 2.3525, and the minimum reached during the run dropped from 2.3800 to 2.2846 at step 12, so the directional prediction that smaller damping yields a larger effective step was correct. The improvement falls short of the predicted 2.10 target, though, because the trajectory got noticeably bumpier rather than just faster: the run produced two LM rejections (steps 6 and 13, rate 0.133) where exp-001 had none, and the spread between adjacent probe values reaches 0.34 around step 6, compared to roughly 0.07 to 0.10 in exp-001. The shapes line up with the damping story across all three runs. At epsilon=100 (exp-001) we get a clean, slow descent that asymptotes to the 2.30 plateau because the effective step is too small to break through. At epsilon=10 (exp-003) the per-step bites are larger and the run actually clears the plateau briefly (four steps below 2.30 between step 8 and step 12) before drifting back up, because once the iterate enters a region where the per-batch quadratic model is less reliable, LM kicks in and the trajectory oscillates around the plateau rather than settling below it. At epsilon=1 (exp-002, complicated further by batch reuse) the step is large enough that the model is wrong often enough to push the run upward overall. So among three runs only exp-003 has touched a probe_loss below 2.30, and even it cannot hold the descent: it visits 2.28 then climbs back to 2.35 over the last three steps. The picture after three runs is that the success criterion of probe_loss < 2.20 in 15 steps is probably not reachable with any single fixed (epsilon, lr) pair on this batch-noise regime, because the regime where steps are large enough to descend is also the regime where single-batch Hessian noise prevents the descent from sticking. Progress over the last five steps is on the order of 0.0016 per step downward at best, which would need roughly 100 more steps to reach 2.20 at this rate, so the budget is the real constraint and either the per-step quality or the batch averaging will have to change to fit inside 15 steps.
 
+---
+
+```yaml
+id: exp-004-large-batch-moderate-eps
+run_name: exp-004-large-batch-moderate-eps
+commit_hash: 147f050ae787a492b8e0a05aeba46e4a55ed545e
+probe_loss_initial: null
+probe_loss_final: null
+probe_loss_min: null
+descent_slope: null
+rejection_rate: null
+rank_among_prior_runs: null  # failed, not ranked
+hypothesis_supported: failed-to-run
+failure_reason: |
+  OOM at step 0 — batch_size=256 caused ~10GB RSS during hessian_inverse_product and SIGKILL.
+  batch_size <= 128 is the practical ceiling on this machine.
+```
+
+This failure invalidates the planned batch-noise isolation test, because exp-004 was designed to attack batch-to-batch Hessian/gradient mismatch from the large-batch-averaging side as a complement to exp-002's batch-reuse approach, and we now have no data point at batch_size=256 to compare against exp-003. The question "is the step-to-step bumpiness driven by batch noise?" therefore remains open on the large-batch axis, although the batch-reuse direction has already been explored: exp-002 showed that freezing the batch for three consecutive steps did not produce visible within-window descent and instead made the trajectory worse than exp-001, which is evidence against batch noise being the dominant problem. The aggregate picture across exp-001 through exp-003 still points to damping level rather than batch noise as the limiting factor. Future plans should constrain `batch-size <= 128` on this machine, and probably `<= 64` for fast iteration, because batch_size=128 was previously observed to push step time to roughly 22s and batch_size=256 is not runnable at all.
+
