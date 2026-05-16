@@ -1006,3 +1006,129 @@ flags:
 code_patch: null
 predicted_outcome: probe_loss ends around 2.05-2.20 if the lower damping helps without amplifying noise; otherwise comparable to exp-026.
 ```
+
+---
+
+```yaml
+id: exp-029-newton-bug-check
+status: running
+commit_hash: TBD
+hypothesis: |
+  Diagnostic check that Newton plumbing works. If the algorithm is correct, then on a
+  single batch held fixed for 15 steps with small damping (epsilon=0.01) and lr=1.0, the
+  training-batch loss should drive close to zero. If it does not, the bug is in the
+  Newton implementation rather than in tuning. probe_loss is incidental; the diagnostic
+  signal is the training loss collapsing to near zero on the held-fixed batch.
+flags:
+  --mode: newton
+  --epsilon: 0.01
+  --lr: 1.0
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --reuse-batch: 15
+  --logdir: runs/auto
+  --run-name: exp-029-newton-bug-check
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: training loss falls to <0.05 within 15 steps if Newton is implemented correctly. probe stays around 2.3 since the training set is 64 fixed samples and there is no generalization to be had.
+```
+
+---
+
+```yaml
+id: exp-030-newton-lr1-eps0.5
+status: pending
+commit_hash: null
+hypothesis: |
+  Newton with the full step (lr=1.0) at moderate damping (epsilon=0.5), frozen LM. Up
+  to now I have been running lr in {0.1, 0.3} which scales the Newton step. The textbook
+  Newton step uses lr=1.0, so if the preconditioner is sound then lr=1.0 should out-descend
+  small-lr variants. exp-027's lr=0.3 ran without divergence at epsilon=1.0, so lr=1.0
+  at epsilon=0.5 is the next natural step.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 1.0
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-030-newton-lr1-eps0.5
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 1.95-2.10. If lr=1.0 holds without divergence, this should be the best Newton result so far and may clear 1.97.
+```
+
+---
+
+```yaml
+id: exp-031-newton-lr1-eps0.1
+status: pending
+commit_hash: null
+hypothesis: |
+  Push damping further down with the full Newton step. epsilon=0.1, lr=1.0, frozen LM.
+  exp-023 tried epsilon=0.1 with lr=0.1 and LM on, and it blew up because the LM decay
+  amplified the step right when the small damping was already aggressive. Freezing LM
+  removes that interaction, and lr=1.0 keeps the step at the textbook Newton magnitude
+  rather than scaling it down.
+flags:
+  --mode: newton
+  --epsilon: 0.1
+  --lr: 1.0
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-031-newton-lr1-eps0.1
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends either around 1.90-2.05 if low damping is the right regime, or above 2.3 if it diverges like exp-023 did. The diagnostic value is high in either direction.
+```
+
+---
+
+```yaml
+id: exp-032-newton-batch128-eps0.5
+status: pending
+commit_hash: null
+hypothesis: |
+  Larger batch (batch-size=128) reduces per-batch Hessian noise. The Hessian estimated
+  on 64 samples is noisy, and Newton amplifies low-curvature directions, so any noise
+  in the eigenstructure gets exaggerated. Doubling the batch halves the gradient
+  variance (and most of the curvature variance), which may matter more than the damping
+  or lr knobs. epsilon=0.5, lr=0.1 matches exp-028's configuration except for batch
+  size, so the comparison isolates the batch-size effect.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 128
+  --num-steps: 15
+  --logdir: runs/auto
+  --run-name: exp-032-newton-batch128-eps0.5
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: probe_loss ends around 2.10-2.20 if batch noise is the dominant issue. If not, it should be comparable to exp-028 (2.27).
+```
