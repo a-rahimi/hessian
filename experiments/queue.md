@@ -1043,8 +1043,8 @@ predicted_outcome: training loss falls to <0.05 within 15 steps if Newton is imp
 
 ```yaml
 id: exp-030-newton-lr1-eps0.5
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 39cd3b738bb7ab0c6ab3ed039b25528115ee0a26
 hypothesis: |
   Newton with the full step (lr=1.0) at moderate damping (epsilon=0.5), frozen LM. Up
   to now I have been running lr in {0.1, 0.3} which scales the Newton step. The textbook
@@ -1074,8 +1074,8 @@ predicted_outcome: probe_loss ends around 1.95-2.10. If lr=1.0 holds without div
 
 ```yaml
 id: exp-031-newton-lr1-eps0.1
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Push damping further down with the full Newton step. epsilon=0.1, lr=1.0, frozen LM.
   exp-023 tried epsilon=0.1 with lr=0.1 and LM on, and it blew up because the LM decay
