@@ -449,8 +449,8 @@ predicted_outcome: probe_loss descends visibly past exp-011's trajectory after r
 
 ```yaml
 id: exp-013-deeper-sgd-baseline
-status: running
-commit_hash: null  # filled by Executor at run start
+status: done
+commit_hash: d4f32d6867eb0f6b1e63d3c5e6a71419269de7c8
 hypothesis: |
   Phase 2 closed with exp-012 beating exp-011 by 0.0302 on probe_loss at depth=16, which is
   directionally correct for the Newton-helps-on-depth thesis but below the 0.05 success
