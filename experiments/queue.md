@@ -1534,8 +1534,8 @@ predicted_outcome: if both knobs matter, trailing-avg training loss ends below e
 
 ```yaml
 id: exp-045-newton-lr-adapt-tol
-status: running
-commit_hash: TBD
+status: done
+commit_hash: e5da7559a3cd39352a962b390603ecb0be87fa4f
 hypothesis: |
   exp-043 demonstrated that the lr plateau-decay trigger fired only once because the
   strict "recent >= prev" condition is rarely satisfied — the avg10 trajectory descends
@@ -1569,4 +1569,82 @@ code_patch: |
   recent >= prev to recent >= prev - tol. So lr decays when the recent window mean
   failed to improve by more than tol over the previous window mean.
 predicted_outcome: lr decays 3-5 times across the run, dropping to 0.025 or 0.0125 by step 40. avg10 final < 2.23 (vs exp-043's 2.24) if the plateau was driven by step-too-large; comparable otherwise.
+```
+
+---
+
+```yaml
+id: exp-046-newton-reuse-batch-diagnostic
+status: running
+commit_hash: TBD
+hypothesis: |
+  Diagnostic for H2 vs H4. Set --reuse-batch=60 so Newton sees the same batch of 64
+  samples for all 60 steps. Switch to --lm-check-batch=same (held-out check is
+  meaningless when there is only one batch). Same recipe otherwise (epsilon=0.5,
+  lr=0.1, lr-adapt with tol=0.02). If avg10 drives to near zero, the algorithm is
+  correct and per-batch Hessian noise is the optimization wall (H2 supported, H4
+  refuted). If avg10 can't get below 2.0 even on a single batch, the algorithm is
+  suspect (H4 supported).
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --adapt-lr-on-plateau: true
+  --lr-decay-window: 10
+  --lr-decay-factor: 0.5
+  --lr-decay-tol: 0.02
+  --lr-min: 0.001
+  --logdir: runs/auto
+  --run-name: exp-046-newton-reuse-batch-diagnostic
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: avg10 drops below 0.5 (most likely 0.01-0.2) if H2; stalls above 2.0 if H4.
+```
+
+---
+
+```yaml
+id: exp-047-newton-batch128-lr-adapt
+status: pending
+commit_hash: null
+hypothesis: |
+  Tests H2 directly by doubling the per-step batch size from 64 to 128. The per-batch
+  Hessian variance falls by approximately a factor of 2, so the Newton-direction noise
+  amplification is halved. If the optimization wall at ~2.24 is per-batch-Hessian
+  noise (H2), the avg10 plateau should drop. If it stays at 2.24, noise isn't the
+  bottleneck. Same recipe otherwise (epsilon=0.5, lr=0.1, lr-adapt with tol=0.02,
+  fresh LM check).
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 128
+  --num-steps: 60
+  --lm-check-batch: fresh
+  --adapt-lr-on-plateau: true
+  --lr-decay-window: 10
+  --lr-decay-factor: 0.5
+  --lr-decay-tol: 0.02
+  --lr-min: 0.001
+  --logdir: runs/auto
+  --run-name: exp-047-newton-batch128-lr-adapt
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: if H2, avg10 below 2.18. If not, avg10 around 2.24.
 ```
