@@ -1457,8 +1457,8 @@ predicted_outcome: rejection rate jumps to 40-70% (vs 50% in exp-039), probe des
 
 ```yaml
 id: exp-043-newton-lr-adapt
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 704d2f40d5b1beab9bc10203b03adff8f850c9cd
 hypothesis: |
   Adapt lr only, leaving epsilon frozen at 0.5. Every 10 steps, compare the mean
   training loss over the last 10 batches to the mean over the previous 10 batches; if
@@ -1499,8 +1499,8 @@ predicted_outcome: trailing-avg training loss drops below 2.20 (vs ~2.25 floor i
 
 ```yaml
 id: exp-044-newton-lr-adapt-eps-adapt
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Adapt both lr (training-loss-plateau decay) and epsilon (LM up/down 1.1/0.9). Tests
   whether epsilon adaptation on top of lr adaptation extracts more descent than lr
