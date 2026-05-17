@@ -1499,8 +1499,8 @@ predicted_outcome: trailing-avg training loss drops below 2.20 (vs ~2.25 floor i
 
 ```yaml
 id: exp-044-newton-lr-adapt-eps-adapt
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 32986f6fde98bcfc3f906d4e99b4c188af263274
 hypothesis: |
   Adapt both lr (training-loss-plateau decay) and epsilon (LM up/down 1.1/0.9). Tests
   whether epsilon adaptation on top of lr adaptation extracts more descent than lr
@@ -1528,4 +1528,45 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: if both knobs matter, trailing-avg training loss ends below exp-043's. If only lr matters, the two end at similar trailing-avg.
+```
+
+---
+
+```yaml
+id: exp-045-newton-lr-adapt-tol
+status: running
+commit_hash: TBD
+hypothesis: |
+  exp-043 demonstrated that the lr plateau-decay trigger fired only once because the
+  strict "recent >= prev" condition is rarely satisfied — the avg10 trajectory descends
+  by tiny amounts (0.001-0.005 per window) that are well below the ~0.05 mini-batch
+  noise floor but still technically positive. Adding --lr-decay-tol=0.02 makes the
+  trigger fire when avg10 fails to improve by *more* than 0.02 in a window. Same
+  config as exp-043 otherwise.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 60
+  --lm-check-batch: fresh
+  --adapt-lr-on-plateau: true
+  --lr-decay-window: 10
+  --lr-decay-factor: 0.5
+  --lr-decay-tol: 0.02
+  --lr-min: 0.001
+  --logdir: runs/auto
+  --run-name: exp-045-newton-lr-adapt-tol
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: |
+  Add --lr-decay-tol flag (default 0.02). Change plateau decay condition from
+  recent >= prev to recent >= prev - tol. So lr decays when the recent window mean
+  failed to improve by more than tol over the previous window mean.
+predicted_outcome: lr decays 3-5 times across the run, dropping to 0.025 or 0.0125 by step 40. avg10 final < 2.23 (vs exp-043's 2.24) if the plateau was driven by step-too-large; comparable otherwise.
 ```

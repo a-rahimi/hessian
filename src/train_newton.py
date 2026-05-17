@@ -313,7 +313,7 @@ def train(args: argparse.Namespace) -> None:
         ):
             recent = sum(list(loss_window)[-window:]) / window
             prev = sum(list(loss_window)[:window]) / window
-            if recent >= prev:
+            if recent >= prev - args.lr_decay_tol:
                 lr = max(lr * args.lr_decay_factor, args.lr_min)
 
         if step_idx % args.log_every == 0:
@@ -436,6 +436,14 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.5,
         help="Multiplicative factor applied to lr on a plateau decay event.",
+    )
+    p.add_argument(
+        "--lr-decay-tol",
+        type=float,
+        default=0.02,
+        help="Plateau tolerance: decay lr when (prev_window_mean - recent_window_mean) "
+        "is at most this value. Set above the mini-batch standard error to avoid being "
+        "tricked by noise-floor descent.",
     )
     p.add_argument("--cpu", action="store_true")
     args = p.parse_args()
