@@ -1680,3 +1680,109 @@ flags:
 code_patch: null
 predicted_outcome: not predicting. just need the number.
 ```
+
+---
+
+```yaml
+id: exp-049-eps-lm-only
+status: running
+commit_hash: TBD
+hypothesis: |
+  Strategy A: LM ε adaptation alone (lm_up=1.1, lm_down=0.9). lr fixed at 0.1 with no
+  plateau adaptation. Tests whether classic LM ε behavior is enough when paired with
+  the fresh-batch LM check we adopted in exp-042. The earlier ε-adaptive runs
+  (exp-022-024) used same-batch LM check and bounced; this isolates whether ε
+  adaptation works under the new acceptance signal.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --lm-check-batch: fresh
+  --logdir: runs/auto
+  --run-name: exp-049-eps-lm-only
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: |
+  Add --lr-lm-on-accept and --lr-lm-on-reject CLI flags (default 1.0 = no-op).
+  When set, multiply lr by the corresponding factor on each LM accept/reject event.
+  Not used in this exp; defaults preserve existing behavior.
+predicted_outcome: trailing-avg training loss in 2.20-2.30 range. The question is the shape: does avg10 keep descending across all 60 steps, or hit a wall like the fixed-ε runs?
+```
+
+---
+
+```yaml
+id: exp-050-eps-lm-plus-lr-plateau
+status: pending
+commit_hash: null
+hypothesis: |
+  Strategy B: LM ε adaptation (lm_up=1.1, lm_down=0.9) plus plateau-triggered lr decay
+  (window=10, tol=0.02). Both adapt but respond to different signals — ε to per-step
+  acceptance, lr to multi-step training-loss progress. This is exp-044 redone with the
+  fresh-batch LM check.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --lm-check-batch: fresh
+  --adapt-lr-on-plateau: true
+  --lr-decay-window: 10
+  --lr-decay-factor: 0.5
+  --lr-decay-tol: 0.02
+  --lr-min: 0.001
+  --logdir: runs/auto
+  --run-name: exp-050-eps-lm-plus-lr-plateau
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: avg10 final at most 2.20 if the two mechanisms compound; otherwise comparable to exp-049.
+```
+
+---
+
+```yaml
+id: exp-051-eps-lr-coupled-lm
+status: pending
+commit_hash: null
+hypothesis: |
+  Strategy C: both ε and lr respond to LM accept/reject per step, coupled symmetrically.
+  On accept: ε *= 0.9, lr *= 1.05. On reject: ε *= 1.1, lr *= 0.7. The intuition is
+  that accept/reject is a fast, local signal about whether the current step matches
+  the loss surface; both step direction (ε) and step magnitude (lr) should shrink
+  together when the step misfires, and grow together when it lands well.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.1
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --lm-check-batch: fresh
+  --lr-lm-on-accept: 1.05
+  --lr-lm-on-reject: 0.7
+  --lr-min: 0.001
+  --logdir: runs/auto
+  --run-name: exp-051-eps-lr-coupled-lm
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: lr should shrink quickly after a few rejects, ε grow. Two failure modes to watch: lr collapses to 0.001 (floor) and run becomes pure SGD-fallback, or ε grows past 5.0 and steps become tiny gradient-like.
+```

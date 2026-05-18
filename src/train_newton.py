@@ -295,12 +295,14 @@ def train(args: argparse.Namespace) -> None:
                     accept = trial_loss < scalars.loss
                 if accept:
                     epsilon = max(epsilon * args.lm_down, args.lm_eps_min)
+                    lr = max(lr * args.lr_lm_on_accept, args.lr_min)
                     scalars.accepted = 1.0
                 else:
                     apply_update(model, update, -effective_lr)
                     apply_update(model, grad_vec, args.sgd_fallback_lr)
                     scalars.step_norm = args.sgd_fallback_lr * vertical_norm(grad_vec)
                     epsilon = min(epsilon * args.lm_up, args.lm_eps_max)
+                    lr = max(lr * args.lr_lm_on_reject, args.lr_min)
                     scalars.accepted = 0.0
             else:
                 raise ValueError(f"unknown mode: {args.mode}")
@@ -436,6 +438,18 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.5,
         help="Multiplicative factor applied to lr on a plateau decay event.",
+    )
+    p.add_argument(
+        "--lr-lm-on-accept",
+        type=float,
+        default=1.0,
+        help="Per-step lr multiplier applied when LM accepts (Newton only). 1.0 disables.",
+    )
+    p.add_argument(
+        "--lr-lm-on-reject",
+        type=float,
+        default=1.0,
+        help="Per-step lr multiplier applied when LM rejects (Newton only). 1.0 disables.",
     )
     p.add_argument(
         "--lr-decay-tol",
