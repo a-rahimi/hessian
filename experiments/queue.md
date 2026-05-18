@@ -1685,8 +1685,8 @@ predicted_outcome: not predicting. just need the number.
 
 ```yaml
 id: exp-049-eps-lm-only
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 07d5abd0a82f19bc95ddde93e53c5294b61ab1d7
 hypothesis: |
   Strategy A: LM ε adaptation alone (lm_up=1.1, lm_down=0.9). lr fixed at 0.1 with no
   plateau adaptation. Tests whether classic LM ε behavior is enough when paired with
@@ -1720,8 +1720,8 @@ predicted_outcome: trailing-avg training loss in 2.20-2.30 range. The question i
 
 ```yaml
 id: exp-050-eps-lm-plus-lr-plateau
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Strategy B: LM ε adaptation (lm_up=1.1, lm_down=0.9) plus plateau-triggered lr decay
   (window=10, tol=0.02). Both adapt but respond to different signals — ε to per-step
