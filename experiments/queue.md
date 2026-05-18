@@ -1575,8 +1575,8 @@ predicted_outcome: lr decays 3-5 times across the run, dropping to 0.025 or 0.01
 
 ```yaml
 id: exp-046-newton-reuse-batch-diagnostic
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 66739c0d4e03119fa56660136ec59e7e1b48c8e7
 hypothesis: |
   Diagnostic for H2 vs H4. Set --reuse-batch=60 so Newton sees the same batch of 64
   samples for all 60 steps. Switch to --lm-check-batch=same (held-out check is
@@ -1647,4 +1647,36 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: if H2, avg10 below 2.18. If not, avg10 around 2.24.
+```
+
+---
+
+```yaml
+id: exp-048-sgd-reuse-batch-baseline
+status: running
+commit_hash: TBD
+hypothesis: |
+  exp-046 showed Newton bottoms out around training loss 1.6 on a single batch of 64
+  samples held fixed for 60 steps. To know whether 1.6 is the optimization-floor of
+  the problem itself or specifically a Newton failure, run SGD on the same fixed batch
+  with matching num-steps=60 (and an extended num-steps=1000 to give SGD ample time).
+  If SGD drives the fixed-batch loss meaningfully below 1.6 at 60 steps, or to near
+  zero at 1000 steps, then Newton's wall at 1.6 is Newton-specific. If SGD also stalls
+  near 1.6, the floor is intrinsic to the model+loss+batch and Newton is doing what
+  it can.
+flags:
+  --mode: sgd
+  --lr: 0.1
+  --batch-size: 64
+  --num-steps: 1000
+  --reuse-batch: 1000
+  --logdir: runs/auto
+  --run-name: exp-048-sgd-reuse-batch-baseline
+  --log-every: 25
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: not predicting. just need the number.
 ```
