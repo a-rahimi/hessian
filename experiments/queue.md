@@ -1720,8 +1720,8 @@ predicted_outcome: trailing-avg training loss in 2.20-2.30 range. The question i
 
 ```yaml
 id: exp-050-eps-lm-plus-lr-plateau
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 59367eae317f9b942d25a6b4f170ab2da369b3e4
 hypothesis: |
   Strategy B: LM ε adaptation (lm_up=1.1, lm_down=0.9) plus plateau-triggered lr decay
   (window=10, tol=0.02). Both adapt but respond to different signals — ε to per-step
@@ -1756,8 +1756,8 @@ predicted_outcome: avg10 final at most 2.20 if the two mechanisms compound; othe
 
 ```yaml
 id: exp-051-eps-lr-coupled-lm
-status: pending
-commit_hash: null
+status: running
+commit_hash: TBD
 hypothesis: |
   Strategy C: both ε and lr respond to LM accept/reject per step, coupled symmetrically.
   On accept: ε *= 0.9, lr *= 1.05. On reject: ε *= 1.1, lr *= 0.7. The intuition is
