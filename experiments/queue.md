@@ -1889,8 +1889,8 @@ predicted_outcome: not predicting.
 
 ```yaml
 id: exp-055-newton-memorize-lr0.3-lm
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 2049ee5
 hypothesis: |
   Refining the lr sweep around the exp-053 sweet spot. Newton on the fixed batch
   reached min loss 1.61 at lr=0.1, 1.16 at lr=0.5, 1.95 at lr=1.0. Optimum is
@@ -1908,6 +1908,39 @@ flags:
   --lm-check-batch: same
   --logdir: runs/auto
   --run-name: exp-055-newton-memorize-lr0.3-lm
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: not predicting.
+```
+
+---
+
+```yaml
+id: exp-056-newton-memorize-aggressive-lm
+status: running
+commit_hash: TBD
+hypothesis: |
+  exp-053 (lr=0.5, lm_up=1.1, lm_down=0.9) reached min loss 1.16 but ε ramped to
+  ~3.0 over the run because rejects (41) outpaced accepts (19). The accumulated ε
+  pushes steps toward gradient-like and away from Newton. More aggressive LM
+  (lm_up=1.5, lm_down=0.5) means one accept halves ε while one reject grows it 50%,
+  so a single accept undoes ~5 rejects. Should keep ε lower when descending.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.5
+  --lm-up: 1.5
+  --lm-down: 0.5
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --logdir: runs/auto
+  --run-name: exp-056-newton-memorize-aggressive-lm
   --log-every: 1
   --num-layers: 8
   --hidden-dim: 24
