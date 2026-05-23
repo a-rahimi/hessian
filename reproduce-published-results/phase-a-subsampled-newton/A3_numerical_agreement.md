@@ -24,7 +24,7 @@ Both relative errors are at float64 machine precision scaled by the conditioning
 
 ## Decision rule
 
-Per Section 5 of [plan.md](../plan.md), A3 with `rel_err < 1e-4` "strongly down-weights **Bug**" on the actual model used for the failing experiments. We saw `rel_err ~ 1e-12`, which is 8 orders of magnitude below the bar. The linear-inverse algorithm at [hessian_inverse_product](../../src/hessian.py#L287) computes the same quantity as the dense solver on the anchor. If A1 or A2 still shows a gap between linear-inverse Newton and sub-sampled Newton, the discrepancy must come from somewhere other than the per-step inverse-Hessian-vector quantity.
+Per Section 5 of [report.md](../report.md), A3 with `rel_err < 1e-4` "strongly down-weights **Bug**" on the actual model used for the failing experiments. We saw `rel_err ~ 1e-12`, which is 8 orders of magnitude below the bar. The linear-inverse algorithm at [hessian_inverse_product](../../src/hessian.py#L287) computes the same quantity as the dense solver on the anchor. If A1 or A2 still shows a gap between linear-inverse Newton and sub-sampled Newton, the discrepancy must come from somewhere other than the per-step inverse-Hessian-vector quantity.
 
 ## Reproducing
 

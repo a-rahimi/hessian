@@ -1,6 +1,6 @@
 # Section 3 sanity check — result
 
-The Section 3 procedure in [plan.md](../plan.md) is implemented as the pytest [test_section3_sanity_check_dense_vs_linear_inverse](../../src/tests/test_hessian.py) inside [src/tests/test_hessian.py](../../src/tests/test_hessian.py). The test passes.
+The Section 3 procedure in [report.md](../report.md) is implemented as the pytest [test_section3_sanity_check_dense_vs_linear_inverse](../../src/tests/test_hessian.py) inside [src/tests/test_hessian.py](../../src/tests/test_hessian.py). The test passes.
 
 ## Setup
 
@@ -21,7 +21,7 @@ All values are at or near `float64` machine epsilon (`~2e-16`) scaled by the con
 
 ## Decision rule
 
-Per Section 3 of [plan.md](../plan.md), the decision rule is "if the relative error is `< 1e-4` for all ε tested, the algorithm is correct on tiny problems and **Bug** is unlikely on small models, so we proceed to Phase A." The check passes. We proceed to Phase A.
+Per Section 3 of [report.md](../report.md), the decision rule is "if the relative error is `< 1e-4` for all ε tested, the algorithm is correct on tiny problems and **Bug** is unlikely on small models, so we proceed to Phase A." The check passes. We proceed to Phase A.
 
 ## Reproducing
 

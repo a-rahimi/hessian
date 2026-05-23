@@ -1,6 +1,6 @@
 # Phase E — cross-phase synthesis
 
-This document synthesizes Phases A, B, C, and D into a single read on why our linear-time inverse-Hessian Newton at [hessian_inverse_product](../../src/hessian.py#L287) stalls on the Phase 5 anchor where published second-order methods do not. The original plan at [plan.md](../plan.md) framed the diagnosis as a three-way classification between **Bug**, **Damping**, and **Scale**. The data forces a fourth option, which we name **Wrapper** below, because the actual evidence rules out all three of the original families.
+This document synthesizes Phases A, B, C, and D into a single read on why our linear-time inverse-Hessian Newton at [hessian_inverse_product](../../src/hessian.py#L287) stalls on the Phase 5 anchor where published second-order methods do not. The original plan at [report.md](../report.md) framed the diagnosis as a three-way classification between **Bug**, **Damping**, and **Scale**. The data forces a fourth option, which we name **Wrapper** below, because the actual evidence rules out all three of the original families.
 
 ## TL;DR
 
@@ -23,11 +23,11 @@ All numbers below are on the **Phase 5 anchor** (`SequenceOfDenseBlocks`, `num_l
 | HF in raw-Hessian mode (Phase C)                                               | `H + λ`            | CG truncation + Martens LM trust ratio      | **2.086** at step 253 (NaN @447) | **0.21** at step 247                | ~300  |
 | Saddle-free Newton (Phase D, k=20)                                             | `|H| + ε I` rank-k | same-batch loss-decrease LM (same as ours) | (see [phase-d](../phase-d-saddle-free-newton/README.md)) | (see [phase-d](../phase-d-saddle-free-newton/README.md)) | 100  |
 
-Cross-phase reference: **K-FAC on the canonical deep autoencoder** (Phase B): test MSE `5.76` after 15000 K-FAC steps vs. `16.72` after 15000 SGD-momentum steps; K-FAC matches SGD's 15k-step number at step 5k. Reproduction is partial but qualitatively clean and matches Martens & Grosse 2015 Figure 1. The plan's "is there any working second-order baseline on our stack" gate (Section 5 of [plan.md](../plan.md)) is satisfied.
+Cross-phase reference: **K-FAC on the canonical deep autoencoder** (Phase B): test MSE `5.76` after 15000 K-FAC steps vs. `16.72` after 15000 SGD-momentum steps; K-FAC matches SGD's 15k-step number at step 5k. Reproduction is partial but qualitatively clean and matches Martens & Grosse 2015 Figure 1. The plan's "is there any working second-order baseline on our stack" gate (Section 5 of [report.md](../report.md)) is satisfied.
 
 ## Why the Bug / Damping / Scale framing breaks
 
-The plan's decision table in Section 5 of [plan.md](../plan.md) assumed each phase outcome would localize to one family. The actual outcomes:
+The plan's decision table in Section 5 of [report.md](../report.md) assumed each phase outcome would localize to one family. The actual outcomes:
 
 - **Section 3 + Phase A3** pass cleanly → **Bug at the per-step level is ruled out.** Both the toy `P=28` Hessian and the anchor's `P=22128` Hessian round-trip through `dense solve` vs. `hessian_inverse_product` at `rel_err ≤ 5e-12` in float64.
 - **Phase C raw-Hessian HF succeeds** on the same `H` we invert → **Damping is ruled out.** If the issue were that `H + ε I` cannot be a descent direction on an indefinite `H`, HF in raw-Hessian mode could not reach `0.21` either — but it does.

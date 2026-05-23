@@ -1,6 +1,6 @@
 # Phase B: reproduce K-FAC on the canonical MNIST deep autoencoder
 
-This phase implements Step B of [plan.md](../plan.md), which reproduces the
+This phase implements Step B of [report.md](../report.md), which reproduces the
 canonical second-order benchmark from Martens & Grosse 2015 Figure 1: the
 Hinton & Salakhutdinov 2006 deep MNIST autoencoder optimized with K-FAC
 versus an SGD-with-momentum baseline.
@@ -127,7 +127,7 @@ adaptive learning rate (quadratic-model rule) recipes from the K-FAC
 paper. Our run uses random Xavier initialization and a fixed K-FAC
 damping schedule, so it lands short of the asymptote.
 
-The qualitative success criterion in [plan.md](../plan.md) — "a 5-10k
+The qualitative success criterion in [report.md](../report.md) — "a 5-10k
 update run that shows K-FAC clearly outpacing SGD" — is met: at step 5000
 K-FAC reaches the MSE that SGD only reaches at step 15000. The Phase B
 gate in Section 5 of the plan is therefore satisfied; we have a working

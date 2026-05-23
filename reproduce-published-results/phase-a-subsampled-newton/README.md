@@ -1,6 +1,6 @@
 # Phase A — Sub-sampled Newton on our anchor
 
-This directory implements **Phase A** of [plan.md](../plan.md). The goal of the
+This directory implements **Phase A** of [report.md](../report.md). The goal of the
 phase is to give our linear-inverse Newton at
 [hessian_inverse_product](../../src/hessian.py#L287) a "ground-truth"
 counterpart on the actual Phase 5 anchor, so any gap between linear-inverse
@@ -61,7 +61,7 @@ eps=0.1   rel_err = 4.466e-12
 ```
 
 That is 8 orders of magnitude below the `< 1e-4` bar from Section 3 of
-[plan.md](../plan.md). The linear-inverse algorithm computes the same step as
+[report.md](../report.md). The linear-inverse algorithm computes the same step as
 the dense solver on the actual anchor model.
 
 ## A1 — Sub-sampled Newton on full CIFAR-10
@@ -120,7 +120,7 @@ A2 reads as: sub-sampled Newton, which by A3's check computes the same step as o
 
 ## Read on Bug / Damping / Scale
 
-Phase A's verdict is that the original Bug / Damping / Scale framing from Section 1 of [plan.md](../plan.md) is too coarse for the actual finding:
+Phase A's verdict is that the original Bug / Damping / Scale framing from Section 1 of [report.md](../report.md) is too coarse for the actual finding:
 
 - **Bug is ruled out at the per-step level.** Section 3 (rel_err ~1e-13 on the tiny model) and A3 (rel_err ~1e-12 on the real anchor) jointly show that [hessian_inverse_product](../../src/hessian.py#L287) computes exactly the dense `(H + ε I)^{-1} g` it claims to. There is no sign-or-transposition error in the block-factored solver path.
 - **Damping is not refuted but is not the main story.** Sub-sampled Newton at `ε = 1.0` and the survivable `lr = 0.01` reaches the same `~2.26` band on the fixed batch that our linear-inverse Newton plateaus in. Increasing ε would only damp further, and decreasing ε made things diverge — so the standard `H + ε I` shape is not by itself the recipe that closes the gap to SGD.

@@ -1,7 +1,7 @@
 # Phase C — Hessian-Free on the autoencoder and on our Phase 5 anchor
 
 This is the Phase C deliverable from
-[reproduce-published-results/plan.md](../plan.md). It runs the published
+[reproduce-published-results/report.md](../report.md). It runs the published
 Hessian-Free optimizer of Martens 2010 on two problems and compares it to
 both SGD-with-momentum and to our project's linear-inverse Newton in
 [src/hessian.py](../../src/hessian.py#L287). The result localizes our
@@ -95,7 +95,7 @@ Fixed-batch memorization (`--fixed-batch`, single 64-sample batch held for
 | Our Newton ref  | 1.16                             | -    |
 | SGD ref         | 0.19                             | -    |
 
-### Decision-rule readout (Section 5 of [plan.md](../plan.md))
+### Decision-rule readout (Section 5 of [report.md](../report.md))
 
 The C2 row of the plan's decision table reads:
 

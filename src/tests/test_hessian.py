@@ -611,7 +611,7 @@ class TestSequenceOfBlocks:
 
 def test_section3_sanity_check_dense_vs_linear_inverse(capsys):
     """
-    Section 3 sanity check from reproduce-published-results/plan.md.
+    Section 3 sanity check from reproduce-published-results/report.md.
 
     Build a tiny SequenceOfDenseBlocks, materialize the full dense Hessian H via
     torch.func.hessian on the cross-entropy loss, and for several values of ε
