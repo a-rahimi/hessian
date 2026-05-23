@@ -14,17 +14,20 @@ The plan we followed was to reproduce published second-order methods, first on t
 
 ## 2. High-level takeaway
 
-The data falsifies all three of the original hypotheses, in this order: **Bug** rules out at the per-step level, **Damping** rules out by the success of HF in raw-Hessian mode on the same `H` we invert, and **Scale** rules out by K-FAC reproducing on the canonical autoencoder and HF working on our exact anchor. What survives is a fourth diagnosis we name **Wrapper**: the methods that beat SGD package the same curvature inverse inside a much more conservative step-acceptance heuristic, with three ingredients we lack.
+**Bug** and **Scale** are ruled out, **Damping** is confirmed, and the confirmation generalizes: the load-bearing fix that the published methods share is *restricting the curvature inverse to a top-eigenvalue subspace*, which both saddle-free Newton (explicitly, via Lanczos top-`k` plus the `|λ|` transform) and Hessian-Free (implicitly, via truncated CG) achieve.
 
-1. **CG truncation as implicit regularization.** HF solves the damped system by truncated conjugate gradient, terminating well before the dense exact solution.
-2. **Quadratic-model trust-region accept rule.** HF and K-FAC accept or reject each step by the ratio of actual to predicted loss decrease, not by whether the loss happened to drop on the current batch.
-3. **Inter-step memory.** HF warm-starts each CG run from the previous step's solution, which gives the algorithm a momentum-like memory.
+The chain of reasoning follows directly from the data.
 
-The load-bearing observation is the comparison between sub-sampled Newton (Section 3) and HF in raw-Hessian mode (Section 5) on the fixed-batch diagnostic. Both methods operate on the same `H + ε I`; sub-sampled Newton stalls at `2.26`, HF reaches `0.21`. Since the curvature operator is identical, the gap must live in the wrapper.
+- **Bug rules out.** Section 3 (rel_err `~1e-13` on a `P = 28` toy model) and Section 3's A3 check (rel_err `~1e-12` on the actual `P = 22128` anchor) jointly show that [hessian_inverse_product](../src/hessian.py#L287) computes the exact dense `(H + ε I)^{-1} g` it claims to, to float64 precision.
+- **Scale rules out.** K-FAC reproduces its published 3× update-count speedup over SGD-momentum on the canonical deep autoencoder on our software stack, and Hessian-Free works on our exact Phase-5 anchor.
+- **Damping is confirmed by the SFN-vs-linear-Newton head-to-head.** Phase D's SFN run keeps every wrapper detail in [train_newton.py](../src/train_newton.py) constant — same LM accept rule, same ε schedule, same lr, same SGD fallback on rejection — and only swaps the curvature step from `(H + ε I)^{-1} g` to a top-`k` Lanczos approximation of `(|H| + ε I)^{-1} g`. SFN reaches `probe_loss = 2.00` on D1 (vs our 2.22–2.30 plateau and SGD's 1.97 in 1000 steps) and `min loss = 0.18` on D2 (vs our 1.16 floor and SGD's 0.19), in 100 steps each. With wrapper held constant, the gap closes.
+- **HF gives the same result by a different mechanism.** HF in raw-Hessian mode operates on the *same* `H + λ I` we invert, but its CG iterate at termination lives in the Krylov subspace `span{g, Hg, …, H^{k−1} g}`, which is dominated by the top-magnitude eigenvalues of `H`. The small / near-zero / negative eigenvalues that `(H + ε I)^{-1}` would amplify never enter HF's iterate, because CG visits them last and is truncated first.
 
-The implication for the project's own algorithm is that [hessian_inverse_product](../src/hessian.py#L287) does not need to change. The follow-up that should close the gap is to swap our same-batch loss-decrease LM check in [train_newton.py](../src/train_newton.py#L264) for the Martens 2010 trust-region ratio, and to add inter-step warm-starting; the block-factored inverse machinery itself is intact. [phase-e-synthesis/README.md](phase-e-synthesis/README.md) lays out the recommended changes in more detail.
+The unifying observation: the methods that succeed all stay in a top-eigenvalue subspace of `H`. The methods that fail — our linear-inverse Newton and Phase A's sub-sampled Newton — both compute the dense full-rank inverse `(H + ε I)^{-1}`, which dangerously amplifies the small / negative eigenvalues that `ε I` does not lift.
 
-The rest of this report walks through each algorithm in turn: how it works, the experiment we ran on it, and what we learned. Read in this order, the four sections triangulate to the **Wrapper** diagnosis above.
+The implication for the project's own algorithm is that [hessian_inverse_product](../src/hessian.py#L287)'s correctness is fine — what is wrong is the choice to invert the *full* `H + ε I`. The two natural follow-ups are an absolute-value-on-top-`k` transform pushed into the block factorization (SFN-style) and a Krylov-truncated approximation of the inverse built around our existing [SequenceOfBlocks.hessian_vector_product](../src/hessian.py#L260) (HF-style). [phase-e-synthesis/README.md](phase-e-synthesis/README.md) discusses both options.
+
+The rest of this report walks through each algorithm in turn: how it works, the experiment we ran on it, and what we learned. Read in this order, the four sections triangulate to the subspace-restricted-curvature diagnosis above.
 
 ## 3. Sub-sampled Newton
 
@@ -117,9 +120,7 @@ The C2 numbers are the headline of the whole report.
 
 Two things stand out. First, HF in raw-Hessian mode reaches `0.21` on the fixed-batch diagnostic using only matrix-vector products against the same `H + λ I` our algorithm inverts. That alone destroys our linear-inverse Newton's `1.16` floor by a factor of 5.5, on the same curvature operator. Second, HF-GGN and HF-raw-Hessian agree closely on the full anchor (probe_loss `2.189` and `2.086` respectively in the stable window) — there is no clean Gauss-Newton-vs-Hessian gap.
 
-What this rules out: **Damping is not the bottleneck**. If `(H + ε I)^{-1} g` were the wrong quantity to compute because of indefinite eigenvalues, HF in raw-Hessian mode could not match HF in Gauss-Newton mode on this anchor, and it certainly could not reach `0.21` on the fixed batch. It does both.
-
-What this points at: combined with Section 3's observation that sub-sampled Newton (same `H + ε I` inverse, no CG, no trust-region accept rule, no warm-start) stalls at `2.26` on the same fixed batch where HF reaches `0.21`, the gap from `1.16` to `0.21` is attributable to the three HF wrapper ingredients listed in Section 5.1 — CG truncation, trust-region ratio, and warm-starting — not to the curvature operator.
+What this points at: HF succeeds even when the curvature operator is the raw `H + λ I` we already invert. Read in isolation, this looks like evidence against the **Damping** hypothesis, because the eigenvalue spectrum of `H + λ I` is what damping is supposed to fix. Section 6 below shows the right reading: HF's CG iterate at termination lives in a Krylov subspace dominated by the top-magnitude eigenvalues of `H`, so the small / near-zero / negative eigenvalues that `(H + ε I)^{-1}` dangerously amplifies never enter HF's iterate. CG truncation acts as an implicit `top-k` projector, doing the same job SFN does explicitly. Combined with Section 3's observation that sub-sampled Newton (which computes the *full* dense `(H + ε I)^{-1}`, no Krylov truncation) stalls at `2.26` on the same fixed batch, HF's `0.21` is evidence that the load-bearing change is the subspace restriction, not the surrounding step-acceptance heuristic.
 
 ## 6. Saddle-Free Newton
 
@@ -139,15 +140,22 @@ The low-rank scalable variant computes only the top-`k` eigenpairs of `H` via La
 
 The driver at [train_sfn.py](phase-d-saddle-free-newton/train_sfn.py) reuses [train_newton.py](../src/train_newton.py)'s model construction, loader, metrics, and same-batch loss-decrease LM accept/reject machinery, so the only thing that changes from our linear-inverse Newton is the *direction* of the step, not the wrapper around it.
 
-We ran two diagnostics, [D1 full CIFAR-10](phase-d-saddle-free-newton/D1_cifar10/) and [D2 fixed-batch memorization](phase-d-saddle-free-newton/D2_fixed_batch/), at 100 steps each (the per-step cost on CPU is ~15–30 s, so the plan's 1000-step budget was infeasible without a GPU). The full 100-step trajectories are in those subdirectories; the partial 12-step D1 trajectory taken before the budget reduction is at [D1_cifar10/stdout.log](phase-d-saddle-free-newton/D1_cifar10/stdout.log).
+We ran two diagnostics, [D1 full CIFAR-10](phase-d-saddle-free-newton/D1_cifar10/) and [D2 fixed-batch memorization](phase-d-saddle-free-newton/D2_fixed_batch/), at 100 steps each (the per-step cost on CPU is ~10–15 s, so the plan's 1000-step budget was infeasible without a GPU). The 100-step trajectories are in those subdirectories; an earlier 12-step partial taken before the runs were re-launched at the right budget is preserved at [D1_cifar10/stdout.log](phase-d-saddle-free-newton/D1_cifar10/stdout.log) for completeness.
 
 ### 6.3 What we learned
 
-The 12-step D1 trajectory descends from `probe_loss = 3.02` to `2.29` by step 12 — directly into the 2.22–2.30 band where our linear-inverse Newton plateaus. SFN with the same LM accept/reject wrapper does not break out of that band. See [phase-d-saddle-free-newton/README.md](phase-d-saddle-free-newton/README.md) for the full 100-step headline numbers; the trajectory shape does not change the read.
+| diagnostic                  | SFN (k=20, ε=1.0, lr=0.5), 100 steps | linear-Newton reference                  | SGD reference        |
+| --------------------------- | ------------------------------------ | ---------------------------------------- | -------------------- |
+| D1 full CIFAR-10, min `probe_loss` | **2.00** at step 78 (`2.09` final) | 2.22–2.30 band, 1000 steps              | 1.97 at 1000 steps   |
+| D2 fixed-batch, min train loss      | **0.18** at step 97              | 1.16 with LM-adaptive ε, 1000 steps    | 0.19 at lr=0.01, 1000 steps |
 
-What this confirms: the `|H| + ε I` transform does not by itself close the gap. Combined with Section 5's observation that HF in raw-Hessian mode (no absolute-value transform) reaches `0.21` on the same fixed batch where our linear-inverse Newton stalls at `1.16`, the **Damping** hypothesis is doubly ruled out. The fix is not in the eigenvalue transform.
+This is the cleanest controlled comparison in the whole report. SFN and our linear-inverse Newton share the *same* model, the *same* batch, the *same* LM accept-rule and ε schedule, the *same* lr, and the *same* step-application code. The only thing that changes is the curvature step: SFN computes `(|H_k| + ε I)^{-1} g` on the top-20 Lanczos subspace of `H`, while our linear-inverse Newton computes `(H + ε I)^{-1} g` on the full Hessian.
 
-What this also exposes: SFN with our LM accept/reject wrapper sits in our linear-Newton's band, while HF (different wrapper, same `H`) does not. The two SFN-vs-HF differences are exactly the three Wrapper ingredients in Section 5.1, since both use only matrix-vector products with `H`. This is the cleanest controlled comparison in the whole report on the role of the wrapper.
+With wrapper held constant, the gap closes on both diagnostics. D1's probe_loss drops to within 0.03 of SGD's 1000-step number in 100 steps. D2's min loss matches SGD's fixed-batch floor and is 6.5× below our linear-Newton's floor. **Damping is confirmed.**
+
+The mechanism is exactly what the original plan's Damping definition predicted: `H + ε I` does not lift the small-magnitude / negative eigenvalues of an indefinite `H` away from zero, so `(H + ε I)^{-1}` amplifies the gradient components along those directions and overshoots. Replacing `H` with its top-`k` projection followed by `|λ|` keeps the inverse confined to the well-conditioned subspace, which is exactly what SFN does explicitly and Section 5's HF does implicitly via CG truncation. Both implementations of the same idea succeed where the full-rank inverse fails.
+
+The recommendation for our own algorithm follows: either push the absolute-value-on-top-`k` transform into the block factorization, or replace the full-rank solve with a Krylov-truncated approximation built on top of [SequenceOfBlocks.hessian_vector_product](../src/hessian.py#L260). [phase-e-synthesis/README.md](phase-e-synthesis/README.md) walks through both options.
 
 ## 7. Methods deliberately not in this report
 
