@@ -62,6 +62,11 @@ class StepScalars:
     accepted: float = 1.0
     step_seconds: float = 0.0
     wall_clock_s: float = 0.0
+    cos_step_neg_grad: float = 0.0
+    pred_loss_change: float = 0.0
+    actual_loss_change: float = 0.0
+    h_eig_min: float = 0.0
+    h_eig_max: float = 0.0
 
 
 class StepLogger:
@@ -153,7 +158,7 @@ def dense_newton_step(
     grad_vec: bpm.Vertical,
     epsilon: float,
     method: str,
-) -> bpm.Vertical:
+) -> tuple[bpm.Vertical, dict[str, float]]:
     """Compute the Newton step by materializing the full Hessian and solving / pinv-ing it."""
     def loss_fn(params):
         return torch.func.functional_call(model, params, (x, y))
@@ -170,13 +175,25 @@ def dense_newton_step(
     else:
         raise ValueError(f"unknown dense newton method: {method}")
 
+    with torch.no_grad():
+        eigvals = torch.linalg.eigvalsh(H)
+        diagnostics = {
+            "cos_step_neg_grad": float(
+                (g_flat @ x_flat) / (g_flat.norm() * x_flat.norm() + 1e-30)
+            ),
+            "pred_linear": float(g_flat @ x_flat),
+            "pred_quadratic": float(x_flat @ H @ x_flat),
+            "h_eig_min": float(eigvals.min()),
+            "h_eig_max": float(eigvals.max()),
+        }
+
     blocks = []
     offset = 0
     for block in grad_vec.flat:
         n = block.shape[0]
         blocks.append(x_flat[offset : offset + n].unsqueeze(1))
         offset += n
-    return bpm.Vertical(blocks)
+    return bpm.Vertical(blocks), diagnostics
 
 
 def apply_update(model: SequenceOfDenseBlocks, update: bpm.Vertical, lr: float) -> None:
@@ -304,9 +321,12 @@ def train(args: argparse.Namespace) -> None:
                 if args.newton_step_method == "custom":
                     update = model.hessian_inverse_product(x, y, grad_vec, epsilon)
                 else:
-                    update = dense_newton_step(
+                    update, diagnostics = dense_newton_step(
                         model, x, y, grad_vec, epsilon, args.newton_step_method
                     )
+                    scalars.cos_step_neg_grad = diagnostics["cos_step_neg_grad"]
+                    scalars.h_eig_min = diagnostics["h_eig_min"]
+                    scalars.h_eig_max = diagnostics["h_eig_max"]
                 raw_step_norm = lr * vertical_norm(update)
                 if args.max_step_norm is not None and raw_step_norm > args.max_step_norm:
                     effective_lr = lr * args.max_step_norm / raw_step_norm
@@ -332,6 +352,12 @@ def train(args: argparse.Namespace) -> None:
                     with torch.no_grad():
                         trial_loss = float(model(x, y).item())
                     accept = trial_loss < scalars.loss
+                if args.newton_step_method != "custom" and args.lm_check_batch == "same":
+                    scalars.actual_loss_change = trial_loss - scalars.loss
+                    scalars.pred_loss_change = (
+                        -effective_lr * diagnostics["pred_linear"]
+                        + 0.5 * effective_lr ** 2 * diagnostics["pred_quadratic"]
+                    )
                 if accept:
                     epsilon = max(epsilon * args.lm_down, args.lm_eps_min)
                     lr = max(lr * args.lr_lm_on_accept, args.lr_min)
@@ -363,6 +389,12 @@ def train(args: argparse.Namespace) -> None:
                 extra = (
                     f" ε={scalars.epsilon:.2e} {'ok' if scalars.accepted else 'REJ'}"
                 )
+                if args.newton_step_method != "custom":
+                    extra += (
+                        f" cos(Δ,-g)={scalars.cos_step_neg_grad:+.3f}"
+                        f" pred={scalars.pred_loss_change:+.4f} actual={scalars.actual_loss_change:+.4f}"
+                        f" eig=[{scalars.h_eig_min:+.2e},{scalars.h_eig_max:+.2e}]"
+                    )
             print(
                 f"[{args.mode}] step={step_idx:4d} "
                 f"loss={scalars.loss:.4f} avg10={scalars.train_loss_avg10:.4f} probe={scalars.probe_loss:.4f} probe_acc={scalars.probe_accuracy:.3f} bacc={scalars.batch_accuracy:.3f} "

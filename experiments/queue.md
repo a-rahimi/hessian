@@ -1954,8 +1954,8 @@ predicted_outcome: not predicting.
 
 ```yaml
 id: exp-057-newton-memorize-dense-solve
-status: running
-commit_hash: TBD
+status: done
+commit_hash: f49be9802c1cdb76d28104db34e5eeb2b0d17d05
 hypothesis: |
   Replicate exp-053 (the best custom-Newton recipe on the fixed batch: ε=0.5 LM-adapt,
   lr=0.5, num-steps=60, reuse-batch=60) but compute the Newton step via dense
@@ -1990,4 +1990,45 @@ code_patch: |
   pinv(H+εI). Reshapes the flat result back to a bpm.Vertical matching the layer
   layout. Default behavior (custom) unchanged.
 predicted_outcome: not predicting numbers. The signal is whether the min loss differs from custom's 1.16. ~4 min wall clock (1.3s/step for solve + 2.2s/step for func.hessian).
+```
+
+---
+
+```yaml
+id: exp-058-newton-diagnostic
+status: running
+commit_hash: TBD
+hypothesis: |
+  Diagnostic: instrument dense-solve to log per-step (a) cos(Δ, -g) — direction
+  agreement with steepest descent, (b) pred_loss_change at effective_lr from the
+  local quadratic model, (c) actual_loss_change on the same batch, (d) H eigenvalue
+  range [min, max]. Run at the exp-053 recipe (ε=0.5 LM-adaptive, lr=0.5, fixed
+  batch, num-steps=60). Goal is to identify which failure mode is operating from
+  the per-step trace: ε washing out H (cos ≈ 1), indefinite Hessian (cos < 0),
+  or non-quadratic geometry (pred ≠ actual).
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.5
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --newton-step-method: dense-solve
+  --logdir: runs/auto
+  --run-name: exp-058-newton-diagnostic
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: |
+  Add diagnostics to dense_newton_step: cos(step, g), separate linear and quadratic
+  parts of the predicted loss change, eigvalsh(H) min/max. In the main loop, compute
+  pred_loss_change at effective_lr and actual_loss_change (trial_loss - current loss
+  when lm-check-batch==same). New StepScalars fields: cos_step_neg_grad,
+  pred_loss_change, actual_loss_change, h_eig_min, h_eig_max. Log line extended.
+predicted_outcome: diagnostic data — analysis comes after.
 ```
