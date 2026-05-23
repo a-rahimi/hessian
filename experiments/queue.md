@@ -1791,8 +1791,8 @@ predicted_outcome: lr should shrink quickly after a few rejects, ε grow. Two fa
 
 ```yaml
 id: exp-052-newton-memorize-lr0.01
-status: running
-commit_hash: TBD
+status: done
+commit_hash: c987c945433456f876cb867569f26150768ec153
 hypothesis: |
   Mirror the SGD recipe that memorized the fixed batch (lr=0.01 reaches loss 0.19) but
   with Newton. Same model+batch, ε=0.5 frozen, lr=0.01 fixed, same-batch LM check
@@ -1818,4 +1818,37 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: not predicting numbers. Watching the trajectory shape.
+```
+
+---
+
+```yaml
+id: exp-053-newton-memorize-lr0.5-lm
+status: running
+commit_hash: TBD
+hypothesis: |
+  exp-052 showed Newton at lr=0.01 reaches only 2.02 on the fixed batch — smaller
+  step makes things worse, not better. The Newton direction at small lr is too
+  conservative to descend efficiently. Try the opposite: lr=0.5 (5x the exp-046
+  lr), with LM ε adaptation (lm-up=1.1, lm-down=0.9) so ε grows when the trial
+  step misfires. Goal: more aggressive Newton step with LM acting as a safety net.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.5
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --logdir: runs/auto
+  --run-name: exp-053-newton-memorize-lr0.5-lm
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: not predicting. need data.
 ```
