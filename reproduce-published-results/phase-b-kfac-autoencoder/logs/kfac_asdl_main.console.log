@@ -1,0 +1,80 @@
+[kfac_asdl_main] device=mps asdl-KFAC fisher_type=fisher_mc lr=0.3 momentum=0.9 batch_size=1000 steps=15000 eps=0.03 update_freq=20
+/Users/arahimi/hessian/.venv/lib/python3.14/site-packages/asdl/utils.py:96: UserWarning: The operator 'aten::cholesky_inverse' is not currently supported on the MPS backend and will fall back to run on the CPU. This may have performance implications. (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/aten/src/ATen/mps/MPSFallback.mm:15.)
+  return torch.cholesky_inverse(u)
+[kfac_asdl_main] step=     0  train_mse= 3.1931  test_bce=242.1272  test_mse=60.3920  t=    0.8s
+[kfac_asdl_main] step=   200  train_mse= 0.8906  test_bce=214.5481  test_mse=53.3469  t=    7.4s
+[kfac_asdl_main] step=   400  train_mse= 0.8804  test_bce=212.3162  test_mse=53.2939  t=   15.6s
+[kfac_asdl_main] step=   600  train_mse= 0.8914  test_bce=208.9860  test_mse=53.0933  t=   26.9s
+[kfac_asdl_main] step=   800  train_mse= 0.8864  test_bce=206.6857  test_mse=52.9376  t=   36.2s
+[kfac_asdl_main] step=  1000  train_mse= 0.8727  test_bce=206.7858  test_mse=52.9988  t=   44.5s
+[kfac_asdl_main] step=  1200  train_mse= 0.8752  test_bce=206.5183  test_mse=52.9068  t=   53.0s
+[kfac_asdl_main] step=  1400  train_mse= 0.8892  test_bce=206.6340  test_mse=52.9626  t=   62.8s
+[kfac_asdl_main] step=  1600  train_mse= 0.8841  test_bce=206.4534  test_mse=52.9123  t=   69.1s
+[kfac_asdl_main] step=  1800  train_mse= 0.8461  test_bce=208.6522  test_mse=51.9335  t=   75.5s
+[kfac_asdl_main] step=  2000  train_mse= 0.7537  test_bce=185.7199  test_mse=45.1646  t=   81.6s
+[kfac_asdl_main] step=  2200  train_mse= 0.7100  test_bce=177.5298  test_mse=42.1400  t=   89.2s
+[kfac_asdl_main] step=  2400  train_mse= 0.6642  test_bce=172.2899  test_mse=39.7656  t=   94.5s
+[kfac_asdl_main] step=  2600  train_mse= 0.5924  test_bce=160.3163  test_mse=35.4749  t=  100.0s
+[kfac_asdl_main] step=  2800  train_mse= 0.5640  test_bce=156.2429  test_mse=34.3756  t=  107.3s
+[kfac_asdl_main] step=  3000  train_mse= 0.5195  test_bce=144.4708  test_mse=30.2902  t=  112.6s
+[kfac_asdl_main] step=  3200  train_mse= 0.4575  test_bce=137.7172  test_mse=28.1336  t=  118.8s
+[kfac_asdl_main] step=  3400  train_mse= 0.4259  test_bce=131.5744  test_mse=25.8539  t=  125.2s
+[kfac_asdl_main] step=  3600  train_mse= 0.4031  test_bce=126.6125  test_mse=24.1716  t=  133.1s
+[kfac_asdl_main] step=  3800  train_mse= 0.3888  test_bce=122.6938  test_mse=22.9703  t=  138.8s
+[kfac_asdl_main] step=  4000  train_mse= 0.3714  test_bce=118.9123  test_mse=21.7328  t=  144.3s
+[kfac_asdl_main] step=  4200  train_mse= 0.3416  test_bce=115.3848  test_mse=20.6059  t=  152.3s
+[kfac_asdl_main] step=  4400  train_mse= 0.3292  test_bce=112.4512  test_mse=19.6647  t=  157.4s
+[kfac_asdl_main] step=  4600  train_mse= 0.3201  test_bce=109.2677  test_mse=18.6781  t=  162.0s
+[kfac_asdl_main] step=  4800  train_mse= 0.3088  test_bce=106.5272  test_mse=17.8326  t=  168.3s
+[kfac_asdl_main] step=  5000  train_mse= 0.2846  test_bce=102.9818  test_mse=16.6630  t=  173.6s
+[kfac_asdl_main] step=  5200  train_mse= 0.2659  test_bce=100.8301  test_mse=16.0195  t=  178.2s
+[kfac_asdl_main] step=  5400  train_mse= 0.2450  test_bce=98.3788  test_mse=15.2017  t=  183.8s
+[kfac_asdl_main] step=  5600  train_mse= 0.2472  test_bce=96.4425  test_mse=14.5838  t=  189.5s
+[kfac_asdl_main] step=  5800  train_mse= 0.2261  test_bce=95.8349  test_mse=14.4773  t=  194.1s
+[kfac_asdl_main] step=  6000  train_mse= 0.2198  test_bce=92.8809  test_mse=13.4704  t=  198.9s
+[kfac_asdl_main] step=  6200  train_mse= 0.2163  test_bce=91.1465  test_mse=12.9167  t=  205.6s
+[kfac_asdl_main] step=  6400  train_mse= 0.2132  test_bce=89.5384  test_mse=12.4126  t=  210.2s
+[kfac_asdl_main] step=  6600  train_mse= 0.1954  test_bce=88.3364  test_mse=12.0254  t=  215.0s
+[kfac_asdl_main] step=  6800  train_mse= 0.1990  test_bce=87.2719  test_mse=11.6922  t=  221.7s
+[kfac_asdl_main] step=  7000  train_mse= 0.1816  test_bce=84.6704  test_mse=10.8383  t=  226.4s
+[kfac_asdl_main] step=  7200  train_mse= 0.1696  test_bce=84.6370  test_mse=10.8698  t=  231.1s
+[kfac_asdl_main] step=  7400  train_mse= 0.1667  test_bce=83.1570  test_mse=10.3996  t=  237.5s
+[kfac_asdl_main] step=  7600  train_mse= 0.1652  test_bce=83.0422  test_mse=10.3943  t=  242.4s
+[kfac_asdl_main] step=  7800  train_mse= 0.1578  test_bce=81.2016  test_mse= 9.8055  t=  247.4s
+[kfac_asdl_main] step=  8000  train_mse= 0.1561  test_bce=80.7370  test_mse= 9.6669  t=  254.2s
+[kfac_asdl_main] step=  8200  train_mse= 0.1452  test_bce=79.3927  test_mse= 9.2298  t=  258.9s
+[kfac_asdl_main] step=  8400  train_mse= 0.1480  test_bce=79.0231  test_mse= 9.1142  t=  263.2s
+[kfac_asdl_main] step=  8600  train_mse= 0.1364  test_bce=78.2682  test_mse= 8.8877  t=  268.1s
+[kfac_asdl_main] step=  8800  train_mse= 0.1361  test_bce=77.6017  test_mse= 8.6714  t=  272.1s
+[kfac_asdl_main] step=  9000  train_mse= 0.1406  test_bce=77.4082  test_mse= 8.6389  t=  276.0s
+[kfac_asdl_main] step=  9200  train_mse= 0.1312  test_bce=76.1125  test_mse= 8.2102  t=  280.6s
+[kfac_asdl_main] step=  9400  train_mse= 0.1332  test_bce=76.6688  test_mse= 8.4005  t=  284.9s
+[kfac_asdl_main] step=  9600  train_mse= 0.1299  test_bce=75.6988  test_mse= 8.0882  t=  288.7s
+[kfac_asdl_main] step=  9800  train_mse= 0.1268  test_bce=75.7273  test_mse= 8.1151  t=  293.5s
+[kfac_asdl_main] step= 10000  train_mse= 0.1251  test_bce=74.7781  test_mse= 7.8189  t=  297.8s
+[kfac_asdl_main] step= 10200  train_mse= 0.1157  test_bce=74.1264  test_mse= 7.5862  t=  301.7s
+[kfac_asdl_main] step= 10400  train_mse= 0.1163  test_bce=73.7591  test_mse= 7.4802  t=  306.2s
+[kfac_asdl_main] step= 10600  train_mse= 0.1105  test_bce=73.5115  test_mse= 7.4006  t=  310.2s
+[kfac_asdl_main] step= 10800  train_mse= 0.1112  test_bce=73.4839  test_mse= 7.4051  t=  315.9s
+[kfac_asdl_main] step= 11000  train_mse= 0.1123  test_bce=72.8873  test_mse= 7.2093  t=  322.2s
+[kfac_asdl_main] step= 11200  train_mse= 0.1089  test_bce=71.7017  test_mse= 6.8220  t=  327.3s
+[kfac_asdl_main] step= 11400  train_mse= 0.1058  test_bce=72.1020  test_mse= 6.9582  t=  332.4s
+[kfac_asdl_main] step= 11600  train_mse= 0.1028  test_bce=71.2297  test_mse= 6.6787  t=  339.2s
+[kfac_asdl_main] step= 11800  train_mse= 0.1028  test_bce=71.7395  test_mse= 6.8533  t=  344.8s
+[kfac_asdl_main] step= 12000  train_mse= 0.0952  test_bce=70.7870  test_mse= 6.5525  t=  350.6s
+[kfac_asdl_main] step= 12200  train_mse= 0.0964  test_bce=70.4997  test_mse= 6.4568  t=  356.8s
+[kfac_asdl_main] step= 12400  train_mse= 0.1024  test_bce=71.1644  test_mse= 6.6766  t=  362.2s
+[kfac_asdl_main] step= 12600  train_mse= 0.0932  test_bce=70.2522  test_mse= 6.3751  t=  367.5s
+[kfac_asdl_main] step= 12800  train_mse= 0.0940  test_bce=69.7329  test_mse= 6.2082  t=  374.5s
+[kfac_asdl_main] step= 13000  train_mse= 0.0958  test_bce=69.8769  test_mse= 6.2802  t=  379.6s
+[kfac_asdl_main] step= 13200  train_mse= 0.0874  test_bce=69.2284  test_mse= 6.0566  t=  384.8s
+[kfac_asdl_main] step= 13400  train_mse= 0.0910  test_bce=69.3350  test_mse= 6.0978  t=  390.2s
+[kfac_asdl_main] step= 13600  train_mse= 0.0948  test_bce=69.1839  test_mse= 6.0422  t=  396.4s
+[kfac_asdl_main] step= 13800  train_mse= 0.0877  test_bce=69.3318  test_mse= 6.0751  t=  401.0s
+[kfac_asdl_main] step= 14000  train_mse= 0.0890  test_bce=68.7951  test_mse= 5.9117  t=  409.7s
+[kfac_asdl_main] step= 14200  train_mse= 0.0841  test_bce=68.2171  test_mse= 5.7388  t=  428.3s
+[kfac_asdl_main] step= 14400  train_mse= 0.0841  test_bce=68.4672  test_mse= 5.8114  t=  442.8s
+[kfac_asdl_main] step= 14600  train_mse= 0.0840  test_bce=68.0679  test_mse= 5.6767  t=  460.3s
+[kfac_asdl_main] step= 14800  train_mse= 0.0856  test_bce=68.8489  test_mse= 5.9478  t=  474.3s
+[kfac_asdl_main] step= 14999  train_mse= 0.0844  test_bce=68.2551  test_mse= 5.7571  t=  490.0s
+[kfac_asdl_main] FINAL test_bce=68.2551 test_mse=5.7571

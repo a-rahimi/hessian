@@ -73,6 +73,17 @@ PYTORCH_ENABLE_MPS_FALLBACK=1 /Users/arahimi/hessian/.venv/bin/python \
     --out plots/recon_vs_steps.png
 ```
 
+If the K-FAC run's JSONL file ends up truncated (we hit a macOS file-buffer
+quirk where ``flush()`` did not make the writes visible to other processes
+or to the file's reported size), regenerate it from the tee'd console log
+via [parse_console_log.py](parse_console_log.py):
+
+```bash
+/Users/arahimi/hessian/.venv/bin/python parse_console_log.py \
+    --in logs/kfac_asdl_main.console.log \
+    --out logs/kfac_asdl_main.jsonl
+```
+
 ## Budget
 
 The published Martens & Grosse 2015 run is roughly 100k full-batch updates
@@ -86,15 +97,22 @@ separate, even though neither run has reached the published asymptote.
 
 At 15000 updates, batch size 1000, with the commands above:
 
-| optimizer | test BCE (sum/example) | test MSE (sum/example, M&G 2015 metric) |
-| --------- | ---------------------- | --------------------------------------- |
-| K-FAC (asdl, MC Fisher) | see [logs/kfac_asdl_main.jsonl](logs/kfac_asdl_main.jsonl) | (final number filled in once the run completes) |
-| SGD-momentum | 99.82 | 16.72 |
+| optimizer | test BCE (sum/example) | test MSE (sum/example, M&G 2015 metric) | wall time |
+| --------- | ---------------------- | --------------------------------------- | --------- |
+| K-FAC (asdl, MC Fisher) | 68.26 | **5.76** | 490 s |
+| SGD-momentum | 99.82 | **16.72** | 99 s |
 
-A reference checkpoint along the way: K-FAC's MSE at step 5000 is 16.80,
-which equals SGD's MSE only at step 15000. That is a roughly 3x reduction in
-update count to reach the same reconstruction error, matching the qualitative
-shape of Martens & Grosse 2015 Figure 1.
+K-FAC reaches test MSE 5.76 against SGD's 16.72 at the same 15k-update
+budget, which is a 2.9x reduction in reconstruction error for K-FAC. A
+reference checkpoint along the way: K-FAC's MSE at step 5000 is 16.80,
+which equals SGD's MSE only at step 15000, so K-FAC takes roughly one
+third the updates of SGD to reach the same reconstruction error. This
+matches the qualitative shape of Martens & Grosse 2015 Figure 1.
+
+The trajectory plot is at [plots/recon_vs_steps.png](plots/recon_vs_steps.png).
+Both axes are log scale. The K-FAC trace sits on the dataset-mean plateau
+near MSE 53 for roughly 1800 steps while it works its way out of sigmoid
+saturation, and from step 2000 onward it drops cleanly past SGD.
 
 ## Reproduction judgment
 
