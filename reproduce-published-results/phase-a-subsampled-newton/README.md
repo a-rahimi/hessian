@@ -66,10 +66,19 @@ the dense solver on the actual anchor model.
 
 ## A1 — Sub-sampled Newton on full CIFAR-10
 
-100 steps, batch size 64, fresh batch each step, `ε = 1.0, lr = 0.5`. Same
-seed as our linear-Newton runs.
+100 steps, batch size 64, fresh batch each step, `ε = 1.0`. We swept `lr ∈ {0.5, 0.1, 0.01}`.
 
-<!-- A1_HEADLINE -->
+Headline (final-step `train_loss_avg10`, all `ε = 1.0`):
+
+| lr   | steps survived | final `train_loss_avg10` | final `probe_loss` | outcome                                            |
+| ---- | -------------- | ------------------------ | ------------------ | -------------------------------------------------- |
+| 0.5  | 17 of 100      | 13.91                    | 94.75              | diverged (loss climbs past 100 at step 16)         |
+| 0.1  | 11 of 100      | 2.62                     | 2.54               | trajectory unstable; `|g|` spikes; agent stopped   |
+| 0.01 | 36 of 100      | 2.74                     | 2.46               | slow descent; still above SGD's 1.97 1000-step bar |
+
+Trajectories: [A1_cifar10/run_lr0.5_eps1.0_diverged/metrics.csv](./A1_cifar10/run_lr0.5_eps1.0_diverged/metrics.csv), [A1_cifar10/run_lr0.1_eps1.0_diverged/metrics.csv](./A1_cifar10/run_lr0.1_eps1.0_diverged/metrics.csv), [A1_cifar10/run_lr0.01_eps1.0/metrics.csv](./A1_cifar10/run_lr0.01_eps1.0/metrics.csv).
+
+A1 reads as: the full Newton step `(H + ε I)^{-1} g` is *not* a safe step at `lr ≥ 0.1` on the anchor, regardless of how it is computed — sub-sampled Newton without LM accept/reject diverges at the spec's `lr = 0.5` in 17 steps, and the conservative `lr = 0.01` only descends as fast as cautious gradient descent. The same dense step our linear-inverse computes (verified by A3 to `rel_err ~ 1e-12`) is *not* by itself the recipe that beats SGD.
 
 Compare to:
 
@@ -95,12 +104,31 @@ Compare to:
 - **Our linear-inverse Newton** on the same fixed batch reaches min loss `1.16`
   at `ε = 0.5, lr = 0.5` with LM-adaptive ε
   ([exp-053](../../experiments/runs/exp-053-newton-memorize-lr0.5-lm/)).
+- **Hessian-Free in raw-Hessian mode**, which depends only on matrix-vector products with the *same* `H + ε I` we invert (see [phase-c-hessian-free](../phase-c-hessian-free/)), reaches `loss = 0.21` at step 247 on this diagnostic.
 
-<!-- A2_HEADLINE -->
+Headline (single 64-sample batch, all `ε = 1.0`):
+
+| lr   | steps survived | final `train_loss_avg10` | min loss seen | outcome                                              |
+| ---- | -------------- | ------------------------ | ------------- | ---------------------------------------------------- |
+| 0.5  | 6 of 100       | 92.4                     | 3.01 (step 0) | diverged catastrophically (loss = 527 at step 6)    |
+| 0.1  | 20 of 100      | 11.1                     | 2.27 (step 19)| diverged at step 20 (loss climbs to 174)            |
+| 0.01 | 51 of 100      | 2.26                     | 2.26 (step 51)| stable descent from 3.01; trajectory still flat-ish |
+
+Trajectories: [A2_fixed_batch/run_lr0.5_eps1.0_diverged/metrics.csv](./A2_fixed_batch/run_lr0.5_eps1.0_diverged/metrics.csv), [A2_fixed_batch/run_lr0.1_eps1.0_diverged/metrics.csv](./A2_fixed_batch/run_lr0.1_eps1.0_diverged/metrics.csv), [A2_fixed_batch/run_lr0.01_eps1.0/metrics.csv](./A2_fixed_batch/run_lr0.01_eps1.0/metrics.csv).
+
+A2 reads as: sub-sampled Newton, which by A3's check computes the same step as our linear-inverse code to 12 significant figures, *also* fails to reach the SGD floor of `0.19` or the HF floor of `0.21` on this fixed batch — its stable trajectory at `lr = 0.01` is around `2.26` after 51 steps. The gap between our linear-inverse Newton (`1.16` minimum, reached with LM-adaptive ε at `lr = 0.5`) and the published methods is therefore *not* in the inverse-Hessian-vector quantity. The two methods compute the same δ; only their wrappers (LM accept/reject, line search, CG truncation) differ.
 
 ## Read on Bug / Damping / Scale
 
-<!-- READ_HEADLINE -->
+Phase A's verdict is that the original Bug / Damping / Scale framing from Section 1 of [plan.md](../plan.md) is too coarse for the actual finding:
+
+- **Bug is ruled out at the per-step level.** Section 3 (rel_err ~1e-13 on the tiny model) and A3 (rel_err ~1e-12 on the real anchor) jointly show that [hessian_inverse_product](../../src/hessian.py#L287) computes exactly the dense `(H + ε I)^{-1} g` it claims to. There is no sign-or-transposition error in the block-factored solver path.
+- **Damping is not refuted but is not the main story.** Sub-sampled Newton at `ε = 1.0` and the survivable `lr = 0.01` reaches the same `~2.26` band on the fixed batch that our linear-inverse Newton plateaus in. Increasing ε would only damp further, and decreasing ε made things diverge — so the standard `H + ε I` shape is not by itself the recipe that closes the gap to SGD.
+- **Scale is also not the bottleneck.** Phase C's HF on the *same* anchor reaches `0.21` on the fixed-batch diagnostic with only matrix-vector products against the same `H`. Whatever HF is doing differently is doing it on the same model, batch, and curvature operator we have.
+
+The actual gap, then, is between "compute `(H + ε I)^{-1} g` and apply it at a fixed lr with a same-batch loss-decrease accept rule" (sub-sampled Newton and our linear-inverse Newton) versus "iterate within a CG loop with a quadratic-model trust-region accept rule and warm-starting from the previous solution" (HF). The published methods package the same curvature inverse inside a much more conservative step-acceptance heuristic, and that is where the 1.16 → 0.21 gap on the fixed-batch diagnostic appears to live.
+
+This is the Phase A read that Phase E should synthesize across with C and D.
 
 ## How to reproduce
 
