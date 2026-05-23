@@ -1857,8 +1857,8 @@ predicted_outcome: not predicting. need data.
 
 ```yaml
 id: exp-054-newton-memorize-lr1.0-lm
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 0a4996f1acd141e40d952df2acd73416143baa46
 hypothesis: |
   exp-053 (lr=0.5) dropped min loss from 1.61 to 1.16. Push to lr=1.0 (textbook full
   Newton step magnitude) with the same LM ε adaptation. Newton's theoretical setup
@@ -1876,6 +1876,38 @@ flags:
   --lm-check-batch: same
   --logdir: runs/auto
   --run-name: exp-054-newton-memorize-lr1.0-lm
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: not predicting.
+```
+
+---
+
+```yaml
+id: exp-055-newton-memorize-lr0.3-lm
+status: running
+commit_hash: TBD
+hypothesis: |
+  Refining the lr sweep around the exp-053 sweet spot. Newton on the fixed batch
+  reached min loss 1.61 at lr=0.1, 1.16 at lr=0.5, 1.95 at lr=1.0. Optimum is
+  between 0.1 and 0.5. lr=0.3 with the same ε=0.5 LM-adaptive setup tests
+  whether the curve has a tighter optimum we missed.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.3
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --logdir: runs/auto
+  --run-name: exp-055-newton-memorize-lr0.3-lm
   --log-every: 1
   --num-layers: 8
   --hidden-dim: 24
