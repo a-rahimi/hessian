@@ -28,6 +28,7 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 
 import block_partitioned_matrices as bpm
+import hessian
 from hessian import SequenceOfDenseBlocks
 
 
@@ -142,6 +143,39 @@ def assemble_gradient_vector(model: SequenceOfDenseBlocks) -> bpm.Vertical:
     for layer in model:
         flat = torch.cat([p.grad.detach().flatten() for p in layer.parameters()])
         blocks.append(flat.unsqueeze(1))
+    return bpm.Vertical(blocks)
+
+
+def dense_newton_step(
+    model: SequenceOfDenseBlocks,
+    x: torch.Tensor,
+    y: torch.Tensor,
+    grad_vec: bpm.Vertical,
+    epsilon: float,
+    method: str,
+) -> bpm.Vertical:
+    """Compute the Newton step by materializing the full Hessian and solving / pinv-ing it."""
+    def loss_fn(params):
+        return torch.func.functional_call(model, params, (x, y))
+
+    hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
+    H = hessian.flatten_2d_pytree(hessian_dict)
+    P = H.shape[0]
+    g_flat = grad_vec.to_tensor().flatten()
+    A = H + epsilon * torch.eye(P, dtype=H.dtype, device=H.device)
+    if method == "dense-solve":
+        x_flat = torch.linalg.solve(A, g_flat)
+    elif method == "dense-pinv":
+        x_flat = torch.linalg.pinv(A) @ g_flat
+    else:
+        raise ValueError(f"unknown dense newton method: {method}")
+
+    blocks = []
+    offset = 0
+    for block in grad_vec.flat:
+        n = block.shape[0]
+        blocks.append(x_flat[offset : offset + n].unsqueeze(1))
+        offset += n
     return bpm.Vertical(blocks)
 
 
@@ -267,7 +301,12 @@ def train(args: argparse.Namespace) -> None:
                 # undo the Newton step, fall back to a small SGD step so the
                 # iteration still makes progress along a descent direction,
                 # and increase ε so the next Newton attempt is better damped.
-                update = model.hessian_inverse_product(x, y, grad_vec, epsilon)
+                if args.newton_step_method == "custom":
+                    update = model.hessian_inverse_product(x, y, grad_vec, epsilon)
+                else:
+                    update = dense_newton_step(
+                        model, x, y, grad_vec, epsilon, args.newton_step_method
+                    )
                 raw_step_norm = lr * vertical_norm(update)
                 if args.max_step_norm is not None and raw_step_norm > args.max_step_norm:
                     effective_lr = lr * args.max_step_norm / raw_step_norm
@@ -412,6 +451,15 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="If set, cap |lr * update| at this value. Newton mode only.",
+    )
+    p.add_argument(
+        "--newton-step-method",
+        choices=["custom", "dense-solve", "dense-pinv"],
+        default="custom",
+        help="How to compute the Newton step. 'custom' uses model.hessian_inverse_product "
+        "(linear-time matrix-free, may be numerically unstable for ill-conditioned H). "
+        "'dense-solve' materializes the full Hessian and solves (H+εI)x=g. "
+        "'dense-pinv' uses torch.linalg.pinv(H+εI) @ g.",
     )
     p.add_argument(
         "--lm-check-batch",

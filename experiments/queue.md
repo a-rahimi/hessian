@@ -1921,8 +1921,8 @@ predicted_outcome: not predicting.
 
 ```yaml
 id: exp-056-newton-memorize-aggressive-lm
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 86d582d
 hypothesis: |
   exp-053 (lr=0.5, lm_up=1.1, lm_down=0.9) reached min loss 1.16 but ε ramped to
   ~3.0 over the run because rejects (41) outpaced accepts (19). The accumulated ε
@@ -1948,4 +1948,46 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: not predicting.
+```
+
+---
+
+```yaml
+id: exp-057-newton-memorize-dense-solve
+status: running
+commit_hash: TBD
+hypothesis: |
+  Replicate exp-053 (the best custom-Newton recipe on the fixed batch: ε=0.5 LM-adapt,
+  lr=0.5, num-steps=60, reuse-batch=60) but compute the Newton step via dense
+  Hessian + torch.linalg.solve instead of the linear-time custom algorithm. The paper
+  notes the custom LDU-based solver is "prone to numerical instability" and a smoke
+  benchmark shows Hessian eigenvalues at init are in [-0.024, 0.024], so ε=0.5 puts
+  the system in a regime where small numerical errors in LDU can blow up. If dense-
+  solve reaches loss meaningfully below custom's min of 1.16, the numerical-stability
+  hypothesis is supported.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.5
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --newton-step-method: dense-solve
+  --logdir: runs/auto
+  --run-name: exp-057-newton-memorize-dense-solve
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: |
+  Add --newton-step-method flag with choices {custom, dense-solve, dense-pinv}.
+  Add dense_newton_step() helper that materializes the full Hessian via
+  torch.func.hessian + flatten_2d_pytree, then either solves (H+εI)x=g or applies
+  pinv(H+εI). Reshapes the flat result back to a bpm.Vertical matching the layer
+  layout. Default behavior (custom) unchanged.
+predicted_outcome: not predicting numbers. The signal is whether the min loss differs from custom's 1.16. ~4 min wall clock (1.3s/step for solve + 2.2s/step for func.hessian).
 ```
