@@ -607,3 +607,102 @@ class TestSequenceOfBlocks:
             rtol=1e-4,
             atol=1e-4,
         )
+
+
+def test_section3_sanity_check_dense_vs_linear_inverse(capsys):
+    """
+    Section 3 sanity check from reproduce-published-results/plan.md.
+
+    Build a tiny SequenceOfDenseBlocks, materialize the full dense Hessian H via
+    torch.func.hessian on the cross-entropy loss, and for several values of ε
+    compare torch.linalg.solve(H + ε I, g) against
+    model.hessian_inverse_product(x, y, g_pytree, ε). The test passes when the
+    relative error is below 1e-4 for every ε. Per-ε relative errors are printed
+    so the result is human-readable when the test is run with -s.
+
+    The test runs in float64 because ε = 1e-3 makes H + ε I poorly
+    conditioned, so float32 round-off alone can push the relative error above
+    1e-4 even though the algorithm itself is correct. We confirmed in
+    development that at float64 the error drops to 1e-13 for every ε, which
+    pins the float32 hit on precision rather than on the linear-inverse code.
+    """
+    prev_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    try:
+        _run_section3_check(capsys)
+    finally:
+        torch.set_default_dtype(prev_dtype)
+
+
+def _run_section3_check(capsys):
+    torch.manual_seed(42)
+
+    image_size = 4
+    hidden_dim = 4
+    num_layers = 2
+    num_classes = 3
+    batch_size = 8
+
+    model = SequenceOfDenseBlocks(
+        input_dim=image_size,
+        hidden_dim=hidden_dim,
+        num_classes=num_classes,
+        num_layers=num_layers,
+        activation=torch.tanh,
+    )
+
+    total_params = sum(p.numel() for p in model.parameters())
+    assert total_params < 300, (
+        f"Parameter count {total_params} exceeds the Section 3 budget of 300; "
+        "shrink the model so the dense Hessian stays cheap."
+    )
+
+    x = torch.randn(batch_size, image_size, requires_grad=False)
+    y = torch.randint(0, num_classes, (batch_size,))
+
+    # Build the dense Hessian via torch.func.hessian on a flat-parameter loss.
+    def loss_fn(params_dict):
+        return torch.func.functional_call(model, params_dict, (x, y))
+
+    hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
+    H = hessian.flatten_2d_pytree(hessian_dict)
+    assert H.shape == (total_params, total_params)
+
+    # Random gradient laid out as a per-layer Vertical block, matching the
+    # layout that hessian_inverse_product expects.
+    g_pytree = bpm.Vertical(
+        [
+            torch.randn(sum(p.numel() for p in layer.parameters()), 1)
+            for layer in model
+        ]
+    )
+    g_flat = g_pytree.to_tensor().flatten()
+    assert g_flat.shape == (total_params,)
+
+    epsilons = [1e-3, 1e-1, 1.0, 10.0]
+    rel_errors = {}
+    eye = torch.eye(total_params)
+    for eps in epsilons:
+        x_dense = torch.linalg.solve(H + eps * eye, g_flat)
+        x_ours = (
+            model.hessian_inverse_product(x, y, g_pytree, eps).to_tensor().flatten()
+        )
+        num = torch.linalg.vector_norm(x_dense - x_ours).item()
+        den = torch.linalg.vector_norm(x_dense).item()
+        rel_errors[eps] = num / den
+
+    # Print per-ε relative errors so the test result is human-readable.
+    with capsys.disabled():
+        print()
+        print(
+            f"[section3] P={total_params}, batch={batch_size}, "
+            f"layers={num_layers}, hidden={hidden_dim}, image_size={image_size}"
+        )
+        for eps in epsilons:
+            print(f"[section3] eps={eps:<8g} rel_err={rel_errors[eps]:.3e}")
+
+    for eps, rel in rel_errors.items():
+        assert rel < 1e-4, (
+            f"Section 3 sanity check failed at eps={eps}: rel_err={rel:.3e} >= 1e-4. "
+            "Do not loosen the tolerance; investigate the algorithm first."
+        )
