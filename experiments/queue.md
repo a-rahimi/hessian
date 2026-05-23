@@ -1824,8 +1824,8 @@ predicted_outcome: not predicting numbers. Watching the trajectory shape.
 
 ```yaml
 id: exp-053-newton-memorize-lr0.5-lm
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 41748539bf06ae23702aebd55f0ca17bf322bc7f
 hypothesis: |
   exp-052 showed Newton at lr=0.01 reaches only 2.02 on the fixed batch — smaller
   step makes things worse, not better. The Newton direction at small lr is too
@@ -1851,4 +1851,36 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: not predicting. need data.
+```
+
+---
+
+```yaml
+id: exp-054-newton-memorize-lr1.0-lm
+status: running
+commit_hash: TBD
+hypothesis: |
+  exp-053 (lr=0.5) dropped min loss from 1.61 to 1.16. Push to lr=1.0 (textbook full
+  Newton step magnitude) with the same LM ε adaptation. Newton's theoretical setup
+  uses lr=1.0; we have been scaling down. ε grew to ~3.0 in exp-053; with lr=1.0,
+  LM may either find a stable ε higher than that or oscillate.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 1.0
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --logdir: runs/auto
+  --run-name: exp-054-newton-memorize-lr1.0-lm
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: not predicting.
 ```
