@@ -1756,8 +1756,8 @@ predicted_outcome: avg10 final at most 2.20 if the two mechanisms compound; othe
 
 ```yaml
 id: exp-051-eps-lr-coupled-lm
-status: running
-commit_hash: TBD
+status: done
+commit_hash: ef9dc030ee920b464913984ea3989478a452590e
 hypothesis: |
   Strategy C: both ε and lr respond to LM accept/reject per step, coupled symmetrically.
   On accept: ε *= 0.9, lr *= 1.05. On reject: ε *= 1.1, lr *= 0.7. The intuition is
@@ -1785,4 +1785,37 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: lr should shrink quickly after a few rejects, ε grow. Two failure modes to watch: lr collapses to 0.001 (floor) and run becomes pure SGD-fallback, or ε grows past 5.0 and steps become tiny gradient-like.
+```
+
+---
+
+```yaml
+id: exp-052-newton-memorize-lr0.01
+status: running
+commit_hash: TBD
+hypothesis: |
+  Mirror the SGD recipe that memorized the fixed batch (lr=0.01 reaches loss 0.19) but
+  with Newton. Same model+batch, ε=0.5 frozen, lr=0.01 fixed, same-batch LM check
+  (only one batch), num-steps=60. If Newton at lr=0.01 reaches near 0.19, the wall
+  in exp-046 was just lr=0.1 being too large. If it stalls, the Newton direction
+  itself is wrong.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.01
+  --lm-up: 1.0
+  --lm-down: 1.0
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --logdir: runs/auto
+  --run-name: exp-052-newton-memorize-lr0.01
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: null
+predicted_outcome: not predicting numbers. Watching the trajectory shape.
 ```
