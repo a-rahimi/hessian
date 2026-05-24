@@ -1996,8 +1996,8 @@ predicted_outcome: not predicting numbers. The signal is whether the min loss di
 
 ```yaml
 id: exp-058-newton-diagnostic
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 0b521e7314b258f25c4961bf92fc153fe01d425e
 hypothesis: |
   Diagnostic: instrument dense-solve to log per-step (a) cos(Δ, -g) — direction
   agreement with steepest descent, (b) pred_loss_change at effective_lr from the
