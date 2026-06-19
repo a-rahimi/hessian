@@ -1921,8 +1921,8 @@ predicted_outcome: not predicting.
 
 ```yaml
 id: exp-056-newton-memorize-aggressive-lm
-status: running
-commit_hash: TBD
+status: done
+commit_hash: 86d582d
 hypothesis: |
   exp-053 (lr=0.5, lm_up=1.1, lm_down=0.9) reached min loss 1.16 but ε ramped to
   ~3.0 over the run because rejects (41) outpaced accepts (19). The accumulated ε
@@ -1948,4 +1948,87 @@ flags:
   --activation: relu
 code_patch: null
 predicted_outcome: not predicting.
+```
+
+---
+
+```yaml
+id: exp-057-newton-memorize-dense-solve
+status: done
+commit_hash: f49be9802c1cdb76d28104db34e5eeb2b0d17d05
+hypothesis: |
+  Replicate exp-053 (the best custom-Newton recipe on the fixed batch: ε=0.5 LM-adapt,
+  lr=0.5, num-steps=60, reuse-batch=60) but compute the Newton step via dense
+  Hessian + torch.linalg.solve instead of the linear-time custom algorithm. The paper
+  notes the custom LDU-based solver is "prone to numerical instability" and a smoke
+  benchmark shows Hessian eigenvalues at init are in [-0.024, 0.024], so ε=0.5 puts
+  the system in a regime where small numerical errors in LDU can blow up. If dense-
+  solve reaches loss meaningfully below custom's min of 1.16, the numerical-stability
+  hypothesis is supported.
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.5
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --newton-step-method: dense-solve
+  --logdir: runs/auto
+  --run-name: exp-057-newton-memorize-dense-solve
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: |
+  Add --newton-step-method flag with choices {custom, dense-solve, dense-pinv}.
+  Add dense_newton_step() helper that materializes the full Hessian via
+  torch.func.hessian + flatten_2d_pytree, then either solves (H+εI)x=g or applies
+  pinv(H+εI). Reshapes the flat result back to a bpm.Vertical matching the layer
+  layout. Default behavior (custom) unchanged.
+predicted_outcome: not predicting numbers. The signal is whether the min loss differs from custom's 1.16. ~4 min wall clock (1.3s/step for solve + 2.2s/step for func.hessian).
+```
+
+---
+
+```yaml
+id: exp-058-newton-diagnostic
+status: done
+commit_hash: 0b521e7314b258f25c4961bf92fc153fe01d425e
+hypothesis: |
+  Diagnostic: instrument dense-solve to log per-step (a) cos(Δ, -g) — direction
+  agreement with steepest descent, (b) pred_loss_change at effective_lr from the
+  local quadratic model, (c) actual_loss_change on the same batch, (d) H eigenvalue
+  range [min, max]. Run at the exp-053 recipe (ε=0.5 LM-adaptive, lr=0.5, fixed
+  batch, num-steps=60). Goal is to identify which failure mode is operating from
+  the per-step trace: ε washing out H (cos ≈ 1), indefinite Hessian (cos < 0),
+  or non-quadratic geometry (pred ≠ actual).
+flags:
+  --mode: newton
+  --epsilon: 0.5
+  --lr: 0.5
+  --lm-up: 1.1
+  --lm-down: 0.9
+  --batch-size: 64
+  --num-steps: 60
+  --reuse-batch: 60
+  --lm-check-batch: same
+  --newton-step-method: dense-solve
+  --logdir: runs/auto
+  --run-name: exp-058-newton-diagnostic
+  --log-every: 1
+  --num-layers: 8
+  --hidden-dim: 24
+  --image-size: 16
+  --activation: relu
+code_patch: |
+  Add diagnostics to dense_newton_step: cos(step, g), separate linear and quadratic
+  parts of the predicted loss change, eigvalsh(H) min/max. In the main loop, compute
+  pred_loss_change at effective_lr and actual_loss_change (trial_loss - current loss
+  when lm-check-batch==same). New StepScalars fields: cos_step_neg_grad,
+  pred_loss_change, actual_loss_change, h_eig_min, h_eig_max. Log line extended.
+predicted_outcome: diagnostic data — analysis comes after.
 ```

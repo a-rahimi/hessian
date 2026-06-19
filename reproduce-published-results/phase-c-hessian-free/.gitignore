@@ -1,0 +1,12 @@
+# The cloned HF library is large and not our code. Re-create it with the
+# install command in README.md.
+third_party/
+
+# Per-step stdout dumps and pyc caches are noise; the CSV logs under
+# C{1,2}_*/logs/ are the canonical records.
+**/__pycache__/
+**/*.pyc
+**/logs_*.txt
+
+# Tensorboard-style event files if any.
+**/events.out.*
