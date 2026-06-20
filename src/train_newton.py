@@ -86,10 +86,14 @@ class StepLogger:
     automatically.
     """
 
-    def __init__(self, logdir: Path, device: torch.device):
+    def __init__(self, logdir: Path, device: torch.device, tb_log_every: int = 1):
         self.writer = SummaryWriter(log_dir=str(logdir))
         self.device = device
         self.t0: float | None = None
+        # Write scalars to tensorboard only every `tb_log_every` steps. Keeps
+        # event files small on very long runs (e.g. hundreds of thousands of
+        # SGD steps) where per-step resolution is unnecessary for plotting.
+        self.tb_log_every = tb_log_every
 
     def _sync(self) -> None:
         if self.device.type == "cuda":
@@ -111,8 +115,9 @@ class StepLogger:
         t_now = time.perf_counter()
         scalars.step_seconds = t_now - t_step_start
         scalars.wall_clock_s = t_now - self.t0
-        for name, value in dataclasses.asdict(scalars).items():
-            self.writer.add_scalar(name, value, global_step=step_idx)
+        if step_idx % self.tb_log_every == 0:
+            for name, value in dataclasses.asdict(scalars).items():
+                self.writer.add_scalar(name, value, global_step=step_idx)
 
     def close(self) -> None:
         self.writer.flush()
@@ -359,7 +364,7 @@ def train(args: argparse.Namespace) -> None:
     logdir = Path(args.logdir) / run_name
     print(f"tensorboard logdir: {logdir}", file=sys.stderr)
 
-    logger = StepLogger(logdir, device=device)
+    logger = StepLogger(logdir, device=device, tb_log_every=args.tb_log_every)
     logger.writer.add_text(
         "config", "  \n".join(f"{k}: {v}" for k, v in vars(args).items())
     )
@@ -730,6 +735,13 @@ def parse_args() -> argparse.Namespace:
         "tricked by noise-floor descent.",
     )
     p.add_argument("--cpu", action="store_true")
+    p.add_argument(
+        "--tb-log-every",
+        type=int,
+        default=1,
+        help="Write tensorboard scalars every N steps. Use >1 on very long "
+        "runs to keep event files small.",
+    )
     # Trust-region flags
     p.add_argument(
         "--delta-init",
