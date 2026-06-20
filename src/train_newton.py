@@ -67,6 +67,12 @@ class StepScalars:
     actual_loss_change: float = 0.0
     h_eig_min: float = 0.0
     h_eig_max: float = 0.0
+    # Trust-region fields
+    trust_radius: float = 0.0
+    rho: float = 0.0
+    lambda_star: float = 0.0
+    hard_case: float = 0.0
+    step_type: float = 0.0  # 0 = interior, 1 = boundary
 
 
 class StepLogger:
@@ -111,6 +117,17 @@ class StepLogger:
     def close(self) -> None:
         self.writer.flush()
         self.writer.close()
+
+
+# The canonical URL https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz now
+# serves a redirect chain that bounces https -> http -> https across hosts.
+# torchvision's urllib-based downloader refuses to follow the https->http
+# downgrade, so download_and_extract_archive() silently stalls and no run ever
+# reaches a training step. Point CIFAR10 straight at the final URL, which
+# returns a clean 200, so urllib never sees the broken redirect.
+torchvision.datasets.CIFAR10.url = (
+    "https://cave.cs.toronto.edu/kriz/cifar-10-python.tar.gz"
+)
 
 
 def load_cifar10_loader(
@@ -212,6 +229,95 @@ def vertical_norm(v: bpm.Vertical) -> float:
     return float(torch.linalg.vector_norm(v.to_tensor()).item())
 
 
+def solve_trs(
+    g: torch.Tensor, H: torch.Tensor, delta: float
+) -> tuple[torch.Tensor, float, str, bool, torch.Tensor]:
+    """Solve the trust-region subproblem exactly via eigendecomposition.
+
+    Returns (p, lambda_star, step_type, hard_case, eigvals) where step_type is
+    "interior" or "boundary" and hard_case is True when g is nearly
+    orthogonal to the minimum eigenvector (logged but not specially handled).
+    eigvals is the ascending spectrum of H, returned so the caller can read
+    h_eig_min/max without a second (expensive) eigendecomposition.
+    """
+    eigvals, Q = torch.linalg.eigh(H)
+    lambda_min = float(eigvals[0].item())
+
+    # Project gradient into eigenbasis: g_hat = Qᵀ g
+    g_hat = Q.T @ g
+
+    # Try unconstrained Newton step (lambda=0), valid only if H is PD
+    if lambda_min > 0:
+        p_hat_newton = -g_hat / eigvals
+        if float(p_hat_newton.norm().item()) <= delta:
+            p = Q @ p_hat_newton
+            return p, 0.0, "interior", False, eigvals
+
+    # Need lambda > 0. Secular equation: ‖(H + λI)⁻¹g‖ = delta
+    # In eigenbasis this is sum(g_hat_i² / (λ_i + λ)²) = delta²
+    # Bisect over lambda in [lambda_lb, lambda_ub]
+    lambda_lb = max(0.0, -lambda_min)
+
+    hard_case = lambda_min <= 0 and float(g_hat[0].abs().item()) < 1e-10 * float(g_hat.norm().item())
+
+    def secular(lam: float) -> float:
+        denom = eigvals + lam
+        return float((g_hat / denom).norm().item())
+
+    # Find upper bound where secular(lambda) < delta
+    lambda_ub = lambda_lb + 1.0
+    for _ in range(60):
+        if secular(lambda_ub) <= delta:
+            break
+        lambda_ub *= 2.0
+
+    # Bisect
+    for _ in range(50):
+        lam_mid = (lambda_lb + lambda_ub) / 2.0
+        if secular(lam_mid) > delta:
+            lambda_lb = lam_mid
+        else:
+            lambda_ub = lam_mid
+        if lambda_ub - lambda_lb < 1e-10 * (1.0 + lambda_ub):
+            break
+
+    lambda_star = (lambda_lb + lambda_ub) / 2.0
+    p_hat = -g_hat / (eigvals + lambda_star)
+    p = Q @ p_hat
+    return p, lambda_star, "boundary", hard_case, eigvals
+
+
+def sgd_warmup(
+    model: "SequenceOfDenseBlocks",
+    loader: torch.utils.data.DataLoader,
+    lr: float,
+    num_steps: int,
+    device: torch.device,
+) -> float:
+    """Run num_steps of SGD and return the mean step norm, for Δ initialization."""
+    step_norms = []
+    data_iter = iter(loader)
+    for _ in range(num_steps):
+        try:
+            x, y = next(data_iter)
+        except StopIteration:
+            data_iter = iter(loader)
+            x, y = next(data_iter)
+        x, y = x.to(device), y.to(device)
+        for p in model.parameters():
+            if p.grad is not None:
+                p.grad.zero_()
+        loss = model(x, y)
+        loss.backward()
+        grad_vec = assemble_gradient_vector(model)
+        step_norms.append(lr * vertical_norm(grad_vec))
+        apply_update(model, grad_vec, lr)
+    # Undo the warmup steps so model state is unaffected
+    # (We just need the scale, not the actual optimization.)
+    # Actually it's fine to leave it — a few SGD steps are a reasonable init.
+    return float(sum(step_norms) / len(step_norms))
+
+
 def train(args: argparse.Namespace) -> None:
     torch.manual_seed(args.seed)
     device = torch.device(
@@ -265,6 +371,18 @@ def train(args: argparse.Namespace) -> None:
     lr = args.lr
     loss_window = collections.deque(maxlen=2 * args.lr_decay_window)
     x, y = None, None
+
+    # Trust-region state
+    if args.mode == "trust-region":
+        if args.delta_init is not None:
+            trust_radius = args.delta_init
+            print(f"trust radius init: {trust_radius:.4e} (manual)", file=sys.stderr)
+        else:
+            print(f"running {args.delta_init_steps}-step SGD warmup to calibrate Δ ...", file=sys.stderr)
+            trust_radius = sgd_warmup(model, loader, lr, args.delta_init_steps, device)
+            print(f"trust radius init: {trust_radius:.4e} (from SGD warmup)", file=sys.stderr)
+    else:
+        trust_radius = 0.0
     while step_idx < args.num_steps:
         if step_idx % args.reuse_batch == 0:
             try:
@@ -369,6 +487,70 @@ def train(args: argparse.Namespace) -> None:
                     epsilon = min(epsilon * args.lm_up, args.lm_eps_max)
                     lr = max(lr * args.lr_lm_on_reject, args.lr_min)
                     scalars.accepted = 0.0
+            elif args.mode == "trust-region":
+                # Build the full dense Hessian (same path as dense-solve Newton)
+                def loss_fn(params):
+                    return torch.func.functional_call(model, params, (x, y))
+
+                hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
+                H = hessian.flatten_2d_pytree(hessian_dict)
+                g_flat = grad_vec.to_tensor().flatten()
+
+                p_flat, lambda_star, step_type, hard_case, eigvals = solve_trs(
+                    g_flat, H, trust_radius
+                )
+
+                scalars.h_eig_min = float(eigvals[0].item())
+                scalars.h_eig_max = float(eigvals[-1].item())
+                scalars.lambda_star = lambda_star
+                scalars.step_type = 1.0 if step_type == "boundary" else 0.0
+                scalars.hard_case = 1.0 if hard_case else 0.0
+                scalars.trust_radius = trust_radius
+
+                # Predicted reduction from the quadratic model: -gᵀp - ½pᵀHp
+                with torch.no_grad():
+                    pred_reduction = float(-(g_flat @ p_flat) - 0.5 * (p_flat @ (H @ p_flat)))
+
+                # Pack the step into bpm.Vertical. solve_trs returns the true
+                # step p (params should move to params + p), but apply_update
+                # *subtracts* its argument (params -= update), matching the SGD
+                # `params -= grad` convention. Negate so apply_update(., +1)
+                # yields params + p, and the rejection undo apply_update(., -1)
+                # cleanly backs it out.
+                neg_p = -p_flat
+                blocks = []
+                offset = 0
+                for block in grad_vec.flat:
+                    n = block.shape[0]
+                    blocks.append(neg_p[offset: offset + n].unsqueeze(1))
+                    offset += n
+                update = bpm.Vertical(blocks)
+
+                scalars.step_norm = float(p_flat.norm().item())
+
+                # Apply the step and measure actual reduction on the same batch
+                apply_update(model, update, 1.0)
+                with torch.no_grad():
+                    trial_loss = float(model(x, y).item())
+                actual_reduction = scalars.loss - trial_loss
+
+                scalars.actual_loss_change = -actual_reduction
+                scalars.pred_loss_change = -pred_reduction
+
+                rho = actual_reduction / (pred_reduction + 1e-30)
+                scalars.rho = rho
+
+                # Standard trust-region radius update
+                if rho < 0.25:
+                    trust_radius = trust_radius * 0.25
+                elif rho >= 0.75 and step_type == "boundary":
+                    trust_radius = min(trust_radius * 2.0, args.delta_max)
+
+                if rho >= args.tr_eta:
+                    scalars.accepted = 1.0
+                else:
+                    apply_update(model, update, -1.0)
+                    scalars.accepted = 0.0
             else:
                 raise ValueError(f"unknown mode: {args.mode}")
 
@@ -395,6 +577,14 @@ def train(args: argparse.Namespace) -> None:
                         f" pred={scalars.pred_loss_change:+.4f} actual={scalars.actual_loss_change:+.4f}"
                         f" eig=[{scalars.h_eig_min:+.2e},{scalars.h_eig_max:+.2e}]"
                     )
+            elif args.mode == "trust-region":
+                extra = (
+                    f" Δ={scalars.trust_radius:.3e} ρ={scalars.rho:+.3f} λ*={scalars.lambda_star:.3e}"
+                    f" {'ok' if scalars.accepted else 'REJ'}"
+                    f" {'boundary' if scalars.step_type else 'interior'}"
+                    f"{' HARD' if scalars.hard_case else ''}"
+                    f" eig=[{scalars.h_eig_min:+.2e},{scalars.h_eig_max:+.2e}]"
+                )
             print(
                 f"[{args.mode}] step={step_idx:4d} "
                 f"loss={scalars.loss:.4f} avg10={scalars.train_loss_avg10:.4f} probe={scalars.probe_loss:.4f} probe_acc={scalars.probe_accuracy:.3f} bacc={scalars.batch_accuracy:.3f} "
@@ -409,7 +599,7 @@ def train(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--mode", choices=["sgd", "newton"], required=True)
+    p.add_argument("--mode", choices=["sgd", "newton", "trust-region"], required=True)
     p.add_argument("--data-dir", default="./data")
     p.add_argument(
         "--logdir",
@@ -540,11 +730,36 @@ def parse_args() -> argparse.Namespace:
         "tricked by noise-floor descent.",
     )
     p.add_argument("--cpu", action="store_true")
+    # Trust-region flags
+    p.add_argument(
+        "--delta-init",
+        type=float,
+        default=None,
+        help="Initial trust radius. Default: auto-calibrate via SGD warmup.",
+    )
+    p.add_argument(
+        "--delta-max",
+        type=float,
+        default=10.0,
+        help="Maximum trust radius.",
+    )
+    p.add_argument(
+        "--tr-eta",
+        type=float,
+        default=0.1,
+        help="Acceptance threshold: accept step if rho >= eta.",
+    )
+    p.add_argument(
+        "--delta-init-steps",
+        type=int,
+        default=10,
+        help="Number of SGD warmup steps used to auto-calibrate the initial trust radius.",
+    )
     args = p.parse_args()
     if args.lr is None:
         args.lr = 0.5 if args.mode == "newton" else 0.1
     if args.log_every is None:
-        args.log_every = 1 if args.mode == "newton" else 10
+        args.log_every = 1 if args.mode in ("newton", "trust-region") else 10
     return args
 
 
