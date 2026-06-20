@@ -169,7 +169,8 @@ def test_efficient_solve_trs_network_smoke():
 
     assert torch.isfinite(p).all()
     assert lam >= 0.0
-    assert float(p.norm()) <= delta * (1.0 + 1e-5)
+    # Default tol is 1e-3 (relative), so allow a small slack on the boundary.
+    assert float(p.norm()) <= delta * (1.0 + 2e-3)
     if step_type == "boundary":
-        assert float(p.norm()) == pytest.approx(delta, rel=1e-4)
+        assert float(p.norm()) == pytest.approx(delta, rel=2e-3)
     assert n_solves >= 1

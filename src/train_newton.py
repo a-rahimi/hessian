@@ -309,7 +309,7 @@ def solve_trs_oracle(
     g: torch.Tensor,
     apply_inverse: Callable[[float, torch.Tensor], torch.Tensor],
     delta: float,
-    tol: float = 1e-6,
+    tol: float = 1e-3,
     max_iter: int = 20,
 ) -> tuple[torch.Tensor, float, str, bool, int]:
     """Solve the trust-region subproblem using only damped-inverse solves.
@@ -321,6 +321,13 @@ def solve_trs_oracle(
 
     Returns (p, lambda_star, step_type, hard_case, n_solves). `p` is the step
     (params should move to params + p), matching `solve_trs`'s convention.
+
+    `tol` is the relative tolerance on the boundary condition ‖p‖ = delta. The
+    trust radius is itself a heuristic, so a loose tol (1e-3) is plenty and is
+    important for cost: each Newton iteration costs two solves, and a tol below
+    the oracle's float precision would never be met, burning `max_iter` solves
+    every call. Keep tol comfortably above the solve's accuracy (e.g. ~1e-3 for
+    a float32 network).
 
     Caveat — the hard case: without λ_min we use the curvature gᵀH⁻¹g as a
     positive-definiteness proxy and search λ from 0. This is exact when H ⪰ 0;
@@ -387,7 +394,7 @@ def efficient_solve_trs(
     y: torch.Tensor,
     grad_vec: bpm.Vertical,
     delta: float,
-    tol: float = 1e-6,
+    tol: float = 1e-3,
     max_iter: int = 20,
 ) -> tuple[torch.Tensor, float, str, bool, int]:
     """Trust-region subproblem via the paper's linear-time damped solver.
