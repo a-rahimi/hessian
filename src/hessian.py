@@ -344,13 +344,7 @@ class SequenceOfBlocks(nn.Module):
         Only the cheap, epsilon- and b-dependent assembly and the
         block-tridiagonal factorization are redone here.
         """
-        Dx, DD_Dxx, DD_Dzx, DM_Dzz = (
-            setup.Dx,
-            setup.DD_Dxx,
-            setup.DD_Dzx,
-            setup.DM_Dzz,
-        )
-        M, P, zero_block = setup.M, setup.P, setup.zero_block
+        Dx, DD_Dxx, DD_Dzx, DM_Dzz, M, P, zero_block = setup
 
         _validate_vector_is_Hessian_shaped(b, Dx)
 
