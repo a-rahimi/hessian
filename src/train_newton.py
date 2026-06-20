@@ -22,6 +22,7 @@ import datetime as dt
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 import torch
 import torchvision
@@ -73,6 +74,7 @@ class StepScalars:
     lambda_star: float = 0.0
     hard_case: float = 0.0
     step_type: float = 0.0  # 0 = interior, 1 = boundary
+    tr_solves: float = 0.0  # oracle (H+lambda I) solves used by the efficient solver
 
 
 class StepLogger:
@@ -292,6 +294,120 @@ def solve_trs(
     return p, lambda_star, "boundary", hard_case, eigvals
 
 
+def vertical_like(flat: torch.Tensor, template: bpm.Vertical) -> bpm.Vertical:
+    """Repack a flat vector into the per-layer column-block structure of `template`."""
+    blocks = []
+    offset = 0
+    for block in template.flat:
+        n = block.shape[0]
+        blocks.append(flat[offset : offset + n].unsqueeze(1))
+        offset += n
+    return bpm.Vertical(blocks)
+
+
+def solve_trs_oracle(
+    g: torch.Tensor,
+    apply_inverse: Callable[[float, torch.Tensor], torch.Tensor],
+    delta: float,
+    tol: float = 1e-6,
+    max_iter: int = 20,
+) -> tuple[torch.Tensor, float, str, bool, int]:
+    """Solve the trust-region subproblem using only damped-inverse solves.
+
+    `apply_inverse(lam, rhs)` must return `(H + lam·I)⁻¹ rhs` for flat vectors.
+    This is the linear-time oracle the paper provides; this routine never forms
+    or eigendecomposes H. It mirrors the math of `solve_trs` but reaches the
+    same minimizer `p = -(H + λ*I)⁻¹ g` through a 1-D search on the damping λ.
+
+    Returns (p, lambda_star, step_type, hard_case, n_solves). `p` is the step
+    (params should move to params + p), matching `solve_trs`'s convention.
+
+    Caveat — the hard case: without λ_min we use the curvature gᵀH⁻¹g as a
+    positive-definiteness proxy and search λ from 0. This is exact when H ⪰ 0;
+    when H is indefinite it is flagged via `hard_case` (logged, not specially
+    handled), per the project's "just log the hard case for now" decision.
+    """
+    n_solves = 0
+
+    def inv(lam: float, rhs: torch.Tensor) -> torch.Tensor:
+        nonlocal n_solves
+        n_solves += 1
+        return apply_inverse(lam, rhs)
+
+    # Interior step (λ = 0): p = -H⁻¹g, valid only if it lies inside the region
+    # AND H is positive definite. gᵀH⁻¹g is the PD proxy — positive when the
+    # Newton step descends into a bowl, non-positive when g has negative-
+    # curvature content (indefinite H), in which case we go to the boundary.
+    s = inv(0.0, g)
+    phi = float(torch.linalg.vector_norm(s))
+    curvature = float(g @ s)
+    if phi <= delta and curvature > 0:
+        return -s, 0.0, "interior", False, n_solves
+
+    hard_case = curvature <= 0
+
+    # Boundary: find λ > 0 with ‖(H + λI)⁻¹g‖ = delta. φ(λ) decreases to 0 as λ
+    # grows, so doubling brackets a feasible hi.
+    lo, hi = 0.0, 1.0
+    s = inv(hi, g)
+    while float(torch.linalg.vector_norm(s)) > delta and hi < 1e16:
+        hi *= 2.0
+        s = inv(hi, g)
+    lam = hi
+
+    # Safeguarded Newton on the secular equation 1/φ(λ) = 1/delta. The
+    # reciprocal 1/φ is nearly affine in λ, so this converges in a few steps.
+    # φ'(λ) = -(sᵀq)/φ with q = (H+λI)⁻¹ s costs one extra solve per iteration.
+    for _ in range(max_iter):
+        phi = float(torch.linalg.vector_norm(s))
+        if abs(phi - delta) <= tol * delta:
+            break
+        if phi > delta:
+            lo = max(lo, lam)
+        else:
+            hi = min(hi, lam)
+        q = inv(lam, s)
+        phi_prime = -float(s @ q) / phi
+        h_prime = -phi_prime / (phi * phi)
+        if h_prime > 0:
+            lam_next = lam + (1.0 / delta - 1.0 / phi) / h_prime
+        else:
+            lam_next = 0.5 * (lo + hi)
+        if not (lo < lam_next < hi):
+            lam_next = 0.5 * (lo + hi)
+        lam = lam_next
+        s = inv(lam, g)
+
+    return -s, lam, "boundary", hard_case, n_solves
+
+
+def efficient_solve_trs(
+    model: SequenceOfDenseBlocks,
+    x: torch.Tensor,
+    y: torch.Tensor,
+    grad_vec: bpm.Vertical,
+    delta: float,
+    tol: float = 1e-6,
+    max_iter: int = 20,
+) -> tuple[torch.Tensor, float, str, bool, int]:
+    """Trust-region subproblem via the paper's linear-time damped solver.
+
+    Computes the network derivatives once (`hessian_inverse_setup`) and reuses
+    them for every trial damping λ, so the per-λ cost is just the block-
+    tridiagonal factorization rather than a fresh functorch pass.
+    """
+    setup = model.hessian_inverse_setup(x, y)
+    g = grad_vec.to_tensor().flatten()
+
+    def apply_inverse(lam: float, rhs_flat: torch.Tensor) -> torch.Tensor:
+        rhs_vert = vertical_like(rhs_flat, grad_vec)
+        out = model.hessian_inverse_solve(setup, rhs_vert, lam)
+        # The solve is a fixed linear algebra step; we never backprop through it.
+        return out.to_tensor().flatten().detach()
+
+    return solve_trs_oracle(g, apply_inverse, delta, tol=tol, max_iter=max_iter)
+
+
 def sgd_warmup(
     model: "SequenceOfDenseBlocks",
     loader: torch.utils.data.DataLoader,
@@ -493,28 +609,47 @@ def train(args: argparse.Namespace) -> None:
                     lr = max(lr * args.lr_lm_on_reject, args.lr_min)
                     scalars.accepted = 0.0
             elif args.mode == "trust-region":
-                # Build the full dense Hessian (same path as dense-solve Newton)
-                def loss_fn(params):
-                    return torch.func.functional_call(model, params, (x, y))
-
-                hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
-                H = hessian.flatten_2d_pytree(hessian_dict)
                 g_flat = grad_vec.to_tensor().flatten()
 
-                p_flat, lambda_star, step_type, hard_case, eigvals = solve_trs(
-                    g_flat, H, trust_radius
-                )
+                if args.tr_solver == "dense":
+                    # Build the full dense Hessian (same path as dense-solve Newton)
+                    def loss_fn(params):
+                        return torch.func.functional_call(model, params, (x, y))
 
-                scalars.h_eig_min = float(eigvals[0].item())
-                scalars.h_eig_max = float(eigvals[-1].item())
+                    hessian_dict = torch.func.hessian(loss_fn)(
+                        dict(model.named_parameters())
+                    )
+                    H = hessian.flatten_2d_pytree(hessian_dict)
+
+                    p_flat, lambda_star, step_type, hard_case, eigvals = solve_trs(
+                        g_flat, H, trust_radius
+                    )
+                    scalars.h_eig_min = float(eigvals[0].item())
+                    scalars.h_eig_max = float(eigvals[-1].item())
+
+                    # Predicted reduction from the quadratic model: -gᵀp - ½pᵀHp
+                    with torch.no_grad():
+                        pred_reduction = float(
+                            -(g_flat @ p_flat) - 0.5 * (p_flat @ (H @ p_flat))
+                        )
+                else:
+                    p_flat, lambda_star, step_type, hard_case, n_solves = (
+                        efficient_solve_trs(model, x, y, grad_vec, trust_radius)
+                    )
+                    scalars.tr_solves = float(n_solves)
+                    # h_eig_min/max need an eigendecomposition we deliberately
+                    # avoid. At the solution (H + λI)p = -g, so pᵀHp = -gᵀp - λ‖p‖²
+                    # and the predicted reduction -gᵀp - ½pᵀHp needs no Hessian:
+                    with torch.no_grad():
+                        pred_reduction = float(
+                            -0.5 * (g_flat @ p_flat)
+                            + 0.5 * lambda_star * (p_flat @ p_flat)
+                        )
+
                 scalars.lambda_star = lambda_star
                 scalars.step_type = 1.0 if step_type == "boundary" else 0.0
                 scalars.hard_case = 1.0 if hard_case else 0.0
                 scalars.trust_radius = trust_radius
-
-                # Predicted reduction from the quadratic model: -gᵀp - ½pᵀHp
-                with torch.no_grad():
-                    pred_reduction = float(-(g_flat @ p_flat) - 0.5 * (p_flat @ (H @ p_flat)))
 
                 # Pack the step into bpm.Vertical. solve_trs returns the true
                 # step p (params should move to params + p), but apply_update
@@ -588,8 +723,11 @@ def train(args: argparse.Namespace) -> None:
                     f" {'ok' if scalars.accepted else 'REJ'}"
                     f" {'boundary' if scalars.step_type else 'interior'}"
                     f"{' HARD' if scalars.hard_case else ''}"
-                    f" eig=[{scalars.h_eig_min:+.2e},{scalars.h_eig_max:+.2e}]"
                 )
+                if args.tr_solver == "efficient":
+                    extra += f" solves={int(scalars.tr_solves)}"
+                else:
+                    extra += f" eig=[{scalars.h_eig_min:+.2e},{scalars.h_eig_max:+.2e}]"
             print(
                 f"[{args.mode}] step={step_idx:4d} "
                 f"loss={scalars.loss:.4f} avg10={scalars.train_loss_avg10:.4f} probe={scalars.probe_loss:.4f} probe_acc={scalars.probe_accuracy:.3f} bacc={scalars.batch_accuracy:.3f} "
@@ -743,6 +881,16 @@ def parse_args() -> argparse.Namespace:
         "runs to keep event files small.",
     )
     # Trust-region flags
+    p.add_argument(
+        "--tr-solver",
+        choices=["dense", "efficient"],
+        default="dense",
+        help=(
+            "Trust-region subproblem solver. 'dense' eigendecomposes the full "
+            "Hessian (O(P^3)); 'efficient' uses the paper's linear-time damped "
+            "solver as an oracle and searches the damping lambda."
+        ),
+    )
     p.add_argument(
         "--delta-init",
         type=float,

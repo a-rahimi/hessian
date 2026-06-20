@@ -57,6 +57,24 @@ class LayerDerivatives(NamedTuple):
     DM_Dzz: torch.Tensor  # D_M ∇_{zz} f_ℓ: (a² × a), scaled by b_ℓ
 
 
+class HessianInverseSetup(NamedTuple):
+    """Epsilon-independent terms shared across (H + epsilon I) solves.
+
+    Produced by `SequenceOfBlocks.hessian_inverse_setup` and consumed by
+    `hessian_inverse_solve`. Holds the network derivatives plus the structural
+    matrices (M, P, zero_block) so a sweep over the damping epsilon recomputes
+    only the cheap per-epsilon assembly and factorization.
+    """
+
+    Dx: bpm.Diagonal
+    DD_Dxx: bpm.Diagonal
+    DD_Dzx: bpm.Diagonal
+    DM_Dzz: bpm.Diagonal
+    M: "bpm.IdentityWithLowerDiagonal"
+    P: torch.Tensor
+    zero_block: bpm.Diagonal
+
+
 class BlockWithMixedDerivatives(nn.Module):
     "An abstract layer for which various partial derivatives can be computed."
 
@@ -284,17 +302,22 @@ class SequenceOfBlocks(nn.Module):
             + Dx.T @ M.T.solve((P.T @ (DM_Dzz @ t1)))
         )
 
-    def hessian_inverse_product(
-        self, z_in: torch.Tensor, target: torch.Tensor, b: bpm.Vertical, epsilon: float
-    ) -> bpm.Vertical:
-        "Solve (H + epsilon I) x = b using the algorithm in hessian.tex."
+    def hessian_inverse_setup(
+        self, z_in: torch.Tensor, target: torch.Tensor
+    ) -> "HessianInverseSetup":
+        """Precompute the epsilon-independent terms of the (H + epsilon I) solve.
 
-        # Compute the terms we used to compute the hessian-vector product H x.
+        The network derivatives (and the structural matrices M, P, zero_block
+        derived from them) do not depend on the damping epsilon. Computing them
+        is the expensive part of `hessian_inverse_product` -- it runs functorch
+        over the whole network. Splitting it out lets a caller that needs to
+        solve `(H + epsilon I) x = b` for many epsilon values (e.g. the
+        trust-region subproblem's search over the damping lambda) pay this cost
+        once and reuse it across all the solves.
+        """
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
         M = bpm.IdentityWithLowerDiagonal((-Dz).flat[1:])
         P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.flatten()])
-
-        _validate_vector_is_Hessian_shaped(b, Dx)
 
         zero_block = bpm.Diagonal(
             [
@@ -302,6 +325,34 @@ class SequenceOfBlocks(nn.Module):
                 for d, mt in zip(Dx.diagonal_blocks, M.T.diagonal_blocks)
             ]
         )
+
+        return HessianInverseSetup(
+            Dx=Dx,
+            DD_Dxx=DD_Dxx,
+            DD_Dzx=DD_Dzx,
+            DM_Dzz=DM_Dzz,
+            M=M,
+            P=P,
+            zero_block=zero_block,
+        )
+
+    def hessian_inverse_solve(
+        self, setup: "HessianInverseSetup", b: bpm.Vertical, epsilon: float
+    ) -> bpm.Vertical:
+        """Solve (H + epsilon I) x = b reusing a precomputed `setup`.
+
+        Only the cheap, epsilon- and b-dependent assembly and the
+        block-tridiagonal factorization are redone here.
+        """
+        Dx, DD_Dxx, DD_Dzx, DM_Dzz = (
+            setup.Dx,
+            setup.DD_Dxx,
+            setup.DD_Dzx,
+            setup.DM_Dzz,
+        )
+        M, P, zero_block = setup.M, setup.P, setup.zero_block
+
+        _validate_vector_is_Hessian_shaped(b, Dx)
 
         # Write (H + epsilon I) x = b as an augmented system K [x;y;z] = [b;0;0].  K is a 3x3
         # block matrix. These  blocks are either diagonal, or bi-diagonal.
@@ -344,6 +395,13 @@ class SequenceOfBlocks(nn.Module):
 
         # Just need the first block of xyz, which is x.
         return xyz.blocks[0][0]
+
+    def hessian_inverse_product(
+        self, z_in: torch.Tensor, target: torch.Tensor, b: bpm.Vertical, epsilon: float
+    ) -> bpm.Vertical:
+        "Solve (H + epsilon I) x = b using the algorithm in hessian.tex."
+        setup = self.hessian_inverse_setup(z_in, target)
+        return self.hessian_inverse_solve(setup, b, epsilon)
 
 
 class SequenceOfDenseBlocks(SequenceOfBlocks):
