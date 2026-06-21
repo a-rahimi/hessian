@@ -75,6 +75,7 @@ class StepScalars:
     hard_case: float = 0.0
     step_type: float = 0.0  # 0 = interior, 1 = boundary
     tr_solves: float = 0.0  # oracle (H+lambda I) solves used by the efficient solver
+    tr_secular_evals: float = 0.0  # secular-function evals used by the dense solver
 
 
 class StepLogger:
@@ -238,14 +239,18 @@ def vertical_norm(v: bpm.Vertical) -> float:
 
 def solve_trs(
     g: torch.Tensor, H: torch.Tensor, delta: float
-) -> tuple[torch.Tensor, float, str, bool, torch.Tensor]:
+) -> tuple[torch.Tensor, float, str, bool, torch.Tensor, int]:
     """Solve the trust-region subproblem exactly via eigendecomposition.
 
-    Returns (p, lambda_star, step_type, hard_case, eigvals) where step_type is
-    "interior" or "boundary" and hard_case is True when g is nearly
-    orthogonal to the minimum eigenvector (logged but not specially handled).
-    eigvals is the ascending spectrum of H, returned so the caller can read
-    h_eig_min/max without a second (expensive) eigendecomposition.
+    Returns (p, lambda_star, step_type, hard_case, eigvals, n_secular_evals)
+    where step_type is "interior" or "boundary" and hard_case is True when g is
+    nearly orthogonal to the minimum eigenvector (logged but not specially
+    handled). eigvals is the ascending spectrum of H, returned so the caller can
+    read h_eig_min/max without a second (expensive) eigendecomposition.
+    n_secular_evals counts evaluations of the secular function ‖(H+λI)⁻¹g‖ in
+    the eigenbasis (the root-find work after the one eigendecomposition); it is
+    the dense analogue of the efficient solver's solve count, though each dense
+    eval is cheap eigenbasis arithmetic rather than a linear solve.
     """
     eigvals, Q = torch.linalg.eigh(H)
     lambda_min = float(eigvals[0].item())
@@ -258,7 +263,7 @@ def solve_trs(
         p_hat_newton = -g_hat / eigvals
         if float(p_hat_newton.norm().item()) <= delta:
             p = Q @ p_hat_newton
-            return p, 0.0, "interior", False, eigvals
+            return p, 0.0, "interior", False, eigvals, 0
 
     # Need lambda > 0. Secular equation: ‖(H + λI)⁻¹g‖ = delta
     # In eigenbasis this is sum(g_hat_i² / (λ_i + λ)²) = delta²
@@ -267,7 +272,11 @@ def solve_trs(
 
     hard_case = lambda_min <= 0 and float(g_hat[0].abs().item()) < 1e-10 * float(g_hat.norm().item())
 
+    n_secular = 0
+
     def secular(lam: float) -> float:
+        nonlocal n_secular
+        n_secular += 1
         denom = eigvals + lam
         return float((g_hat / denom).norm().item())
 
@@ -291,7 +300,7 @@ def solve_trs(
     lambda_star = (lambda_lb + lambda_ub) / 2.0
     p_hat = -g_hat / (eigvals + lambda_star)
     p = Q @ p_hat
-    return p, lambda_star, "boundary", hard_case, eigvals
+    return p, lambda_star, "boundary", hard_case, eigvals, n_secular
 
 
 def vertical_like(flat: torch.Tensor, template: bpm.Vertical) -> bpm.Vertical:
@@ -628,11 +637,12 @@ def train(args: argparse.Namespace) -> None:
                     )
                     H = hessian.flatten_2d_pytree(hessian_dict)
 
-                    p_flat, lambda_star, step_type, hard_case, eigvals = solve_trs(
-                        g_flat, H, trust_radius
+                    p_flat, lambda_star, step_type, hard_case, eigvals, n_secular = (
+                        solve_trs(g_flat, H, trust_radius)
                     )
                     scalars.h_eig_min = float(eigvals[0].item())
                     scalars.h_eig_max = float(eigvals[-1].item())
+                    scalars.tr_secular_evals = float(n_secular)
 
                     # Predicted reduction from the quadratic model: -gᵀp - ½pᵀHp
                     with torch.no_grad():
@@ -734,7 +744,10 @@ def train(args: argparse.Namespace) -> None:
                 if args.tr_solver == "efficient":
                     extra += f" solves={int(scalars.tr_solves)}"
                 else:
-                    extra += f" eig=[{scalars.h_eig_min:+.2e},{scalars.h_eig_max:+.2e}]"
+                    extra += (
+                        f" secular={int(scalars.tr_secular_evals)}"
+                        f" eig=[{scalars.h_eig_min:+.2e},{scalars.h_eig_max:+.2e}]"
+                    )
             print(
                 f"[{args.mode}] step={step_idx:4d} "
                 f"loss={scalars.loss:.4f} avg10={scalars.train_loss_avg10:.4f} probe={scalars.probe_loss:.4f} probe_acc={scalars.probe_accuracy:.3f} bacc={scalars.batch_accuracy:.3f} "

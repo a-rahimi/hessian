@@ -56,7 +56,7 @@ def test_oracle_matches_dense_boundary_spd(seed):
     newton = torch.linalg.solve(H, g)
     delta = 0.1 * float(newton.norm())
 
-    p_dense, lam_dense, type_dense, _, _ = solve_trs(g, H, delta)
+    p_dense, lam_dense, type_dense, _, _, _ = solve_trs(g, H, delta)
     p_oracle, lam_oracle, type_oracle, _, n_solves = solve_trs_oracle(
         g, dense_inverse_oracle(H), delta, tol=1e-10
     )
@@ -80,7 +80,7 @@ def test_oracle_matches_dense_interior_spd(seed):
     newton = torch.linalg.solve(H, g)
     delta = 10.0 * float(newton.norm())
 
-    p_dense, lam_dense, type_dense, _, _ = solve_trs(g, H, delta)
+    p_dense, lam_dense, type_dense, _, _, _ = solve_trs(g, H, delta)
     p_oracle, lam_oracle, type_oracle, _, _ = solve_trs_oracle(
         g, dense_inverse_oracle(H), delta, tol=1e-10
     )
@@ -107,7 +107,7 @@ def test_oracle_matches_dense_indefinite_safe_delta():
     target = torch.linalg.solve(H + lam0 * torch.eye(n, dtype=torch.float64), g)
     delta = float(target.norm())
 
-    p_dense, lam_dense, type_dense, _, _ = solve_trs(g, H, delta)
+    p_dense, lam_dense, type_dense, _, _, _ = solve_trs(g, H, delta)
     p_oracle, lam_oracle, type_oracle, hard, _ = solve_trs_oracle(
         g, dense_inverse_oracle(H), delta, tol=1e-10
     )
