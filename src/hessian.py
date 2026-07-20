@@ -216,7 +216,7 @@ def _splu_solve(K: bpm.Generic, b: bpm.Vertical, Dx: bpm.Diagonal) -> bpm.Vertic
     the block path unnecessary.
     """
     with torch.no_grad():
-        K_csc = bpm.to_scipy_csc(K)
+        K_csc = K.to_scipy_csc()
 
         rhs = np.zeros(K_csc.shape[0], dtype=np.float64)
         offset = 0

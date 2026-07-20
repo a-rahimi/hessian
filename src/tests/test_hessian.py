@@ -788,7 +788,7 @@ def test_to_scipy_csc_matches_dense():
         ]
     )
 
-    sparse = bpm.to_scipy_csc(M)
+    sparse = M.to_scipy_csc()
 
     assert sparse.dtype == np.float64
     assert sparse.shape == (M.height, M.width)

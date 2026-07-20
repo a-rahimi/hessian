@@ -48,7 +48,7 @@ Matrix
 """
 
 from typing import Any, Callable, Iterator, Sequence
-from functools import singledispatch, singledispatchmethod, cached_property
+from functools import singledispatchmethod, cached_property
 
 import numpy as np
 import scipy.sparse
@@ -60,6 +60,48 @@ class Matrix:
 
     def to_tensor(self) -> torch.Tensor:
         raise NotImplementedError
+
+    def to_scipy_csc(self) -> scipy.sparse.csc_matrix:
+        """Convert to a scipy.sparse.csc_matrix without materializing the matrix densely.
+
+        Recurses through the block structure and emits COO triplets for the leaf
+        blocks only, so memory use is proportional to the number of nonzeros
+        rather than to height * width.
+        """
+        rows: list[np.ndarray] = []
+        cols: list[np.ndarray] = []
+        vals: list[np.ndarray] = []
+        self._emit_coo(0, 0, rows, cols, vals)
+        return scipy.sparse.coo_matrix(
+            (
+                np.concatenate(vals) if vals else np.empty(0, dtype=np.float64),
+                (
+                    np.concatenate(rows) if rows else np.empty(0, dtype=np.intp),
+                    np.concatenate(cols) if cols else np.empty(0, dtype=np.intp),
+                ),
+            ),
+            shape=(self.height, self.width),
+            dtype=np.float64,
+        ).tocsc()
+
+    def _emit_coo(
+        self,
+        row_offset: int,
+        col_offset: int,
+        rows: list[np.ndarray],
+        cols: list[np.ndarray],
+        vals: list[np.ndarray],
+    ) -> None:
+        """Append the COO triplets of this matrix to rows/cols/vals, offset by (row_offset, col_offset).
+
+        Overridden per block type so that a sparse assembly never has to
+        materialize a dense tensor for the matrix as a whole (only for its
+        individual leaf blocks, which are small). Each leaf appends whole numpy
+        arrays so no per-entry Python loop touches the nonzeros.
+        """
+        raise NotImplementedError(
+            f"to_scipy_csc: no sparse COO emission registered for {type(self)}"
+        )
 
     def invert(self) -> "Matrix":
         raise NotImplementedError
@@ -109,6 +151,18 @@ class Tensor(torch.Tensor, Matrix):
 
     def to_tensor(self) -> torch.Tensor:
         return torch.Tensor(self)
+
+    def _emit_coo(self, row_offset, col_offset, rows, cols, vals) -> None:
+        # Scan for nonzeros with torch (multithreaded, ~4x faster than
+        # np.nonzero on large blocks) and convert only the nonzero values to
+        # float64, avoiding a full-precision copy of large mostly-zero blocks.
+        dense = self.detach().cpu()
+        nonzero_indices = torch.nonzero(dense)
+        nz_rows = nonzero_indices[:, 0].numpy()
+        nz_cols = nonzero_indices[:, 1].numpy()
+        rows.append(nz_rows + row_offset)
+        cols.append(nz_cols + col_offset)
+        vals.append(dense.numpy()[nz_rows, nz_cols].astype(np.float64, copy=False))
 
     @singledispatchmethod
     def __matmul__(self, other: Matrix) -> Matrix:
@@ -173,6 +227,18 @@ class Identity(Matrix):
 
     def to_tensor(self) -> torch.Tensor:
         return torch.eye(self.dimension)
+
+    def _emit_coo(self, row_offset, col_offset, rows, cols, vals) -> None:
+        if self.dimension == 0:
+            raise ValueError(
+                "Cannot emit sparse COO entries for an Identity with unknown dimension"
+            )
+        # ScaledIdentity inherits this method; its scale attribute replaces the
+        # implicit 1.0 of a plain Identity.
+        scale = getattr(self, "scale", 1.0)
+        rows.append(np.arange(self.dimension) + row_offset)
+        cols.append(np.arange(self.dimension) + col_offset)
+        vals.append(np.full(self.dimension, scale, dtype=np.float64))
 
     def __eq__(self, other: Matrix) -> bool:
         return isinstance(other, Identity) and self.dimension == other.dimension
@@ -289,6 +355,9 @@ class Zero(Matrix):
 
     def to_tensor(self) -> torch.Tensor:
         return torch.zeros(*self.shape)
+
+    def _emit_coo(self, row_offset, col_offset, rows, cols, vals) -> None:
+        pass
 
     def __neg__(self) -> "Zero":
         return self
@@ -503,6 +572,15 @@ class Generic(Ragged):
         return torch.vstack(
             [torch.hstack([b.to_tensor() for b in row]) for row in self.blocks]
         )
+
+    def _emit_coo(self, row_offset, col_offset, rows, cols, vals) -> None:
+        row = row_offset
+        for block_row in self.blocks:
+            col = col_offset
+            for block in block_row:
+                block._emit_coo(row, col, rows, cols, vals)
+                col += block.width
+            row += block_row[0].height
 
     @property
     def width(self) -> int:
@@ -1023,6 +1101,28 @@ class Tridiagonal(Ragged):
         )
         D = Diagonal(self.diagonal_blocks)
         return D.to_tensor() + L.to_tensor() + U.to_tensor()
+
+    def _emit_coo(self, row_offset, col_offset, rows, cols, vals) -> None:
+        diagonal_blocks = self.diagonal_blocks
+
+        row_offsets = []
+        r = row_offset
+        for d in diagonal_blocks:
+            row_offsets.append(r)
+            r += d.height
+
+        col_offsets = []
+        c = col_offset
+        for d in diagonal_blocks:
+            col_offsets.append(c)
+            c += d.width
+
+        for i, d in enumerate(diagonal_blocks):
+            d._emit_coo(row_offsets[i], col_offsets[i], rows, cols, vals)
+        for i, L in enumerate(self.lower_blocks):
+            L._emit_coo(row_offsets[i + 1], col_offsets[i], rows, cols, vals)
+        for i, U in enumerate(self.upper_blocks):
+            U._emit_coo(row_offsets[i], col_offsets[i + 1], rows, cols, vals)
 
 
 class SymmetricTriDiagonal(Tridiagonal):
@@ -1625,116 +1725,3 @@ def _(self, other: ScaledIdentity) -> "SymmetricTriDiagonal":
         lower_blocks=self.lower_blocks,
         diagonal_blocks=(Diagonal(self.diagonal_blocks) + other).diagonal_blocks,
     )
-
-
-@singledispatch
-def _emit_coo(
-    matrix: Matrix,
-    row_offset: int,
-    col_offset: int,
-    rows: list[np.ndarray],
-    cols: list[np.ndarray],
-    vals: list[np.ndarray],
-) -> None:
-    """Append the COO triplets of `matrix` to rows/cols/vals, offset by (row_offset, col_offset).
-
-    Dispatches on block type so that a sparse assembly never has to
-    materialize a dense tensor for the matrix as a whole (only for its
-    individual leaf blocks, which are small). Each leaf appends whole numpy
-    arrays so no per-entry Python loop touches the nonzeros.
-    """
-    raise NotImplementedError(
-        f"to_scipy_csc: no sparse COO emission registered for {type(matrix)}"
-    )
-
-
-@_emit_coo.register
-def _(matrix: Zero, row_offset, col_offset, rows, cols, vals) -> None:
-    pass
-
-
-@_emit_coo.register
-def _(matrix: Identity, row_offset, col_offset, rows, cols, vals) -> None:
-    if matrix.dimension == 0:
-        raise ValueError(
-            "Cannot emit sparse COO entries for an Identity with unknown dimension"
-        )
-    scale = getattr(matrix, "scale", 1.0)
-    rows.append(np.arange(matrix.dimension) + row_offset)
-    cols.append(np.arange(matrix.dimension) + col_offset)
-    vals.append(np.full(matrix.dimension, scale, dtype=np.float64))
-
-
-@_emit_coo.register
-def _(matrix: Tensor, row_offset, col_offset, rows, cols, vals) -> None:
-    # Scan for nonzeros with torch (multithreaded, ~4x faster than
-    # np.nonzero on large blocks) and convert only the nonzero values to
-    # float64, avoiding a full-precision copy of large mostly-zero blocks.
-    dense = matrix.detach().cpu()
-    nonzero_indices = torch.nonzero(dense)
-    nz_rows = nonzero_indices[:, 0].numpy()
-    nz_cols = nonzero_indices[:, 1].numpy()
-    rows.append(nz_rows + row_offset)
-    cols.append(nz_cols + col_offset)
-    vals.append(dense.numpy()[nz_rows, nz_cols].astype(np.float64, copy=False))
-
-
-@_emit_coo.register
-def _(matrix: Generic, row_offset, col_offset, rows, cols, vals) -> None:
-    row = row_offset
-    for block_row in matrix.blocks:
-        col = col_offset
-        for block in block_row:
-            _emit_coo(block, row, col, rows, cols, vals)
-            col += block.width
-        row += block_row[0].height
-
-
-@_emit_coo.register
-def _(matrix: Tridiagonal, row_offset, col_offset, rows, cols, vals) -> None:
-    diagonal_blocks = matrix.diagonal_blocks
-    lower_blocks = matrix.lower_blocks
-    upper_blocks = matrix.upper_blocks
-
-    row_offsets = []
-    r = row_offset
-    for d in diagonal_blocks:
-        row_offsets.append(r)
-        r += d.height
-
-    col_offsets = []
-    c = col_offset
-    for d in diagonal_blocks:
-        col_offsets.append(c)
-        c += d.width
-
-    for i, d in enumerate(diagonal_blocks):
-        _emit_coo(d, row_offsets[i], col_offsets[i], rows, cols, vals)
-    for i, L in enumerate(lower_blocks):
-        _emit_coo(L, row_offsets[i + 1], col_offsets[i], rows, cols, vals)
-    for i, U in enumerate(upper_blocks):
-        _emit_coo(U, row_offsets[i], col_offsets[i + 1], rows, cols, vals)
-
-
-def to_scipy_csc(matrix: Matrix) -> scipy.sparse.csc_matrix:
-    """Convert a Matrix to a scipy.sparse.csc_matrix without materializing it densely.
-
-    Recurses through the block structure and emits COO triplets for the leaf
-    blocks only, so memory use is proportional to the number of nonzeros
-    rather than to height * width.
-    """
-    rows: list[np.ndarray] = []
-    cols: list[np.ndarray] = []
-    vals: list[np.ndarray] = []
-    _emit_coo(matrix, 0, 0, rows, cols, vals)
-    return scipy.sparse.coo_matrix(
-        (
-            np.concatenate(vals) if vals else np.empty(0, dtype=np.float64),
-            (
-                np.concatenate(rows) if rows else np.empty(0, dtype=np.intp),
-                np.concatenate(cols) if cols else np.empty(0, dtype=np.intp),
-            ),
-        ),
-        shape=(matrix.height, matrix.width),
-        dtype=np.float64,
-    ).tocsc()
