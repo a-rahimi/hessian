@@ -79,6 +79,12 @@ class HessianInverseSetup(NamedTuple):
 class BlockWithMixedDerivatives(nn.Module):
     "An abstract layer for which various partial derivatives can be computed."
 
+    # Whether Dz and DM_Dzz are batch-block-diagonal for this layer, i.e.
+    # whether sample i's output depends only on sample i's input. This holds
+    # for ordinary per-sample layers (DenseBlock etc.) but not for LossLayer,
+    # whose scalar mean-loss output couples every sample together.
+    batch_structured_dz = True
+
     def __init__(self):
         super().__init__()
         # Caches for the input and output of the layer
@@ -117,14 +123,20 @@ class BlockWithMixedDerivatives(nn.Module):
         def dloss_dz_f(x, z):
             return dloss_dz.flatten() @ f(x, z).flatten()
 
+        if self.batch_structured_dz:
+            Dz, DM_Dzz = self._per_sample_Dz_DM_Dzz(dloss_dz, params, input_shape)
+        else:
+            Dz = torch.func.jacrev(lambda z: f(params, z))(z_in).reshape(
+                self.output.numel(), -1
+            )
+            DM_Dzz = TF.hessian(lambda z: dloss_dz_f(params, z))(z_in)
+
         return LayerDerivatives(
             Dx=reshape_pytree(
                 TF.jacrev(lambda x: f(x, z_in))(params),
                 starting_shape=self.output.shape,
             ).reshape(self.output.numel(), -1),
-            Dz=torch.func.jacrev(lambda z: f(params, z))(z_in).reshape(
-                self.output.numel(), -1
-            ),
+            Dz=Dz,
             DD_Dxx=flatten_2d_pytree(TF.hessian(lambda x: dloss_dz_f(x, z_in))(params)),
             DD_Dzx=torch.func.jacrev(
                 lambda z_in: reshape_pytree(
@@ -132,8 +144,43 @@ class BlockWithMixedDerivatives(nn.Module):
                     starting_shape=(),
                 ),
             )(z_in).reshape(-1, self.input.numel()),
-            DM_Dzz=TF.hessian(lambda z: dloss_dz_f(params, z))(z_in),
+            DM_Dzz=DM_Dzz,
         )
+
+    def _per_sample_Dz_DM_Dzz(
+        self, dloss_dz: torch.Tensor, params: dict, input_shape: torch.Size
+    ) -> tuple["bpm.Diagonal", "bpm.Diagonal"]:
+        """Compute Dz and DM_Dzz per-sample and return them as nested `bpm.Diagonal`s.
+
+        Sample i's output depends only on sample i's input (verified in
+        docs/batch-structure-plan.md), so the (batch*w) x (batch*w) Dz and
+        DM_Dzz blocks are exactly block-diagonal in the batch dimension. Rather
+        than materializing the dense (batch*w)^2 tensor and discarding the
+        zeros, vmap a per-sample jacobian/hessian over the batch to get the
+        `batch` non-zero w x w sub-blocks directly.
+        """
+        batch = input_shape[0]
+        sample_shape = input_shape[1:]
+        z_batch = self.input.reshape(batch, -1)
+        dloss_batch = dloss_dz.reshape(batch, -1)
+
+        def naked_single(z_s: torch.Tensor) -> torch.Tensor:
+            out = TF.functional_call(
+                self, params, (z_s.reshape(sample_shape).unsqueeze(0),)
+            )
+            return out.reshape(-1)
+
+        def scalar_single(z_s: torch.Tensor, dloss_s: torch.Tensor) -> torch.Tensor:
+            return dloss_s @ naked_single(z_s)
+
+        Dz_batched = torch.func.vmap(torch.func.jacrev(naked_single))(z_batch)
+        DM_Dzz_batched = torch.func.vmap(torch.func.hessian(scalar_single))(
+            z_batch, dloss_batch
+        )
+
+        Dz = bpm.Diagonal([bpm.Tensor(block) for block in Dz_batched])
+        DM_Dzz = bpm.Diagonal([bpm.Tensor(block) for block in DM_Dzz_batched])
+        return Dz, DM_Dzz
 
 
 class DenseBlock(BlockWithMixedDerivatives):
@@ -155,6 +202,15 @@ class DenseBlock(BlockWithMixedDerivatives):
 
 class LossLayer(DenseBlock):
     """Final layer that fuses the last linear layer with the loss computation."""
+
+    # The loss layer's output is the scalar mean loss over the whole batch, not
+    # a per-sample vector, so Dz (a single row) cannot be split into batch x w
+    # x w sub-blocks the way a normal layer's can -- there is no batch axis on
+    # the output to block against. (DM_Dzz's cross-sample terms happen to be
+    # numerically zero for mean cross-entropy too, but reproducing that
+    # per-sample -- correctly accounting for the 1/batch mean scaling -- adds
+    # risk without the memory payoff that matters here, so both stay dense.)
+    batch_structured_dz = False
 
     def __init__(self, input_dim: int, num_classes: int):
         super().__init__(input_dim, num_classes, nn.Identity())
@@ -241,6 +297,24 @@ def _splu_solve(K: bpm.Generic, b: bpm.Vertical, Dx: bpm.Diagonal) -> bpm.Vertic
         return bpm.Vertical(x_blocks)
 
 
+def _densify_per_sample_blocks(diagonal: bpm.Diagonal) -> bpm.Diagonal:
+    """Collapse each layer's per-sample nested `Diagonal` block into a dense `Tensor`.
+
+    `Dz` and `DM_Dzz` carry a per-sample block-diagonal structure (a nested
+    `Diagonal` of `batch` sub-blocks). The reference matrix-vector and block
+    paths eliminate the activation space in a way that couples the batch samples
+    through the shared parameters, so that structure cannot survive the
+    computation. Materializing each layer's block densely lets those paths do
+    only dense activation-space linear algebra, with no structured matrix ever
+    multiplying an unstructured tensor. The default splu path keeps the full
+    per-sample structure (via `to_scipy_csc`), so the setup's memory win is
+    unaffected.
+    """
+    return bpm.Diagonal(
+        [bpm.Tensor(block.to_tensor()) for block in diagonal.diagonal_blocks]
+    )
+
+
 class SequenceOfBlocks(nn.Module):
     "A sequence of blocks for which mixed derivatives can be computed."
 
@@ -320,6 +394,10 @@ class SequenceOfBlocks(nn.Module):
         operations instead of backprop operations.
         """
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
+        # The activation-space elimination below couples the batch samples, so
+        # collapse Dz's and DM_Dzz's per-sample structure into dense blocks.
+        Dz = _densify_per_sample_blocks(Dz)
+        DM_Dzz = _densify_per_sample_blocks(DM_Dzz)
         M = bpm.IdentityWithLowerDiagonal((-Dz).flat[1:])
         P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.flatten()])
 
@@ -405,6 +483,23 @@ class SequenceOfBlocks(nn.Module):
 
         if solver == "splu":
             return _splu_solve(K, b, Dx)
+
+        # The block factorization couples the batch samples through the shared
+        # parameters (the Schur complements S12, S22 are dense across samples),
+        # so the per-sample structure of `M` and `DM_Dzz` cannot survive the
+        # solve. Densify those nested per-sample blocks so the block path is
+        # entirely dense activation-space linear algebra.
+        M = bpm.IdentityWithLowerDiagonal(
+            [bpm.Tensor(block.to_tensor()) for block in M.lower_blocks]
+        )
+        DM_Dzz = _densify_per_sample_blocks(DM_Dzz)
+        K = bpm.Generic(
+            [
+                [DD_Dxx + epsilon * bpm.Identity(DD_Dxx.height), DD_Dzx @ P, Dx.T],
+                [-Dx, M, zero_block],
+                [-P.T @ DD_Dzx.T, -P.T @ DM_Dzz @ P, M.T],
+            ]
+        )
 
         zeros = bpm.Vertical([bpm.Zero((b.height, 1)) for b in M.diagonal_blocks])
         b00 = bpm.Vertical([b, zeros, zeros])
