@@ -5,6 +5,7 @@ as described in "The Hessian of tall-skinny networks is easy to invert"
 
 from typing import Callable, Iterator, Iterable, NamedTuple, Sequence
 import numpy as np
+import scipy.sparse.linalg
 import torch
 import torch.func as TF
 import torch.nn as nn
@@ -206,6 +207,40 @@ def _validate_vector_is_Hessian_shaped(b: bpm.Vertical, Dx: bpm.Diagonal):
             )
 
 
+def _splu_solve(K: bpm.Generic, b: bpm.Vertical, Dx: bpm.Diagonal) -> bpm.Vertical:
+    """Solve K [x;y;z] = [b;0;0] with scipy's sparse LU and return x.
+
+    The factorization runs in float64 with partial pivoting, so it is both
+    more accurate and faster than the unpivoted block LDU path. SuperLU's
+    fill-reducing column ordering makes the blockwise-transpose pivoting of
+    the block path unnecessary.
+    """
+    with torch.no_grad():
+        K_csc = bpm.to_scipy_csc(K)
+
+        rhs = np.zeros(K_csc.shape[0], dtype=np.float64)
+        offset = 0
+        for block in b.flat:
+            block_np = block.detach().to(torch.float64).numpy().ravel()
+            rhs[offset : offset + block_np.size] = block_np
+            offset += block_np.size
+
+        xyz = scipy.sparse.linalg.splu(K_csc).solve(rhs)
+
+        x_blocks = []
+        offset = 0
+        for b_block, Dx_block in zip(b.flat, Dx.diagonal_blocks):
+            width = Dx_block.width
+            x_np = np.ascontiguousarray(xyz[offset : offset + width])
+            x_blocks.append(
+                bpm.Tensor(
+                    torch.from_numpy(x_np).to(b_block.dtype).reshape(width, 1)
+                )
+            )
+            offset += width
+        return bpm.Vertical(x_blocks)
+
+
 class SequenceOfBlocks(nn.Module):
     "A sequence of blocks for which mixed derivatives can be computed."
 
@@ -337,13 +372,23 @@ class SequenceOfBlocks(nn.Module):
         )
 
     def hessian_inverse_solve(
-        self, setup: "HessianInverseSetup", b: bpm.Vertical, epsilon: float
+        self,
+        setup: "HessianInverseSetup",
+        b: bpm.Vertical,
+        epsilon: float,
+        solver: str = "splu",
     ) -> bpm.Vertical:
         """Solve (H + epsilon I) x = b reusing a precomputed `setup`.
 
-        Only the cheap, epsilon- and b-dependent assembly and the
-        block-tridiagonal factorization are redone here.
+        Only the cheap, epsilon- and b-dependent assembly and factorization are
+        redone here. `solver` selects the factorization: "splu" (default) uses
+        scipy's sparse LU with partial pivoting in float64, which is faster and
+        far more accurate; "block" uses the paper's unpivoted block-tridiagonal
+        LDU factorization.
         """
+        if solver not in ("splu", "block"):
+            raise ValueError(f"solver must be 'splu' or 'block', got {solver!r}")
+
         Dx, DD_Dxx, DD_Dzx, DM_Dzz, M, P, zero_block = setup
 
         _validate_vector_is_Hessian_shaped(b, Dx)
@@ -357,6 +402,9 @@ class SequenceOfBlocks(nn.Module):
                 [-P.T @ DD_Dzx.T, -P.T @ DM_Dzz @ P, M.T],
             ]
         )
+
+        if solver == "splu":
+            return _splu_solve(K, b, Dx)
 
         zeros = bpm.Vertical([bpm.Zero((b.height, 1)) for b in M.diagonal_blocks])
         b00 = bpm.Vertical([b, zeros, zeros])
@@ -391,11 +439,16 @@ class SequenceOfBlocks(nn.Module):
         return xyz.blocks[0][0]
 
     def hessian_inverse_product(
-        self, z_in: torch.Tensor, target: torch.Tensor, b: bpm.Vertical, epsilon: float
+        self,
+        z_in: torch.Tensor,
+        target: torch.Tensor,
+        b: bpm.Vertical,
+        epsilon: float,
+        solver: str = "splu",
     ) -> bpm.Vertical:
         "Solve (H + epsilon I) x = b using the algorithm in hessian.tex."
         setup = self.hessian_inverse_setup(z_in, target)
-        return self.hessian_inverse_solve(setup, b, epsilon)
+        return self.hessian_inverse_solve(setup, b, epsilon, solver=solver)
 
 
 class SequenceOfDenseBlocks(SequenceOfBlocks):
