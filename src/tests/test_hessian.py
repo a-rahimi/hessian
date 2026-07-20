@@ -85,11 +85,18 @@ class TestDenseBlock:
         assert derivs.Dx.shape == (output_dim, num_params)
         torch.testing.assert_close(derivs.Dx, expected_Dx)
 
-        assert derivs.Dz.shape == (output_dim, input_dim)
-        torch.testing.assert_close(derivs.Dz, expected_Dz)
+        # Dz/DM_Dzz are now computed per-sample and returned as a nested
+        # bpm.Diagonal (see docs/batch-structure-plan.md Phase 1); unwrap to a
+        # dense tensor to compare against the analytical reference.
+        assert (derivs.Dz.height, derivs.Dz.width) == (output_dim, input_dim)
+        torch.testing.assert_close(derivs.Dz.to_tensor(), expected_Dz)
 
-        torch.testing.assert_close(derivs.DD_Dxx, torch.zeros_like(derivs.DD_Dxx))
-        torch.testing.assert_close(derivs.DM_Dzz, torch.zeros_like(derivs.DM_Dzz))
+        torch.testing.assert_close(
+            derivs.DD_Dxx, torch.zeros_like(derivs.DD_Dxx)
+        )
+        torch.testing.assert_close(
+            derivs.DM_Dzz.to_tensor(), torch.zeros(input_dim, input_dim)
+        )
 
         assert derivs.DD_Dzx.shape == (num_params, input_dim)
         torch.testing.assert_close(derivs.DD_Dzx, expected_DD_Dzx)
@@ -148,8 +155,8 @@ class TestDenseBlock:
         torch.testing.assert_close(derivs.Dx, expected_Dx)
 
         expected_Dz = 2 * z_linear.reshape(-1, 1) * block_square.linear.weight
-        assert derivs.Dz.shape == (output_dim, input_dim)
-        torch.testing.assert_close(derivs.Dz, expected_Dz)
+        assert (derivs.Dz.height, derivs.Dz.width) == (output_dim, input_dim)
+        torch.testing.assert_close(derivs.Dz.to_tensor(), expected_Dz)
 
         expected_DD_Dxx = (
             2
@@ -167,8 +174,108 @@ class TestDenseBlock:
             @ block_square.linear.weight
         )
         assert expected_DD_Dzz.shape == (input_dim, input_dim)
-        assert derivs.DM_Dzz.shape == (input_dim, input_dim)
-        torch.testing.assert_close(derivs.DM_Dzz, expected_DD_Dzz)
+        assert (derivs.DM_Dzz.height, derivs.DM_Dzz.width) == (input_dim, input_dim)
+        torch.testing.assert_close(derivs.DM_Dzz.to_tensor(), expected_DD_Dzz)
+
+
+class TestBatchStructuredDerivatives:
+    """Test the per-sample nested-Diagonal representation of Dz/DM_Dzz.
+
+    See docs/batch-structure-plan.md Phase 1: for an ordinary (non-loss)
+    layer, sample i's output depends only on sample i's input, so Dz and
+    DM_Dzz should come back as a bpm.Diagonal of `batch` independent
+    sub-blocks rather than a dense (batch*w)^2 tensor. The oracle is the
+    pre-change dense computation (torch.func.jacrev/hessian over the
+    batch-flattened input).
+    """
+
+    @pytest.fixture
+    def batch_size(self):
+        return 5
+
+    @pytest.fixture
+    def input_dim(self):
+        return 3
+
+    @pytest.fixture
+    def output_dim(self):
+        return 4
+
+    @pytest.fixture
+    def z_in(self, batch_size, input_dim):
+        return torch.randn(batch_size, input_dim, requires_grad=True)
+
+    @pytest.fixture
+    def dloss_dz(self, batch_size, output_dim):
+        return torch.randn(batch_size, output_dim)
+
+    @pytest.fixture
+    def block(self, input_dim, output_dim, z_in):
+        block = DenseBlock(input_dim, output_dim, torch.tanh)
+        block(z_in)
+        return block
+
+    def dense_reference(self, block, z_in, dloss_dz, input_dim, output_dim):
+        """Recompute Dz/DM_Dzz the pre-change way: dense jacrev/hessian over
+        the batch-flattened input."""
+        params = dict(block.named_parameters())
+        input_shape = z_in.shape
+        z_flat = z_in.flatten().detach()
+
+        def f(z):
+            return torch.func.functional_call(block, params, (z.reshape(input_shape),))
+
+        def dloss_dz_f(z):
+            return dloss_dz.flatten() @ f(z).flatten()
+
+        Dz = torch.func.jacrev(f)(z_flat).reshape(-1, z_flat.numel())
+        DM_Dzz = torch.func.hessian(dloss_dz_f)(z_flat)
+        return Dz, DM_Dzz
+
+    def test_dz_is_nested_diagonal_with_one_block_per_sample(
+        self, block, z_in, dloss_dz, batch_size, input_dim, output_dim
+    ):
+        derivs = block.derivatives(dloss_dz)
+
+        assert isinstance(derivs.Dz, bpm.Diagonal)
+        assert derivs.Dz.num_blocks() == batch_size
+        for sub_block in derivs.Dz.diagonal_blocks:
+            assert sub_block.shape == (output_dim, input_dim)
+
+        assert isinstance(derivs.DM_Dzz, bpm.Diagonal)
+        assert derivs.DM_Dzz.num_blocks() == batch_size
+        for sub_block in derivs.DM_Dzz.diagonal_blocks:
+            assert sub_block.shape == (input_dim, input_dim)
+
+    def test_dz_matches_dense_reference(
+        self, block, z_in, dloss_dz, input_dim, output_dim
+    ):
+        derivs = block.derivatives(dloss_dz)
+        Dz_dense_expected, DM_Dzz_dense_expected = self.dense_reference(
+            block, z_in, dloss_dz, input_dim, output_dim
+        )
+
+        torch.testing.assert_close(
+            derivs.Dz.to_tensor(), Dz_dense_expected, rtol=1e-5, atol=1e-6
+        )
+        torch.testing.assert_close(
+            derivs.DM_Dzz.to_tensor(), DM_Dzz_dense_expected, rtol=1e-5, atol=1e-6
+        )
+
+    def test_cross_sample_blocks_are_exactly_zero_in_dense_reference(
+        self, block, z_in, dloss_dz, batch_size, input_dim, output_dim
+    ):
+        """Sanity-check the structural claim itself: the dense reference has
+        zero cross-sample coupling, which is exactly what licenses discarding
+        those entries and storing only the block-diagonal."""
+        _, DM_Dzz_dense = self.dense_reference(block, z_in, dloss_dz, input_dim, output_dim)
+        DM_Dzz_blocked = DM_Dzz_dense.reshape(batch_size, input_dim, batch_size, input_dim)
+        for i in range(batch_size):
+            for j in range(batch_size):
+                if i != j:
+                    torch.testing.assert_close(
+                        DM_Dzz_blocked[i, :, j, :], torch.zeros(input_dim, input_dim)
+                    )
 
 
 class TestLossLayer:
@@ -420,6 +527,9 @@ class TestSequenceOfBlocks:
         """
         Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = model.derivatives(z_in, target)
 
+        # Dz is a per-sample nested Diagonal; densify it so M solves against the
+        # dense e_L below, matching how hessian_vector_product builds M.
+        Dz = hessian._densify_per_sample_blocks(Dz)
         M = bpm.IdentityWithLowerDiagonal((-Dz).flat[1:])
         e_L = bpm.Vertical([torch.zeros(layer.output.numel(), 1) for layer in model])
         assert e_L.flat[-1].numel() == 1

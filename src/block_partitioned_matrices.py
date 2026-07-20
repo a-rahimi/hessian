@@ -1391,7 +1391,7 @@ class Diagonal(Tridiagonal):
     def invert(self) -> "Diagonal":
         return Diagonal([b.invert() for b in self.diagonal_blocks])
 
-    def solve(self, rhs: Vertical | "Diagonal") -> Vertical | "Diagonal":
+    def solve(self, rhs: "Vertical | Diagonal") -> "Vertical | Diagonal":
         if self.num_blocks() != rhs.num_blocks():
             raise ValueError("Number of blocks in matrix and vector must match")
 
@@ -1432,6 +1432,22 @@ def _(self, other: Vertical) -> Vertical:
     return Vertical(self @ Diagonal(other))
 
 
+@Diagonal.__matmul__.register
+def _(self, other: Identity) -> Diagonal:
+    if other.dimension != 0 and self.width != other.dimension:
+        raise ValueError(
+            f"Dimension mismatch: Diagonal(width={self.width}) @ Identity({other.dimension})"
+        )
+    return self
+
+
+@Diagonal.__matmul__.register
+def _(self, other: Zero) -> Zero:
+    if self.width != other.height:
+        raise ValueError(f"Shape mismatch {self} vs {other.height} x {other.width}")
+    return Zero((self.height, other.width))
+
+
 @Diagonal.__add__.register
 def _(self, other: Diagonal) -> Diagonal:
     return Ragged.__add__(self, other)  # Forwards to the parent.
@@ -1446,6 +1462,16 @@ def _(self, _: Identity) -> Diagonal:
 @Diagonal.__sub__.register
 def _(self, other: Diagonal) -> Diagonal:
     return Ragged.__sub__(self, other)  # Forwards to the parent.
+
+
+@Diagonal.__sub__.register
+def _(self, other: Zero) -> Diagonal:
+    return self
+
+
+@Diagonal.__add__.register
+def _(self, other: Zero) -> Diagonal:
+    return self
 
 
 @Diagonal.__sub__.register
@@ -1610,7 +1636,7 @@ class UpperDiagonal(UpperBiDiagonal):
 
         # U D is upper diagonal, with entries U[:] D[1:]
         return UpperDiagonal(
-            width_leading_zeros=other.flat[0].shape[1],
+            width_leading_zeros=other.flat[0].width,
             upper_blocks=(Diagonal(self.upper_blocks) @ Diagonal(other.flat[1:])).flat,
             height_trailing_zeros=self.height_trailing_zeros,
         )
