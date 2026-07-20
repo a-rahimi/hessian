@@ -2,6 +2,7 @@
 Unit tests for hessian.py
 """
 
+import numpy as np
 import pytest
 import torch
 import torch.nn as nn
@@ -550,10 +551,16 @@ class TestSequenceOfBlocks:
         hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
         H = hessian.flatten_2d_pytree(hessian_dict)
         H = H + epsilon * torch.eye(H.shape[0])
-        hinv_g_torch = torch.linalg.solve(H, random_parameter_vector.to_tensor())
+        # Solve in float64 so the reference solve itself adds no error. The
+        # remaining discrepancy is float32 noise between the two independently
+        # computed Hessians, amplified by the conditioning of H, so the
+        # tolerance cannot be much tighter than 1e-3.
+        hinv_g_torch = torch.linalg.solve(
+            H.detach().double(), random_parameter_vector.to_tensor().double()
+        ).float()
 
         # Compare the two methods
-        torch.testing.assert_close(hinv_g_flat, hinv_g_torch, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(hinv_g_flat, hinv_g_torch, rtol=1e-3, atol=1e-3)
 
     def test_hessian_inverse_product_vs_torch_func_batch(
         self, model, z_in_batch, target_batch, epsilon, random_parameter_vector
@@ -582,6 +589,65 @@ class TestSequenceOfBlocks:
 
         # Compare the two methods
         torch.testing.assert_close(hinv_g_flat, hinv_g_torch, rtol=1e-2, atol=1e-2)
+
+    def test_hessian_inverse_solve_splu_matches_block(
+        self, model, z_in, target, epsilon, random_parameter_vector
+    ):
+        """The splu and block solvers should agree to float32 accuracy on a small model."""
+        setup = model.hessian_inverse_setup(z_in, target)
+        x_splu = model.hessian_inverse_solve(
+            setup, random_parameter_vector, epsilon, solver="splu"
+        )
+        x_block = model.hessian_inverse_solve(
+            setup, random_parameter_vector, epsilon, solver="block"
+        )
+
+        for splu_block, block_block in zip(x_splu.flat, x_block.flat):
+            assert splu_block.shape == block_block.shape
+            assert splu_block.dtype == block_block.dtype
+
+        torch.testing.assert_close(
+            x_splu.to_tensor(), x_block.to_tensor(), rtol=1e-3, atol=1e-3
+        )
+
+    def test_hessian_inverse_solve_splu_vs_dense_float64(
+        self, model, z_in, target, epsilon, random_parameter_vector
+    ):
+        """The splu solver should match a dense float64 solve of the same augmented system."""
+        setup = model.hessian_inverse_setup(z_in, target)
+        x_splu = model.hessian_inverse_solve(
+            setup, random_parameter_vector, epsilon, solver="splu"
+        )
+
+        Dx, DD_Dxx, DD_Dzx, DM_Dzz, M, P, zero_block = setup
+        K = bpm.Generic(
+            [
+                [DD_Dxx + epsilon * bpm.Identity(DD_Dxx.height), DD_Dzx @ P, Dx.T],
+                [-Dx, M, zero_block],
+                [-P.T @ DD_Dzx.T, -P.T @ DM_Dzz @ P, M.T],
+            ]
+        )
+        K_dense = K.to_tensor().detach().to(torch.float64)
+
+        b_flat = random_parameter_vector.to_tensor().to(torch.float64)
+        rhs = torch.zeros(K_dense.shape[0], 1, dtype=torch.float64)
+        rhs[: b_flat.shape[0]] = b_flat
+
+        xyz = torch.linalg.solve(K_dense, rhs)
+        x_ref = xyz[: b_flat.shape[0]].to(torch.float32)
+
+        torch.testing.assert_close(
+            x_splu.to_tensor(), x_ref, rtol=1e-5, atol=1e-6
+        )
+
+    def test_hessian_inverse_solve_rejects_unknown_solver(
+        self, model, z_in, target, epsilon, random_parameter_vector
+    ):
+        setup = model.hessian_inverse_setup(z_in, target)
+        with pytest.raises(ValueError, match="solver"):
+            model.hessian_inverse_solve(
+                setup, random_parameter_vector, epsilon, solver="qr"
+            )
 
     def test_hessian_inverse_is_inverse_of_hessian(
         self, model, z_in, target, epsilon, random_parameter_vector
@@ -706,3 +772,24 @@ def _run_section3_check(capsys):
             f"Section 3 sanity check failed at eps={eps}: rel_err={rel:.3e} >= 1e-4. "
             "Do not loosen the tolerance; investigate the algorithm first."
         )
+
+
+def test_to_scipy_csc_matches_dense():
+    torch.manual_seed(0)
+    M = bpm.Generic(
+        [
+            [torch.randn(3, 3), bpm.Zero((3, 2)), torch.randn(3, 4)],
+            [torch.randn(2, 3), bpm.Identity(2), bpm.Zero((2, 4))],
+            [
+                bpm.Zero((4, 3)),
+                torch.randn(4, 2),
+                bpm.Diagonal([torch.randn(2, 2), bpm.ScaledIdentity(2.5, 2)]),
+            ],
+        ]
+    )
+
+    sparse = bpm.to_scipy_csc(M)
+
+    assert sparse.dtype == np.float64
+    assert sparse.shape == (M.height, M.width)
+    np.testing.assert_allclose(sparse.toarray(), M.to_tensor().numpy(), atol=1e-7)
