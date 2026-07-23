@@ -55,7 +55,7 @@ SGD = Config(
     ACTIVATION,
     [
         "--mode", "sgd",
-        "--lr", "0.03",
+        "--lr", "0.1",
         "--num-steps", "30000",
         "--activation", ACTIVATION,
         *SHARED_ARGS,
