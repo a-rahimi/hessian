@@ -14,10 +14,7 @@ import math
 import sys
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = SCRIPT_DIR / "results"
@@ -45,7 +42,8 @@ def load_csv(name: str) -> dict[str, list[float]]:
     return cols
 
 
-def main() -> None:
+def build_figure() -> plt.Figure:
+    """Build the two-panel loss figure and return it (for inline display)."""
     fig, (ax_iter, ax_time) = plt.subplots(1, 2, figsize=(12, 5))
 
     for config in CONFIGS:
@@ -75,11 +73,17 @@ def main() -> None:
         "Fixed-batch memorization: width 8 x depth 16 MLP, 32-example fixed batch"
     )
     fig.tight_layout()
+    return fig
 
-    out = RESULTS_DIR / "memorization_curves.png"
-    fig.savefig(out, dpi=130)
-    print(f"wrote {out}")
+
+def save_figure(out: Path | None = None) -> Path:
+    out = out or (RESULTS_DIR / "memorization_curves.png")
+    build_figure().savefig(out, dpi=130)
+    return out
 
 
 if __name__ == "__main__":
-    main()
+    import matplotlib
+
+    matplotlib.use("Agg")
+    print(f"wrote {save_figure()}")
