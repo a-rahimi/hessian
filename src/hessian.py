@@ -81,8 +81,9 @@ class BlockWithMixedDerivatives(nn.Module):
 
     # Whether Dz and DM_Dzz are batch-block-diagonal for this layer, i.e.
     # whether sample i's output depends only on sample i's input. This holds
-    # for ordinary per-sample layers (DenseBlock etc.) but not for LossLayer,
-    # whose scalar mean-loss output couples every sample together.
+    # for ordinary per-sample layers (DenseBlock etc.) but not for the loss
+    # layers (LossLayer, CrossEntropyLayer), whose scalar mean-loss output
+    # couples every sample together.
     batch_structured_dz = True
 
     def __init__(self):
@@ -249,6 +250,54 @@ class LossLayer(DenseBlock):
         )
 
 
+class CrossEntropyLayer(BlockWithMixedDerivatives):
+    """Final layer that computes the loss and holds no parameters of its own.
+
+    `LossLayer` fuses the classifier's linear map into the loss, so the last
+    activation z_{L-1} is the feature vector and the last layer owns parameters.
+    Keeping the linear map in its own `DenseBlock` and ending the pipeline with
+    this layer instead moves z_{L-1} to the logits, which puts every parameter
+    strictly upstream of the loss. The consequence that matters is that
+    ∇_zz f_L becomes the Hessian of a convex function of the logits rather than
+    a mixed parameter/activation object, so it is positive semidefinite.
+    """
+
+    # Same reason as LossLayer: the output is the scalar mean loss over the
+    # whole batch rather than a per-sample vector, so there is no batch axis on
+    # the output to block Dz and DM_Dzz against.
+    batch_structured_dz = False
+
+    def naked_forward(self, x: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return F.cross_entropy(x, targets)
+
+    def derivatives(
+        self, dloss_dz: torch.Tensor, targets: torch.Tensor
+    ) -> LayerDerivatives:
+        if targets.dtype != torch.int64:
+            raise ValueError("For the loss layer, targets must be an integer tensor")
+
+        # Ignore dloss_dz. For the loss layer, it's always ∂z_L/∂z_L = 1.
+        input_shape = self.input.shape
+        z_in = self.input.flatten()
+
+        def f(z: torch.Tensor) -> torch.Tensor:
+            return self.naked_forward(z.reshape(input_shape), targets)
+
+        # The blocks carrying a parameter axis are empty rather than absent, so
+        # that this layer still contributes a (zero-width) block everywhere the
+        # derivatives are assembled into block-partitioned matrices, keeping the
+        # block count equal to the number of layers.
+        n_in = z_in.numel()
+        kwargs = {"dtype": z_in.dtype, "device": z_in.device}
+        return LayerDerivatives(
+            Dx=torch.zeros(1, 0, **kwargs),
+            Dz=TF.jacrev(f)(z_in).reshape(1, n_in),
+            DD_Dxx=torch.zeros(0, 0, **kwargs),
+            DD_Dzx=torch.zeros(0, n_in, **kwargs),
+            DM_Dzz=TF.hessian(f)(z_in),
+        )
+
+
 def _validate_vector_is_Hessian_shaped(b: bpm.Vertical, Dx: bpm.Diagonal):
     if b.num_blocks() != Dx.num_blocks():
         raise ValueError(
@@ -319,7 +368,9 @@ class SequenceOfBlocks(nn.Module):
     "A sequence of blocks for which mixed derivatives can be computed."
 
     def __init__(
-        self, layers: Sequence[BlockWithMixedDerivatives], loss_layer: LossLayer
+        self,
+        layers: Sequence[BlockWithMixedDerivatives],
+        loss_layer: BlockWithMixedDerivatives,
     ):
         super().__init__()
         self.layers = nn.Sequential(*layers)
@@ -555,11 +606,19 @@ class SequenceOfDenseBlocks(SequenceOfBlocks):
         num_layers: int = 19,
         activation: Callable[[torch.Tensor], torch.Tensor] = torch.tanh,
     ):
+        # `num_layers` counts the parameter-carrying layers, the classifier
+        # included. The classifier is a `DenseBlock` with no activation rather
+        # than part of the loss layer, so the pipeline's last activation is the
+        # logits and the trailing `CrossEntropyLayer` has no parameters. Because
+        # the classifier is still constructed last and with the same shape, this
+        # draws the same random weights in the same order as fusing it into the
+        # loss layer did, so a seeded run is unchanged.
         super().__init__(
             [DenseBlock(input_dim, hidden_dim, activation)]
             + [
                 DenseBlock(hidden_dim, hidden_dim, activation)
                 for _ in range(num_layers - 2)
-            ],
-            LossLayer(hidden_dim, num_classes),
+            ]
+            + [DenseBlock(hidden_dim, num_classes, nn.Identity())],
+            CrossEntropyLayer(),
         )

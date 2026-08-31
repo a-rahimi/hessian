@@ -8,7 +8,13 @@ import torch
 import torch.nn as nn
 
 import hessian
-from hessian import DenseBlock, LossLayer, SequenceOfDenseBlocks
+from hessian import (
+    CrossEntropyLayer,
+    DenseBlock,
+    LossLayer,
+    SequenceOfBlocks,
+    SequenceOfDenseBlocks,
+)
 import block_partitioned_matrices as bpm
 
 
@@ -437,6 +443,86 @@ class TestLossLayer:
         ), (
             f"DM_Dzz shape should be ({input_dim}, {input_dim}), got {derivs.DM_Dzz.shape}"
         )
+
+
+class TestParameterFreeLossLayer:
+    """`SequenceOfDenseBlocks` ends in a loss layer that owns no parameters.
+
+    The classifier is its own `DenseBlock` at the end of the chain rather than
+    fused into the loss, so the pipeline's last activation is the logits. Nothing
+    about the model changes, but every parameter now sits strictly upstream of
+    the loss, which is what lets the last DM_Dzz block be read as the curvature
+    of a convex function of the logits.
+    """
+
+    HIDDEN_DIM, NUM_CLASSES, INPUT_DIM, NUM_LAYERS = 4, 6, 3, 4
+
+    @pytest.fixture
+    def model(self):
+        return SequenceOfDenseBlocks(
+            input_dim=self.INPUT_DIM,
+            hidden_dim=self.HIDDEN_DIM,
+            num_classes=self.NUM_CLASSES,
+            num_layers=self.NUM_LAYERS,
+            activation=torch.tanh,
+        )
+
+    @pytest.fixture
+    def z_in(self):
+        return torch.randn(2, self.INPUT_DIM)
+
+    @pytest.fixture
+    def target(self):
+        return torch.randint(0, self.NUM_CLASSES, (2,))
+
+    def test_loss_layer_owns_no_parameters(self, model):
+        assert isinstance(model.loss_layer, CrossEntropyLayer)
+        assert list(model.loss_layer.parameters()) == []
+
+    def test_layer_chain_outputs_the_logits(self, model, z_in, target):
+        logits = model.layers(z_in)
+        assert logits.shape == (z_in.shape[0], self.NUM_CLASSES)
+        torch.testing.assert_close(
+            model(z_in, target), nn.functional.cross_entropy(logits, target)
+        )
+
+    def test_parameters_match_the_fused_arrangement(self, model):
+        """Moving the classifier out of the loss layer moved no parameters."""
+        fused = SequenceOfBlocks(
+            [DenseBlock(self.INPUT_DIM, self.HIDDEN_DIM, torch.tanh)]
+            + [
+                DenseBlock(self.HIDDEN_DIM, self.HIDDEN_DIM, torch.tanh)
+                for _ in range(self.NUM_LAYERS - 2)
+            ],
+            LossLayer(self.HIDDEN_DIM, self.NUM_CLASSES),
+        )
+        assert [p.shape for p in model.parameters()] == [
+            p.shape for p in fused.parameters()
+        ]
+
+    def test_loss_layer_contributes_a_zero_width_parameter_block(
+        self, model, z_in, target
+    ):
+        """The loss layer still gets a block, just one with no columns.
+
+        Keeping the block rather than dropping it is what holds the block count
+        equal to the number of layers, which every caller that repacks a flat
+        vector into per-layer blocks relies on.
+        """
+        Dx, _, DD_Dxx, DD_Dzx, _ = model.derivatives(z_in, target)
+        assert Dx.num_blocks() == len(list(model))
+        assert Dx.diagonal_blocks[-1].shape == (1, 0)
+        assert DD_Dxx.diagonal_blocks[-1].shape == (0, 0)
+        assert DD_Dzx.diagonal_blocks[-1].shape[0] == 0
+
+    def test_loss_curvature_block_is_positive_semidefinite(
+        self, model, z_in, target
+    ):
+        """The last DM_Dzz block is ∇_zz of cross-entropy in its own logits."""
+        *_, DM_Dzz = model.derivatives(z_in, target)
+        block = DM_Dzz.diagonal_blocks[-1].to_tensor().detach()
+        eigenvalues = torch.linalg.eigvalsh(0.5 * (block + block.T))
+        assert float(eigenvalues.min()) > -1e-6
 
 
 class TestSequenceOfBlocks:

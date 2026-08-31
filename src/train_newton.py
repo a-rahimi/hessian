@@ -169,9 +169,18 @@ def assemble_gradient_vector(model: SequenceOfDenseBlocks) -> bpm.Vertical:
     Iteration order matches `model.__iter__` (hidden layers then loss_layer),
     which is the same ordering used by `hessian_inverse_product`.
     """
+    proto = next(model.parameters())
     blocks = []
     for layer in model:
-        flat = torch.cat([p.grad.detach().flatten() for p in layer.parameters()])
+        grads = [p.grad.detach().flatten() for p in layer.parameters()]
+        # The trailing cross-entropy layer has no parameters, so it contributes
+        # an empty block rather than no block, which keeps the block count equal
+        # to the number of layers that `hessian_inverse_product` blocks against.
+        flat = (
+            torch.cat(grads)
+            if grads
+            else torch.zeros(0, dtype=proto.dtype, device=proto.device)
+        )
         blocks.append(flat.unsqueeze(1))
     return bpm.Vertical(blocks)
 
@@ -487,7 +496,10 @@ def train(args: argparse.Namespace) -> None:
     # Default nn.Linear init under-scales weights for deep nets. Re-initialize
     # so gradients propagate through all layers at depth.
     nonlinearity = "relu" if args.activation in {"relu", "gelu"} else "tanh"
-    for layer in model:
+    # Every weight lives in `model.layers`, the classifier included, because the
+    # trailing loss layer has no parameters. Iterating the chain therefore visits
+    # the same linears in the same order that iterating the whole model used to.
+    for layer in model.layers:
         torch.nn.init.kaiming_normal_(layer.linear.weight, nonlinearity=nonlinearity)
 
     run_name = (
@@ -544,17 +556,15 @@ def train(args: argparse.Namespace) -> None:
             scalars.lr = lr
             with torch.no_grad():
                 scalars.probe_loss = float(model(probe_x, probe_y).item())
-                probe_features = model.layers(probe_x)
-                probe_logits = model.loss_layer.linear(probe_features)
+                probe_logits = model.layers(probe_x)
                 scalars.probe_accuracy = float(
                     (probe_logits.argmax(dim=1) == probe_y).float().mean().item()
                 )
 
-            # Batch accuracy uses the loss layer's pre-loss logits. Re-run the
-            # cheap forward up to the loss layer to read them.
+            # Batch accuracy uses the pre-loss logits, which are the output of
+            # the layer chain now that the classifier is the last of its blocks.
             with torch.no_grad():
-                features = model.layers(x)
-                logits = model.loss_layer.linear(features)
+                logits = model.layers(x)
                 scalars.batch_accuracy = float(
                     (logits.argmax(dim=1) == y).float().mean().item()
                 )
