@@ -13,6 +13,7 @@ import torch.nn.functional as F
 import contextlib
 
 import block_partitioned_matrices as bpm
+import timing
 
 
 def reshape_starting(v: torch.Tensor, starting_shape: tuple[int, ...]):
@@ -272,29 +273,36 @@ def _splu_solve(K: bpm.Generic, b: bpm.Vertical, Dx: bpm.Diagonal) -> bpm.Vertic
     the block path unnecessary.
     """
     with torch.no_grad():
-        K_csc = K.to_scipy_csc()
+        with timing.record("solve/splu/to-csc"):
+            K_csc = K.to_scipy_csc()
 
-        rhs = np.zeros(K_csc.shape[0], dtype=np.float64)
-        offset = 0
-        for block in b.flat:
-            block_np = block.detach().to(torch.float64).numpy().ravel()
-            rhs[offset : offset + block_np.size] = block_np
-            offset += block_np.size
+        with timing.record("solve/splu/factorize"):
+            lu = scipy.sparse.linalg.splu(K_csc)
 
-        xyz = scipy.sparse.linalg.splu(K_csc).solve(rhs)
+        with timing.record("solve/splu/pack"):
+            rhs = np.zeros(K_csc.shape[0], dtype=np.float64)
+            offset = 0
+            for block in b.flat:
+                block_np = block.detach().to(torch.float64).numpy().ravel()
+                rhs[offset : offset + block_np.size] = block_np
+                offset += block_np.size
 
-        x_blocks = []
-        offset = 0
-        for b_block, Dx_block in zip(b.flat, Dx.diagonal_blocks):
-            width = Dx_block.width
-            x_np = np.ascontiguousarray(xyz[offset : offset + width])
-            x_blocks.append(
-                bpm.Tensor(
-                    torch.from_numpy(x_np).to(b_block.dtype).reshape(width, 1)
+        with timing.record("solve/splu/substitute"):
+            xyz = lu.solve(rhs)
+
+        with timing.record("solve/splu/pack"):
+            x_blocks = []
+            offset = 0
+            for b_block, Dx_block in zip(b.flat, Dx.diagonal_blocks):
+                width = Dx_block.width
+                x_np = np.ascontiguousarray(xyz[offset : offset + width])
+                x_blocks.append(
+                    bpm.Tensor(
+                        torch.from_numpy(x_np).to(b_block.dtype).reshape(width, 1)
+                    )
                 )
-            )
-            offset += width
-        return bpm.Vertical(x_blocks)
+                offset += width
+            return bpm.Vertical(x_blocks)
 
 
 def _densify_per_sample_blocks(diagonal: bpm.Diagonal) -> bpm.Diagonal:
@@ -428,7 +436,8 @@ class SequenceOfBlocks(nn.Module):
         trust-region subproblem's search over the damping lambda) pay this cost
         once and reuse it across all the solves.
         """
-        Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
+        with timing.record("setup/derivatives"):
+            Dx, Dz, DD_Dxx, DD_Dzx, DM_Dzz = self.derivatives(z_in, target)
         M = bpm.IdentityWithLowerDiagonal((-Dz).flat[1:])
         P = bpm.downshifting_matrix(z_in.numel(), [b.shape[0] for b in Dx.flatten()])
 
@@ -473,13 +482,14 @@ class SequenceOfBlocks(nn.Module):
 
         # Write (H + epsilon I) x = b as an augmented system K [x;y;z] = [b;0;0].  K is a 3x3
         # block matrix. These  blocks are either diagonal, or bi-diagonal.
-        K = bpm.Generic(
-            [
-                [DD_Dxx + epsilon * bpm.Identity(DD_Dxx.height), DD_Dzx @ P, Dx.T],
-                [-Dx, M, zero_block],
-                [-P.T @ DD_Dzx.T, -P.T @ DM_Dzz @ P, M.T],
-            ]
-        )
+        with timing.record("solve/assemble-K"):
+            K = bpm.Generic(
+                [
+                    [DD_Dxx + epsilon * bpm.Identity(DD_Dxx.height), DD_Dzx @ P, Dx.T],
+                    [-Dx, M, zero_block],
+                    [-P.T @ DD_Dzx.T, -P.T @ DM_Dzz @ P, M.T],
+                ]
+            )
 
         if solver == "splu":
             return _splu_solve(K, b, Dx)
@@ -512,20 +522,27 @@ class SequenceOfBlocks(nn.Module):
         # We can solve K' xyz' = π [b;0;0] for xyz' by factorizing K' and
         # applying the inverse of these factors, then report xyz = π⁻¹ xyz'. The paper shows
         # that  π⁻¹ = π, so we can just report π xyz'.
-        K_pivoted = bpm.Tridiagonal.blockwise_transpose(K)
+        with timing.record("solve/block/pivot"):
+            K_pivoted = bpm.Tridiagonal.blockwise_transpose(K)
 
-        # Confirm that all the blocks of the resulting tridiagonal matrix are 3x3 block matrices.
-        # Then cast these explicit to Generic3x3 blocks so we can use a fast solver for them.
-        assert all(b.shape == (3, 3) for b in K_pivoted.flatten())
-        K_pivoted = bpm.Tridiagonal(
-            [bpm.Generic3x3(b.blocks) for b in K_pivoted.diagonal_blocks],
-            lower_blocks=[bpm.Generic3x3(b.blocks) for b in K_pivoted.lower_blocks],
-            upper_blocks=[bpm.Generic3x3(b.blocks) for b in K_pivoted.upper_blocks],
-        )
+            # Confirm that all the blocks of the resulting tridiagonal matrix are 3x3 block matrices.
+            # Then cast these explicit to Generic3x3 blocks so we can use a fast solver for them.
+            assert all(b.shape == (3, 3) for b in K_pivoted.flatten())
+            K_pivoted = bpm.Tridiagonal(
+                [bpm.Generic3x3(b.blocks) for b in K_pivoted.diagonal_blocks],
+                lower_blocks=[bpm.Generic3x3(b.blocks) for b in K_pivoted.lower_blocks],
+                upper_blocks=[bpm.Generic3x3(b.blocks) for b in K_pivoted.upper_blocks],
+            )
 
-        b00_pivoted = b00.blockwise_transpose()
+            b00_pivoted = b00.blockwise_transpose()
 
-        xyz_pivoted = K_pivoted.solve(b00_pivoted)
+        # Spell out Tridiagonal.solve here so the factorization and the
+        # triangular substitutions are timed as separate stages.
+        with timing.record("solve/block/factorize"):
+            L, D, U = K_pivoted.LDU_decomposition()
+
+        with timing.record("solve/block/substitute"):
+            xyz_pivoted = U.solve(D.solve(L.solve(b00_pivoted)))
 
         # Pivot back to the original order of x, y, z.
         xyz = xyz_pivoted.blockwise_transpose()

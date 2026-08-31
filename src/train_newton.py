@@ -30,6 +30,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import block_partitioned_matrices as bpm
 import hessian
+import timing
 from hessian import SequenceOfDenseBlocks
 
 
@@ -456,6 +457,7 @@ def sgd_warmup(
 
 
 def train(args: argparse.Namespace) -> None:
+    timing.reset()
     torch.manual_seed(args.seed)
     device = torch.device(
         "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
@@ -535,7 +537,8 @@ def train(args: argparse.Namespace) -> None:
                 if p.grad is not None:
                     p.grad.zero_()
 
-            loss = model(x, y)
+            with timing.record("train/gradient"):
+                loss = model(x, y)
             scalars.loss = float(loss.item())
             loss_window.append(scalars.loss)
             window = args.lr_decay_window
@@ -559,8 +562,9 @@ def train(args: argparse.Namespace) -> None:
                     (logits.argmax(dim=1) == y).float().mean().item()
                 )
 
-            loss.backward()
-            grad_vec = assemble_gradient_vector(model)
+            with timing.record("train/gradient"):
+                loss.backward()
+                grad_vec = assemble_gradient_vector(model)
             scalars.grad_norm = vertical_norm(grad_vec)
 
             if args.mode == "sgd":
@@ -637,9 +641,10 @@ def train(args: argparse.Namespace) -> None:
                     )
                     H = hessian.flatten_2d_pytree(hessian_dict)
 
-                    p_flat, lambda_star, step_type, hard_case, eigvals, n_secular = (
-                        solve_trs(g_flat, H, trust_radius)
-                    )
+                    with timing.record("train/trs-subproblem"):
+                        p_flat, lambda_star, step_type, hard_case, eigvals, n_secular = (
+                            solve_trs(g_flat, H, trust_radius)
+                        )
                     scalars.h_eig_min = float(eigvals[0].item())
                     scalars.h_eig_max = float(eigvals[-1].item())
                     scalars.tr_secular_evals = float(n_secular)
@@ -650,9 +655,10 @@ def train(args: argparse.Namespace) -> None:
                             -(g_flat @ p_flat) - 0.5 * (p_flat @ (H @ p_flat))
                         )
                 else:
-                    p_flat, lambda_star, step_type, hard_case, n_solves = (
-                        efficient_solve_trs(model, x, y, grad_vec, trust_radius)
-                    )
+                    with timing.record("train/trs-subproblem"):
+                        p_flat, lambda_star, step_type, hard_case, n_solves = (
+                            efficient_solve_trs(model, x, y, grad_vec, trust_radius)
+                        )
                     scalars.tr_solves = float(n_solves)
                     # h_eig_min/max need an eigendecomposition we deliberately
                     # avoid. At the solution (H + λI)p = -g, so pᵀHp = -gᵀp - λ‖p‖²
@@ -758,6 +764,7 @@ def train(args: argparse.Namespace) -> None:
         step_idx += 1
 
     logger.close()
+    print(timing.report(), file=sys.stderr)
 
 
 def parse_args() -> argparse.Namespace:
