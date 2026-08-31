@@ -235,13 +235,11 @@ def train(args: argparse.Namespace) -> None:
             scalars.lr = lr
             with torch.no_grad():
                 scalars.probe_loss = float(model(probe_x, probe_y).item())
-                probe_features = model.layers(probe_x)
-                probe_logits = model.loss_layer.linear(probe_features)
+                probe_logits = model.layers(probe_x)
                 scalars.probe_accuracy = float(
                     (probe_logits.argmax(dim=1) == probe_y).float().mean().item()
                 )
-                features = model.layers(x)
-                logits = model.loss_layer.linear(features)
+                logits = model.layers(x)
                 scalars.batch_accuracy = float(
                     (logits.argmax(dim=1) == y).float().mean().item()
                 )

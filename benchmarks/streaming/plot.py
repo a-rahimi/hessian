@@ -22,8 +22,12 @@ RESULTS_DIR = SCRIPT_DIR / "results"
 sys.path.insert(0, str(SCRIPT_DIR))
 from experiments import CONFIGS  # noqa: E402
 
-# gelu is the only activation here, so distinguish the two runs by color.
-METHOD_COLOR = {"trust-region": "#0072B2", "sgd": "#D55E00"}
+# gelu is the only activation here, so distinguish the runs by color.
+METHOD_COLOR = {
+    "trust-region": "#0072B2",
+    "trust-region-ggn": "#009E73",
+    "sgd": "#D55E00",
+}
 
 RANDOM_GUESS_LOSS = math.log(10)
 

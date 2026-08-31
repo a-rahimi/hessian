@@ -8,7 +8,13 @@ import torch
 import torch.nn as nn
 
 import hessian
-from hessian import DenseBlock, LossLayer, SequenceOfDenseBlocks
+from hessian import (
+    CrossEntropyLayer,
+    DenseBlock,
+    LossLayer,
+    SequenceOfBlocks,
+    SequenceOfDenseBlocks,
+)
 import block_partitioned_matrices as bpm
 
 
@@ -439,6 +445,86 @@ class TestLossLayer:
         )
 
 
+class TestParameterFreeLossLayer:
+    """`SequenceOfDenseBlocks` ends in a loss layer that owns no parameters.
+
+    The classifier is its own `DenseBlock` at the end of the chain rather than
+    fused into the loss, so the pipeline's last activation is the logits. Nothing
+    about the model changes, but every parameter now sits strictly upstream of
+    the loss, which is what lets the last DM_Dzz block be read as the curvature
+    of a convex function of the logits.
+    """
+
+    HIDDEN_DIM, NUM_CLASSES, INPUT_DIM, NUM_LAYERS = 4, 6, 3, 4
+
+    @pytest.fixture
+    def model(self):
+        return SequenceOfDenseBlocks(
+            input_dim=self.INPUT_DIM,
+            hidden_dim=self.HIDDEN_DIM,
+            num_classes=self.NUM_CLASSES,
+            num_layers=self.NUM_LAYERS,
+            activation=torch.tanh,
+        )
+
+    @pytest.fixture
+    def z_in(self):
+        return torch.randn(2, self.INPUT_DIM)
+
+    @pytest.fixture
+    def target(self):
+        return torch.randint(0, self.NUM_CLASSES, (2,))
+
+    def test_loss_layer_owns_no_parameters(self, model):
+        assert isinstance(model.loss_layer, CrossEntropyLayer)
+        assert list(model.loss_layer.parameters()) == []
+
+    def test_layer_chain_outputs_the_logits(self, model, z_in, target):
+        logits = model.layers(z_in)
+        assert logits.shape == (z_in.shape[0], self.NUM_CLASSES)
+        torch.testing.assert_close(
+            model(z_in, target), nn.functional.cross_entropy(logits, target)
+        )
+
+    def test_parameters_match_the_fused_arrangement(self, model):
+        """Moving the classifier out of the loss layer moved no parameters."""
+        fused = SequenceOfBlocks(
+            [DenseBlock(self.INPUT_DIM, self.HIDDEN_DIM, torch.tanh)]
+            + [
+                DenseBlock(self.HIDDEN_DIM, self.HIDDEN_DIM, torch.tanh)
+                for _ in range(self.NUM_LAYERS - 2)
+            ],
+            LossLayer(self.HIDDEN_DIM, self.NUM_CLASSES),
+        )
+        assert [p.shape for p in model.parameters()] == [
+            p.shape for p in fused.parameters()
+        ]
+
+    def test_loss_layer_contributes_a_zero_width_parameter_block(
+        self, model, z_in, target
+    ):
+        """The loss layer still gets a block, just one with no columns.
+
+        Keeping the block rather than dropping it is what holds the block count
+        equal to the number of layers, which every caller that repacks a flat
+        vector into per-layer blocks relies on.
+        """
+        Dx, _, DD_Dxx, DD_Dzx, _ = model.derivatives(z_in, target)
+        assert Dx.num_blocks() == len(list(model))
+        assert Dx.diagonal_blocks[-1].shape == (1, 0)
+        assert DD_Dxx.diagonal_blocks[-1].shape == (0, 0)
+        assert DD_Dzx.diagonal_blocks[-1].shape[0] == 0
+
+    def test_loss_curvature_block_is_positive_semidefinite(
+        self, model, z_in, target
+    ):
+        """The last DM_Dzz block is ∇_zz of cross-entropy in its own logits."""
+        *_, DM_Dzz = model.derivatives(z_in, target)
+        block = DM_Dzz.diagonal_blocks[-1].to_tensor().detach()
+        eigenvalues = torch.linalg.eigvalsh(0.5 * (block + block.T))
+        assert float(eigenvalues.min()) > -1e-6
+
+
 class TestSequenceOfBlocks:
     @pytest.fixture
     def model_config(self):
@@ -782,6 +868,153 @@ class TestSequenceOfBlocks:
             random_parameter_vector.to_tensor(),
             rtol=1e-4,
             atol=1e-4,
+        )
+
+
+class TestGaussNewton:
+    """`gauss_newton_setup` puts G = J' Λ J through the same augmented system as H.
+
+    Every reference here is built from autograd rather than from the block
+    machinery, so the tests check the machinery instead of restating it.
+    """
+
+    INPUT_DIM, HIDDEN_DIM, NUM_CLASSES, NUM_LAYERS, BATCH = 3, 4, 3, 4, 2
+
+    @pytest.fixture
+    def model(self):
+        torch.manual_seed(0)
+        return SequenceOfDenseBlocks(
+            input_dim=self.INPUT_DIM,
+            hidden_dim=self.HIDDEN_DIM,
+            num_classes=self.NUM_CLASSES,
+            num_layers=self.NUM_LAYERS,
+            activation=torch.tanh,
+        )
+
+    @pytest.fixture
+    def z_in(self):
+        torch.manual_seed(1)
+        return torch.randn(self.BATCH, self.INPUT_DIM)
+
+    @pytest.fixture
+    def target(self):
+        torch.manual_seed(2)
+        return torch.randint(0, self.NUM_CLASSES, (self.BATCH,))
+
+    @pytest.fixture
+    def rhs(self, model):
+        torch.manual_seed(3)
+        return bpm.Vertical(
+            [
+                torch.randn(sum(p.numel() for p in layer.parameters()), 1)
+                for layer in model
+            ]
+        )
+
+    def _flat_params(self, model):
+        """The parameters as one flat vector, plus the inverse of that packing."""
+        params = dict(model.named_parameters())
+        names = list(params)
+
+        def unflatten(v):
+            out, offset = {}, 0
+            for name in names:
+                n = params[name].numel()
+                out[name] = v[offset : offset + n].view_as(params[name])
+                offset += n
+            return out
+
+        flat = torch.cat([params[name].detach().reshape(-1) for name in names])
+        return flat, unflatten
+
+    def _logits_fn(self, model, z_in):
+        """The map from a flat parameter vector to the flattened logits.
+
+        The loss layer holds no parameters, so the layer chain's output is the
+        loss's input, which is what the Gauss-Newton matrix linearizes.
+        """
+        _, unflatten = self._flat_params(model)
+
+        def logits(v):
+            params = {
+                name[len("layers.") :]: t for name, t in unflatten(v).items()
+            }
+            return torch.func.functional_call(model.layers, params, (z_in,)).reshape(-1)
+
+        return logits
+
+    def _loss_of_logits(self, target):
+        return lambda r: nn.functional.cross_entropy(
+            r.reshape(self.BATCH, self.NUM_CLASSES), target
+        )
+
+    def _dense_gauss_newton(self, model, z_in, target):
+        flat, _ = self._flat_params(model)
+        logits = self._logits_fn(model, z_in)
+        J = torch.func.jacrev(logits)(flat)
+        Lam = torch.func.hessian(self._loss_of_logits(target))(logits(flat).detach())
+        return J.T @ Lam @ J
+
+    def _dense_hessian(self, model, z_in, target):
+        flat, unflatten = self._flat_params(model)
+        return torch.func.hessian(
+            lambda v: torch.func.functional_call(model, unflatten(v), (z_in, target))
+        )(flat)
+
+    @pytest.mark.parametrize("solver", ["splu", "block"])
+    @pytest.mark.parametrize("epsilon", [0.1, 1.0])
+    def test_solve_matches_a_dense_gauss_newton_solve(
+        self, model, z_in, target, rhs, solver, epsilon
+    ):
+        G = self._dense_gauss_newton(model, z_in, target)
+        want = torch.linalg.solve(
+            G + epsilon * torch.eye(G.shape[0]), rhs.to_tensor().flatten()
+        )
+        got = model.gauss_newton_inverse_product(
+            z_in, target, rhs, epsilon, solver=solver
+        )
+        torch.testing.assert_close(
+            got.to_tensor().flatten(), want, rtol=1e-4, atol=1e-5
+        )
+
+    def test_gauss_newton_is_psd_where_the_hessian_is_indefinite(
+        self, model, z_in, target
+    ):
+        """The reason to build G at all: G^-1 reverses no descent direction."""
+        G = self._dense_gauss_newton(model, z_in, target)
+        H = self._dense_hessian(model, z_in, target)
+        assert float(torch.linalg.eigvalsh(0.5 * (G + G.T)).min()) > -1e-5
+        assert float(torch.linalg.eigvalsh(0.5 * (H + H.T)).min()) < -1e-3
+
+    def test_hessian_exceeds_gauss_newton_by_the_network_curvature(
+        self, model, z_in, target
+    ):
+        """H = G + sum_i (dloss/dlogit_i) * grad_xx logit_i, the identity defining G."""
+        flat, _ = self._flat_params(model)
+        logits = self._logits_fn(model, z_in)
+        dloss_dlogits = torch.func.grad(self._loss_of_logits(target))(
+            logits(flat).detach()
+        )
+        logit_hessians = torch.func.jacrev(torch.func.jacrev(logits))(flat)
+        network_curvature = torch.einsum("i,ijk->jk", dloss_dlogits, logit_hessians)
+
+        torch.testing.assert_close(
+            self._dense_hessian(model, z_in, target),
+            self._dense_gauss_newton(model, z_in, target) + network_curvature,
+            rtol=1e-4,
+            atol=1e-5,
+        )
+
+    def test_hessian_setup_is_left_alone(self, model, z_in, target):
+        """Masking blocks for G must not disturb the Hessian's own setup."""
+        hessian_setup = model.hessian_inverse_setup(z_in, target)
+        model.gauss_newton_setup(z_in, target)
+        after = model.hessian_inverse_setup(z_in, target)
+        torch.testing.assert_close(
+            hessian_setup.DD_Dxx.to_tensor(), after.DD_Dxx.to_tensor()
+        )
+        torch.testing.assert_close(
+            hessian_setup.DM_Dzz.to_tensor(), after.DM_Dzz.to_tensor()
         )
 
 

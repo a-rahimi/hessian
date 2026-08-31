@@ -33,20 +33,34 @@ class Config:
     args: list[str]
 
 
+# Everything the two trust-region runs share, so that the only thing separating
+# them is which curvature matrix the subproblem is built on.
+TR_ARGS = [
+    "--mode", "trust-region",
+    "--tr-solver", "dense",
+    "--delta-init", "1.0",
+    "--delta-max", "100",
+    "--tr-eta", "0.1",
+    "--num-steps", "400",
+    "--activation", ACTIVATION,
+    *SHARED_ARGS,
+]
+
 TR = Config(
     "tr_gelu",
     "trust-region",
     ACTIVATION,
-    [
-        "--mode", "trust-region",
-        "--tr-solver", "dense",
-        "--delta-init", "1.0",
-        "--delta-max", "100",
-        "--tr-eta", "0.1",
-        "--num-steps", "400",
-        "--activation", ACTIVATION,
-        *SHARED_ARGS,
-    ],
+    [*TR_ARGS, "--curvature", "hessian"],
+)
+
+# The same trust region on the Gauss-Newton matrix instead of the Hessian. G
+# drops the network's own curvature, which is what makes the Hessian indefinite,
+# so the subproblem is solved on a positive semidefinite matrix.
+GGN = Config(
+    "ggn_gelu",
+    "trust-region-ggn",
+    ACTIVATION,
+    [*TR_ARGS, "--curvature", "ggn"],
 )
 
 SGD = Config(
@@ -62,5 +76,5 @@ SGD = Config(
     ],
 )
 
-CONFIGS = [TR, SGD]
+CONFIGS = [TR, GGN, SGD]
 CONFIGS_BY_NAME = {c.name: c for c in CONFIGS}

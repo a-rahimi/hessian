@@ -399,6 +399,16 @@ def _(self, other: Zero) -> Tensor:
     return Zero((self.shape[0], other.width))
 
 
+@ScaledIdentity.__matmul__.register
+def _(self, other: Zero) -> Zero:
+    # Without this the generic ScaledIdentity case would try `self.scale * other`,
+    # and scaling is not defined on Zero. Scaling leaves a zero block zero, so the
+    # product is the operand itself.
+    if self.dimension and self.dimension != other.height:
+        raise ValueError(f"Shape mismatch {self} vs {other.height} x {other.width}")
+    return other
+
+
 @Tensor.__add__.register
 def _(self, other: Zero) -> Tensor:
     if self.width != other.width or self.height != other.height:

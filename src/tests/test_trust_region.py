@@ -16,6 +16,8 @@ from train_newton import (
     efficient_solve_trs,
     vertical_like,
     assemble_gradient_vector,
+    dense_curvature_matrix,
+    dense_gauss_newton_matrix,
 )
 from hessian import SequenceOfDenseBlocks
 import block_partitioned_matrices as bpm
@@ -174,3 +176,65 @@ def test_efficient_solve_trs_network_smoke():
     if step_type == "boundary":
         assert float(p.norm()) == pytest.approx(delta, rel=2e-3)
     assert n_solves >= 1
+
+
+def _tiny_network_batch():
+    torch.manual_seed(0)
+    model = SequenceOfDenseBlocks(
+        input_dim=12, hidden_dim=6, num_classes=4, num_layers=3
+    )
+    x = torch.randn(8, 12)
+    y = torch.randint(0, 4, (8,))
+    model(x, y).backward()
+    return model, x, y, assemble_gradient_vector(model)
+
+
+def test_dense_gauss_newton_matches_the_block_gauss_newton_solve():
+    """train_newton's dense G and hessian.py's block form must agree.
+
+    The two build the Gauss-Newton matrix by different routes, one by
+    materializing J' L J from autograd and the other by masking blocks of the
+    augmented system, so agreeing is a real check rather than a restatement.
+    """
+    model, x, y, grad_vec = _tiny_network_batch()
+    G = dense_gauss_newton_matrix(model, x, y)
+    epsilon = 0.5
+    want = torch.linalg.solve(
+        G + epsilon * torch.eye(G.shape[0]), grad_vec.to_tensor().flatten()
+    )
+    got = model.gauss_newton_inverse_product(x, y, grad_vec, epsilon)
+    torch.testing.assert_close(
+        got.to_tensor().flatten(), want, rtol=1e-4, atol=1e-5
+    )
+
+
+def test_dense_curvature_matrix_selects_the_requested_matrix():
+    model, x, y, _ = _tiny_network_batch()
+    torch.testing.assert_close(
+        dense_curvature_matrix(model, x, y, "ggn"),
+        dense_gauss_newton_matrix(model, x, y),
+    )
+    H = dense_curvature_matrix(model, x, y, "hessian").detach()
+    assert float(torch.linalg.eigvalsh(0.5 * (H + H.T)).min()) < -1e-3
+
+
+def test_efficient_solve_trs_on_the_gauss_newton_matrix():
+    """G is singular, so the oracle must skip its undamped probe and not blow up."""
+    model, x, y, grad_vec = _tiny_network_batch()
+    delta = 0.5
+    p, lam, step_type, hard, n_solves = efficient_solve_trs(
+        model, x, y, grad_vec, delta, curvature="ggn"
+    )
+
+    assert torch.isfinite(p).all()
+    assert lam > 0.0, "a singular G admits no undamped interior step"
+    assert step_type == "boundary"
+    assert not hard, "G is positive semidefinite, so there is no hard case"
+    assert float(p.norm()) == pytest.approx(delta, rel=2e-3)
+
+
+def test_gauss_newton_solve_is_singular_without_damping():
+    """The undamped probe is skipped because it is genuinely unsolvable, not slow."""
+    model, x, y, grad_vec = _tiny_network_batch()
+    with pytest.raises(RuntimeError, match="singular"):
+        model.gauss_newton_inverse_product(x, y, grad_vec, 0.0)

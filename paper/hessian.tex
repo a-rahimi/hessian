@@ -462,6 +462,118 @@ number of activations in the corresponding layer. In all,assuming $a$ and $p$
 are the largest activation and parameter count for a layer, the running time
 for solving this system is $O\left(L \max(a, p)^3\right)$ operations.
 
+\section{The Gauss--Newton matrix}
+
+The reason to compute $H^{-1} g$ at all is to precondition gradient descent, so
+that a step accounts for the curvature of the loss instead of treating every
+direction alike. For that purpose the Hessian has a defect: away from a minimum
+it is indefinite, with negative eigenvalues along the directions in which the
+loss curves downward. Preconditioning with $H^{-1}$ along such a direction
+divides by a negative number and so reverses the step, which drives the iterate
+toward the critical point rather than away from it; the update is therefore drawn
+into saddle points instead of descending past them. A positive definite
+preconditioner has none of this trouble, because its inverse reverses no
+direction: the step it produces is always a descent direction, and its
+factorization has no negative pivots to make the solve unstable. What we want,
+then, is a positive semidefinite matrix that still captures the loss's curvature.
+The Gauss--Newton matrix is that matrix, and it agrees with $H$ wherever the
+network is close to linear.
+
+To define it, split the pipeline at its last activation: let $r \equiv z_{L-1}$
+be the output of the network and read the fused last layer $f_L$ as a loss
+$\ell(r)$ on that output, convex in $r$ as squared error and cross-entropy both
+are. The network computes the map $r(x)$ from parameters to output, and the loss
+composes that map with $\ell$. The curvature that makes $H$ indefinite is the
+bending of this map $r(x)$, so the Gauss--Newton matrix removes it by replacing
+$r(x)$ with its linearization about the current parameters $x_0$,
+\begin{equation}
+  r_{\mathrm{lin}}(x) \equiv r(x_0) + J\,(x - x_0),
+  \qquad
+  J \equiv \frac{\partial z_{L-1}}{\partial x}.
+\end{equation}
+The loss of this linearized model, $\ell\!\left(r_{\mathrm{lin}}(x)\right)$, is a
+convex quadratic in $x$ because $\ell$ is convex and $r_{\mathrm{lin}}$ is
+affine, so its Hessian is constant and equal to
+\begin{equation}
+  \label{eq:ggn}
+  G \equiv J^\top \Lambda J,
+  \qquad
+  \Lambda \equiv \nabla^2_r\, \ell = \nabla_{zz} f_L.
+\end{equation}
+This matrix $G$ is the Gauss--Newton matrix: the output Jacobian $J$ carries the
+loss's curvature $\Lambda$ back to the parameters. It is positive semidefinite
+because $\Lambda$ is, which is the property we were after, and for squared-error
+and cross-entropy losses it equals the Fisher information of the model, so the
+step $G^{-1} g$ is a natural-gradient step.
+
+Comparing $G$ with the true Hessian shows exactly what the linearization
+discarded. Differentiating $\ell(r(x))$ without linearizing gives
+\begin{equation}
+  \label{eq:ggn-vs-h}
+  H = J^\top \Lambda J + \sum_i \frac{\partial \ell}{\partial r_i}\, \nabla^2_x r_i,
+\end{equation}
+the sum running over the components $r_i$ of the output, with $\nabla^2_x r_i$
+the Hessian of the network's own output and $\partial \ell / \partial r_i$ the
+loss gradient that weights it. The Gauss--Newton matrix is the first term. The
+dropped sum is the network's curvature, and because its weights
+$\partial \ell / \partial r_i$ carry either sign it is what can turn $H$
+indefinite; it also vanishes when the network is affine, so $G = H$ exactly for a
+linear model and approximately for a mildly nonlinear one. In the block form of
+Equation~(\ref{eq:hessian}) this dropped sum is the first three terms together
+with the $\ell < L$ blocks of the fourth, and $G$ is the surviving last-layer
+block $\nabla_{zz} f_L$ carried through the Jacobians,
+\begin{equation}
+  \label{eq:ggn-block}
+  G = D_x^\top M^{-\top} P^\top \Lambda_\bullet P M^{-1} D_x,
+  \qquad
+  \Lambda_\bullet \equiv
+  \begin{bmatrix}
+    0 &        &                 \\
+      & \ddots &                 \\
+      &        & \nabla_{zz} f_L
+  \end{bmatrix},
+\end{equation}
+since $J = \partial z_{L-1} / \partial x$ is the last block-row of $P M^{-1} D_x$
+and $\Lambda_\bullet$, which is $D_M D_{zz}$ with every block but the last
+zeroed, selects it.
+
+Because $G$ is a second-order polynomial in $M^{-1}$ of the shape the previous
+section lifts, the same auxiliary variables solve $(G + \epsilon I) x = g$ with
+two of the blocks removed. Keep $y \equiv M^{-1} D_x x$, so $M y - D_x x = 0$, as
+before, and define the second variable from the loss curvature alone,
+\begin{equation}
+  z \equiv M^{-\top} P^\top \Lambda_\bullet P y,
+  \qquad \text{so } M^\top z - P^\top \Lambda_\bullet P y = 0.
+\end{equation}
+Then $G x = D_x^\top M^{-\top} P^\top \Lambda_\bullet P y = D_x^\top z$, so
+$(G + \epsilon I) x = \epsilon x + D_x^\top z = g$. Collecting the three
+equations gives the counterpart of Equation~(\ref{eq:unified-system}),
+\begin{equation}
+  \label{eq:ggn-system}
+  \begin{bmatrix}
+    \epsilon I & 0                         & D_x^\top \\
+    -D_x       & M                         & 0        \\
+    0          & -P^\top \Lambda_\bullet P & M^\top
+  \end{bmatrix}
+  \begin{bmatrix}
+    x \\ y \\ z
+  \end{bmatrix}
+  =
+  \begin{bmatrix}
+    g \\ 0 \\ 0
+  \end{bmatrix}.
+\end{equation}
+This is the matrix $\K$ of Equation~(\ref{eq:unified-system}) with the blocks
+$D_D D_{xx}$, $D_D D_{zx} P$, and $P^\top D_M D_{xz}$ deleted --- the blocks
+built from the network curvature that $G$ drops --- and $P^\top D_M D_{zz} P$
+narrowed to $P^\top \Lambda_\bullet P$. Its blocks are still block-diagonal or
+block-bi-diagonal, so the pivot $\Pi$ again makes it block-tri-diagonal, and the
+same block-LDU solve returns $x = (G + \epsilon I)^{-1} g$ in
+$O\left(L \max(a,p)^3\right)$ operations. The solve is also cheaper than for $H$:
+the oracle is queried only for the first derivatives $\nabla_x f_\ell$ and
+$\nabla_z f_\ell$ and the single loss Hessian $\nabla_{zz} f_L$, and because
+$G + \epsilon I$ is positive definite its factorization has no indefinite pivots.
+
 \section{Conclusion}
 
 We have described a method to compute the product of the inverse Hessian of a
