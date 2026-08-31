@@ -871,6 +871,153 @@ class TestSequenceOfBlocks:
         )
 
 
+class TestGaussNewton:
+    """`gauss_newton_setup` puts G = J' Λ J through the same augmented system as H.
+
+    Every reference here is built from autograd rather than from the block
+    machinery, so the tests check the machinery instead of restating it.
+    """
+
+    INPUT_DIM, HIDDEN_DIM, NUM_CLASSES, NUM_LAYERS, BATCH = 3, 4, 3, 4, 2
+
+    @pytest.fixture
+    def model(self):
+        torch.manual_seed(0)
+        return SequenceOfDenseBlocks(
+            input_dim=self.INPUT_DIM,
+            hidden_dim=self.HIDDEN_DIM,
+            num_classes=self.NUM_CLASSES,
+            num_layers=self.NUM_LAYERS,
+            activation=torch.tanh,
+        )
+
+    @pytest.fixture
+    def z_in(self):
+        torch.manual_seed(1)
+        return torch.randn(self.BATCH, self.INPUT_DIM)
+
+    @pytest.fixture
+    def target(self):
+        torch.manual_seed(2)
+        return torch.randint(0, self.NUM_CLASSES, (self.BATCH,))
+
+    @pytest.fixture
+    def rhs(self, model):
+        torch.manual_seed(3)
+        return bpm.Vertical(
+            [
+                torch.randn(sum(p.numel() for p in layer.parameters()), 1)
+                for layer in model
+            ]
+        )
+
+    def _flat_params(self, model):
+        """The parameters as one flat vector, plus the inverse of that packing."""
+        params = dict(model.named_parameters())
+        names = list(params)
+
+        def unflatten(v):
+            out, offset = {}, 0
+            for name in names:
+                n = params[name].numel()
+                out[name] = v[offset : offset + n].view_as(params[name])
+                offset += n
+            return out
+
+        flat = torch.cat([params[name].detach().reshape(-1) for name in names])
+        return flat, unflatten
+
+    def _logits_fn(self, model, z_in):
+        """The map from a flat parameter vector to the flattened logits.
+
+        The loss layer holds no parameters, so the layer chain's output is the
+        loss's input, which is what the Gauss-Newton matrix linearizes.
+        """
+        _, unflatten = self._flat_params(model)
+
+        def logits(v):
+            params = {
+                name[len("layers.") :]: t for name, t in unflatten(v).items()
+            }
+            return torch.func.functional_call(model.layers, params, (z_in,)).reshape(-1)
+
+        return logits
+
+    def _loss_of_logits(self, target):
+        return lambda r: nn.functional.cross_entropy(
+            r.reshape(self.BATCH, self.NUM_CLASSES), target
+        )
+
+    def _dense_gauss_newton(self, model, z_in, target):
+        flat, _ = self._flat_params(model)
+        logits = self._logits_fn(model, z_in)
+        J = torch.func.jacrev(logits)(flat)
+        Lam = torch.func.hessian(self._loss_of_logits(target))(logits(flat).detach())
+        return J.T @ Lam @ J
+
+    def _dense_hessian(self, model, z_in, target):
+        flat, unflatten = self._flat_params(model)
+        return torch.func.hessian(
+            lambda v: torch.func.functional_call(model, unflatten(v), (z_in, target))
+        )(flat)
+
+    @pytest.mark.parametrize("solver", ["splu", "block"])
+    @pytest.mark.parametrize("epsilon", [0.1, 1.0])
+    def test_solve_matches_a_dense_gauss_newton_solve(
+        self, model, z_in, target, rhs, solver, epsilon
+    ):
+        G = self._dense_gauss_newton(model, z_in, target)
+        want = torch.linalg.solve(
+            G + epsilon * torch.eye(G.shape[0]), rhs.to_tensor().flatten()
+        )
+        got = model.gauss_newton_inverse_product(
+            z_in, target, rhs, epsilon, solver=solver
+        )
+        torch.testing.assert_close(
+            got.to_tensor().flatten(), want, rtol=1e-4, atol=1e-5
+        )
+
+    def test_gauss_newton_is_psd_where_the_hessian_is_indefinite(
+        self, model, z_in, target
+    ):
+        """The reason to build G at all: G^-1 reverses no descent direction."""
+        G = self._dense_gauss_newton(model, z_in, target)
+        H = self._dense_hessian(model, z_in, target)
+        assert float(torch.linalg.eigvalsh(0.5 * (G + G.T)).min()) > -1e-5
+        assert float(torch.linalg.eigvalsh(0.5 * (H + H.T)).min()) < -1e-3
+
+    def test_hessian_exceeds_gauss_newton_by_the_network_curvature(
+        self, model, z_in, target
+    ):
+        """H = G + sum_i (dloss/dlogit_i) * grad_xx logit_i, the identity defining G."""
+        flat, _ = self._flat_params(model)
+        logits = self._logits_fn(model, z_in)
+        dloss_dlogits = torch.func.grad(self._loss_of_logits(target))(
+            logits(flat).detach()
+        )
+        logit_hessians = torch.func.jacrev(torch.func.jacrev(logits))(flat)
+        network_curvature = torch.einsum("i,ijk->jk", dloss_dlogits, logit_hessians)
+
+        torch.testing.assert_close(
+            self._dense_hessian(model, z_in, target),
+            self._dense_gauss_newton(model, z_in, target) + network_curvature,
+            rtol=1e-4,
+            atol=1e-5,
+        )
+
+    def test_hessian_setup_is_left_alone(self, model, z_in, target):
+        """Masking blocks for G must not disturb the Hessian's own setup."""
+        hessian_setup = model.hessian_inverse_setup(z_in, target)
+        model.gauss_newton_setup(z_in, target)
+        after = model.hessian_inverse_setup(z_in, target)
+        torch.testing.assert_close(
+            hessian_setup.DD_Dxx.to_tensor(), after.DD_Dxx.to_tensor()
+        )
+        torch.testing.assert_close(
+            hessian_setup.DM_Dzz.to_tensor(), after.DM_Dzz.to_tensor()
+        )
+
+
 def test_section3_sanity_check_dense_vs_linear_inverse(capsys):
     """
     Section 3 sanity check from reproduce-published-results/report.md.

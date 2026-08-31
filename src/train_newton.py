@@ -185,6 +185,54 @@ def assemble_gradient_vector(model: SequenceOfDenseBlocks) -> bpm.Vertical:
     return bpm.Vertical(blocks)
 
 
+def dense_gauss_newton_matrix(
+    model: SequenceOfDenseBlocks, x: torch.Tensor, y: torch.Tensor
+) -> torch.Tensor:
+    """Materialize G = J' Λ J, the counterpart of materializing the dense Hessian.
+
+    J is the Jacobian of the logits in the parameters and Λ is the curvature of
+    the loss in the logits. Because the loss layer holds no parameters, the layer
+    chain's output is the logits, so J is just the chain's Jacobian.
+    """
+    params = dict(model.named_parameters())
+    names = list(params)
+    assert all(name.startswith("layers.") for name in names), (
+        "every parameter should belong to the layer chain"
+    )
+
+    def logits(flat: torch.Tensor) -> torch.Tensor:
+        chain_params, offset = {}, 0
+        for name in names:
+            n = params[name].numel()
+            chain_params[name[len("layers.") :]] = flat[offset : offset + n].view_as(
+                params[name]
+            )
+            offset += n
+        return torch.func.functional_call(model.layers, chain_params, (x,)).reshape(-1)
+
+    flat = torch.cat([params[name].detach().reshape(-1) for name in names])
+    J = torch.func.jacrev(logits)(flat)
+    Lambda = torch.func.hessian(
+        lambda r: torch.nn.functional.cross_entropy(r.reshape(x.shape[0], -1), y)
+    )(logits(flat).detach())
+    return J.T @ Lambda @ J
+
+
+def dense_curvature_matrix(
+    model: SequenceOfDenseBlocks, x: torch.Tensor, y: torch.Tensor, curvature: str
+) -> torch.Tensor:
+    """The matrix the step preconditions with, materialized densely."""
+    if curvature == "ggn":
+        return dense_gauss_newton_matrix(model, x, y)
+
+    def loss_fn(params):
+        return torch.func.functional_call(model, params, (x, y))
+
+    return hessian.flatten_2d_pytree(
+        torch.func.hessian(loss_fn)(dict(model.named_parameters()))
+    )
+
+
 def dense_newton_step(
     model: SequenceOfDenseBlocks,
     x: torch.Tensor,
@@ -192,13 +240,10 @@ def dense_newton_step(
     grad_vec: bpm.Vertical,
     epsilon: float,
     method: str,
+    curvature: str = "hessian",
 ) -> tuple[bpm.Vertical, dict[str, float]]:
-    """Compute the Newton step by materializing the full Hessian and solving / pinv-ing it."""
-    def loss_fn(params):
-        return torch.func.functional_call(model, params, (x, y))
-
-    hessian_dict = torch.func.hessian(loss_fn)(dict(model.named_parameters()))
-    H = hessian.flatten_2d_pytree(hessian_dict)
+    """Compute the Newton step by materializing the curvature matrix and solving / pinv-ing it."""
+    H = dense_curvature_matrix(model, x, y, curvature)
     P = H.shape[0]
     g_flat = grad_vec.to_tensor().flatten()
     A = H + epsilon * torch.eye(P, dtype=H.dtype, device=H.device)
@@ -329,6 +374,7 @@ def solve_trs_oracle(
     delta: float,
     tol: float = 1e-3,
     max_iter: int = 20,
+    singular_at_zero: bool = False,
 ) -> tuple[torch.Tensor, float, str, bool, int]:
     """Solve the trust-region subproblem using only damped-inverse solves.
 
@@ -351,6 +397,14 @@ def solve_trs_oracle(
     positive-definiteness proxy and search λ from 0. This is exact when H ⪰ 0;
     when H is indefinite it is flagged via `hard_case` (logged, not specially
     handled), per the project's "just log the hard case for now" decision.
+
+    Set `singular_at_zero` when the curvature matrix is known to be singular, as
+    the Gauss-Newton matrix is whenever the batch supplies fewer independent
+    logit directions than there are parameters. The undamped probe below would
+    then ask for a solve against an exactly singular matrix rather than merely an
+    ill-conditioned one, and the interior step it tests for cannot exist anyway,
+    so the search skips it and goes straight to the boundary. Such a matrix is
+    positive semidefinite, so there is no negative curvature and no hard case.
     """
     n_solves = 0
 
@@ -363,13 +417,16 @@ def solve_trs_oracle(
     # AND H is positive definite. gᵀH⁻¹g is the PD proxy — positive when the
     # Newton step descends into a bowl, non-positive when g has negative-
     # curvature content (indefinite H), in which case we go to the boundary.
-    s = inv(0.0, g)
-    phi = float(torch.linalg.vector_norm(s))
-    curvature = float(g @ s)
-    if phi <= delta and curvature > 0:
-        return -s, 0.0, "interior", False, n_solves
+    if singular_at_zero:
+        hard_case = False
+    else:
+        s = inv(0.0, g)
+        phi = float(torch.linalg.vector_norm(s))
+        curvature = float(g @ s)
+        if phi <= delta and curvature > 0:
+            return -s, 0.0, "interior", False, n_solves
 
-    hard_case = curvature <= 0
+        hard_case = curvature <= 0
 
     # Boundary: find λ > 0 with ‖(H + λI)⁻¹g‖ = delta. φ(λ) decreases to 0 as λ
     # grows, so doubling brackets a feasible hi.
@@ -414,14 +471,21 @@ def efficient_solve_trs(
     delta: float,
     tol: float = 1e-3,
     max_iter: int = 20,
+    curvature: str = "hessian",
 ) -> tuple[torch.Tensor, float, str, bool, int]:
     """Trust-region subproblem via the paper's linear-time damped solver.
 
-    Computes the network derivatives once (`hessian_inverse_setup`) and reuses
-    them for every trial damping λ, so the per-λ cost is just the block-
-    tridiagonal factorization rather than a fresh functorch pass.
+    Computes the network derivatives once and reuses them for every trial damping
+    λ, so the per-λ cost is just the block-tridiagonal factorization rather than a
+    fresh functorch pass. `curvature` picks which matrix the subproblem is built
+    on: the two setups differ only in which blocks of the augmented system are
+    populated, so the solve itself is the same either way.
     """
-    setup = model.hessian_inverse_setup(x, y)
+    setup = (
+        model.gauss_newton_setup(x, y)
+        if curvature == "ggn"
+        else model.hessian_inverse_setup(x, y)
+    )
     g = grad_vec.to_tensor().flatten()
 
     def apply_inverse(lam: float, rhs_flat: torch.Tensor) -> torch.Tensor:
@@ -430,7 +494,14 @@ def efficient_solve_trs(
         # The solve is a fixed linear algebra step; we never backprop through it.
         return out.to_tensor().flatten().detach()
 
-    return solve_trs_oracle(g, apply_inverse, delta, tol=tol, max_iter=max_iter)
+    return solve_trs_oracle(
+        g,
+        apply_inverse,
+        delta,
+        tol=tol,
+        max_iter=max_iter,
+        singular_at_zero=curvature == "ggn",
+    )
 
 
 def sgd_warmup(
@@ -584,10 +655,21 @@ def train(args: argparse.Namespace) -> None:
                 # iteration still makes progress along a descent direction,
                 # and increase ε so the next Newton attempt is better damped.
                 if args.newton_step_method == "custom":
-                    update = model.hessian_inverse_product(x, y, grad_vec, epsilon)
+                    solve = (
+                        model.gauss_newton_inverse_product
+                        if args.curvature == "ggn"
+                        else model.hessian_inverse_product
+                    )
+                    update = solve(x, y, grad_vec, epsilon)
                 else:
                     update, diagnostics = dense_newton_step(
-                        model, x, y, grad_vec, epsilon, args.newton_step_method
+                        model,
+                        x,
+                        y,
+                        grad_vec,
+                        epsilon,
+                        args.newton_step_method,
+                        args.curvature,
                     )
                     scalars.cos_step_neg_grad = diagnostics["cos_step_neg_grad"]
                     scalars.h_eig_min = diagnostics["h_eig_min"]
@@ -638,14 +720,8 @@ def train(args: argparse.Namespace) -> None:
                 g_flat = grad_vec.to_tensor().flatten()
 
                 if args.tr_solver == "dense":
-                    # Build the full dense Hessian (same path as dense-solve Newton)
-                    def loss_fn(params):
-                        return torch.func.functional_call(model, params, (x, y))
-
-                    hessian_dict = torch.func.hessian(loss_fn)(
-                        dict(model.named_parameters())
-                    )
-                    H = hessian.flatten_2d_pytree(hessian_dict)
+                    # Materialize the curvature matrix (same path as dense-solve Newton)
+                    H = dense_curvature_matrix(model, x, y, args.curvature)
 
                     p_flat, lambda_star, step_type, hard_case, eigvals, n_secular = (
                         solve_trs(g_flat, H, trust_radius)
@@ -661,7 +737,14 @@ def train(args: argparse.Namespace) -> None:
                         )
                 else:
                     p_flat, lambda_star, step_type, hard_case, n_solves = (
-                        efficient_solve_trs(model, x, y, grad_vec, trust_radius)
+                        efficient_solve_trs(
+                            model,
+                            x,
+                            y,
+                            grad_vec,
+                            trust_radius,
+                            curvature=args.curvature,
+                        )
                     )
                     scalars.tr_solves = float(n_solves)
                     # h_eig_min/max need an eigendecomposition we deliberately
@@ -773,6 +856,18 @@ def train(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--mode", choices=["sgd", "newton", "trust-region"], required=True)
+    p.add_argument(
+        "--curvature",
+        choices=["hessian", "ggn"],
+        default="hessian",
+        help=(
+            "Which curvature matrix the newton and trust-region modes "
+            "precondition with. 'hessian' is the loss Hessian, which is "
+            "indefinite away from a minimum. 'ggn' is the Gauss-Newton matrix "
+            "J'LJ, which drops the network's own curvature and so is positive "
+            "semidefinite. Ignored by sgd."
+        ),
+    )
     p.add_argument("--data-dir", default="./data")
     p.add_argument(
         "--logdir",

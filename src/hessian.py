@@ -346,6 +346,26 @@ def _splu_solve(K: bpm.Generic, b: bpm.Vertical, Dx: bpm.Diagonal) -> bpm.Vertic
         return bpm.Vertical(x_blocks)
 
 
+def _zero_blocks_like(diagonal: bpm.Diagonal) -> list[bpm.Matrix]:
+    """Placeholders matching `diagonal`'s block shapes but holding no values.
+
+    `bpm.Zero` costs no storage and emits nothing into the sparse assembly, so
+    dropping a term from the augmented system this way is free rather than a
+    multiplication by an explicit block of zeros. A block with no rows or columns
+    is the exception: a parameter-free layer contributes one, and `bpm.Zero`
+    treats a zero dimension as an unknown dimension, which later blocks the
+    sizing and the block factorization. Such a block costs nothing to materialize
+    densely, so materialize it and let it take the same path the undropped terms
+    take.
+    """
+    return [
+        torch.zeros(block.height, block.width)
+        if block.height == 0 or block.width == 0
+        else bpm.Zero((block.height, block.width))
+        for block in diagonal.diagonal_blocks
+    ]
+
+
 def _densify_per_sample_blocks(diagonal: bpm.Diagonal) -> bpm.Diagonal:
     """Collapse each layer's per-sample nested `Diagonal` block into a dense `Tensor`.
 
@@ -500,6 +520,44 @@ class SequenceOfBlocks(nn.Module):
             zero_block=zero_block,
         )
 
+    def gauss_newton_setup(
+        self, z_in: torch.Tensor, target: torch.Tensor
+    ) -> "HessianInverseSetup":
+        """Like `hessian_inverse_setup`, but for the Gauss-Newton matrix.
+
+        The Gauss-Newton matrix is the Hessian of the model you get by
+        linearizing the map from the parameters to the loss's input while
+        keeping the loss itself exact, which works out to G = J' Λ J with
+        J = ∂z_{L-1}/∂x the logit Jacobian and Λ = ∇_zz f_L the curvature of the
+        loss in the logits. Differentiating the same loss without linearizing
+        gives
+
+            H = J' Λ J + Σ_i (∂loss/∂logit_i) ∇_xx logit_i,
+
+        so G keeps the first term and drops the second, the network's own
+        curvature. That second term is what can make H indefinite, because the
+        loss gradients weighting it carry either sign, whereas G is positive
+        semidefinite whenever Λ is.
+
+        In the blocks assembled by `hessian_inverse_setup` the dropped sum is
+        exactly D_D D_xx, D_D D_zx, and every D_M D_zz block but the last, so
+        the Gauss-Newton solve is the very same augmented system with those
+        blocks zeroed. Feed the result to `hessian_inverse_solve` to get
+        (G + epsilon I)^-1 b.
+        """
+        setup = self.hessian_inverse_setup(z_in, target)
+
+        # Keep only the last D_M D_zz block. Since the loss layer holds no
+        # parameters its input is the logits, so that block is the Λ above.
+        loss_curvature = _zero_blocks_like(setup.DM_Dzz)
+        loss_curvature[-1] = setup.DM_Dzz.diagonal_blocks[-1]
+
+        return setup._replace(
+            DD_Dxx=bpm.Diagonal(_zero_blocks_like(setup.DD_Dxx)),
+            DD_Dzx=bpm.Diagonal(_zero_blocks_like(setup.DD_Dzx)),
+            DM_Dzz=bpm.Diagonal(loss_curvature),
+        )
+
     def hessian_inverse_solve(
         self,
         setup: "HessianInverseSetup",
@@ -594,6 +652,18 @@ class SequenceOfBlocks(nn.Module):
     ) -> bpm.Vertical:
         "Solve (H + epsilon I) x = b using the algorithm in hessian.tex."
         setup = self.hessian_inverse_setup(z_in, target)
+        return self.hessian_inverse_solve(setup, b, epsilon, solver=solver)
+
+    def gauss_newton_inverse_product(
+        self,
+        z_in: torch.Tensor,
+        target: torch.Tensor,
+        b: bpm.Vertical,
+        epsilon: float,
+        solver: str = "splu",
+    ) -> bpm.Vertical:
+        "Solve (G + epsilon I) x = b for the Gauss-Newton matrix G."
+        setup = self.gauss_newton_setup(z_in, target)
         return self.hessian_inverse_solve(setup, b, epsilon, solver=solver)
 
 
