@@ -1,0 +1,301 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+
+\newcommand{\Hbar}{\bar{H}}
+\newcommand{\gbar}{\bar{g}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\R}{\mathbb{R}}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{corollary}{Corollary}
+\newtheorem{remark}{Remark}
+
+\title{Preconditioned SGD on a Stochastic Quadratic}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{The stochastic quadratic}
+
+Fix $x_0\in\R^n$ and consider
+\[
+    f(x;g,H)=g'(x-x_0)+\tfrac12\,(x-x_0)'H(x-x_0),
+\]
+where the pair $(g,H)$ is random, with mean gradient $\gbar=\E[g]$ and mean
+Hessian $\Hbar=\E[H]\succ0$.
+
+Because expectation is linear, the averaged
+objective $\E f$ is itself a quadratic with Hessian $\Hbar$, and its gradient is
+\[
+    \nabla \E f(x)=\gbar+\Hbar(x-x_0).
+\]
+It is
+minimized at
+\[
+    x^\star=x_0-\Hbar^{-1}\gbar .
+\]
+
+The  stochastic gradient of $f$ is
+\[
+    \nabla f(x;g,H)=g+H(x-x_0).
+\]
+To find $x^\star$, we'll consider a preconditioner $P\succ0$ and a step size
+$\eta>0$. The preconditioned stochastic gradient update under these conditions
+is
+\[
+    x_{k+1}=x_k-\eta\,P\,\nabla f(x_k;g_k,H_k)
+    =x_k-\eta\,P\big[g_k+H_k(x_k-x_0)\big].
+\]
+
+\section{The error recurrence}
+
+Define the error $e_k\equiv x_k-x^\star$ and the offset
+$d\equiv x^\star-x_0$. Let
+$\Sigma\equiv\operatorname{Cov}(g)$ be the gradient covariance and
+$\tilde{H}_k\equiv H_k-\Hbar$ the Hessian noise. Write
+\[
+    A\equiv I-\eta P\Hbar,\qquad N\equiv\E[\tilde{H}_k P^2\tilde{H}_k]\succeq0,
+    \qquad \rho\equiv\|A\|_2^2+2\eta^2\|N\|_2 .
+\]
+
+\begin{theorem}\label{thm:mse}
+    If $\rho<1$, then for every $k\ge0$,
+    \[
+        \E\|e_k\|^2\le\rho^k\,\E\|e_0\|^2
+        +\frac{1-\rho^k}{1-\rho}\,\eta^2\big(\tr(P\Sigma P)+2\,d'Nd\big).
+    \]
+    So $\E\|e_k\|^2$ decays geometrically at rate $\rho$ to a floor at most
+    $\eta^2\big(\tr(P\Sigma P)+2\,d'Nd\big)/(1-\rho)$.
+\end{theorem}
+
+The floor is fluctuation rather than a persistent offset. That's because the
+mean error vanishes, $\E e_k\to0$.
+Taking expectations of \eqref{eq:err} gives $\E e_{k+1}=A\,\E e_k$.
+Hence $\|\E e_k\|\le\|A\|_2^k\|\E e_0\|\to0$ when $\|A\|_2<1$.
+
+
+\begin{proof}
+    Write the gradient noise $\tilde{g}_k\equiv g_k-\gbar$, with covariance
+    $\Sigma$; it and $\tilde{H}_k$ are zero mean and independent of each other and of
+    $e_k$. In error coordinates $x_k-x_0=e_k+d$, and the averaged gradient is
+    $\nabla\E f(x_k)=\gbar+\Hbar(x_k-x_0)=\Hbar e_k$, because $\Hbar d=-\gbar$ (as
+    $d=x^\star-x_0=-\Hbar^{-1}\gbar$). The stochastic gradient is that mean plus the
+    two noise terms,
+    \[
+        \nabla f(x_k;g_k,H_k)=\nabla\E f(x_k)+\tilde{g}_k+\tilde{H}_k(x_k-x_0)
+        =\Hbar e_k+\tilde{g}_k+\tilde{H}_k(e_k+d).
+    \]
+    Substituting into the update gives the recurrence
+    \begin{equation}\label{eq:err}
+        e_{k+1}=A\,e_k-\eta P\tilde{g}_k-\eta P\tilde{H}_k(e_k+d).
+    \end{equation}
+
+    Condition \eqref{eq:err} on $e_k$ and expand $\|e_{k+1}\|^2$. Every cross term
+    drops, because both noises are zero mean given $e_k$ and independent of each
+    other, leaving the sum of the deterministic contraction on the norm of $e_k$, a
+    term that scales with the noise in the gradient, and a term that grows with the
+    noise in the Hessian:
+    \begin{equation}\label{eq:cond}
+        \E\big[\|e_{k+1}\|^2\mid e_k\big]
+        =\|A e_k\|^2+\eta^2\,\E\|P\tilde{g}_k\|^2+\eta^2\,(e_k+d)'N(e_k+d).
+    \end{equation}
+
+    Take the total expectation of \eqref{eq:cond}. The gradient term is already
+    constant, $\eta^2\,\E\|P\tilde{g}_k\|^2=\eta^2\tr(P\Sigma P)$; the other two are
+    state-dependent, so bound each by its operator norm. The contraction gives
+    $\E\|Ae_k\|^2\le\|A\|_2^2\,\E\|e_k\|^2$. For the Hessian term, expand
+    $\E[(e_k+d)'N(e_k+d)]=\E[e_k'Ne_k]+2(\E e_k)'Nd+d'Nd$, where
+    $\E[e_k'Ne_k]\le\|N\|_2\,\E\|e_k\|^2$ and the cross term obeys
+    $2(\E e_k)'Nd\le(\E e_k)'N(\E e_k)+d'Nd\le\|N\|_2\,\E\|e_k\|^2+d'Nd$, using
+    $\|\E e_k\|^2\le\E\|e_k\|^2$. Collecting the pieces gives the one-step affine
+    bound
+    \begin{equation}\label{eq:bound}
+        \E\|e_{k+1}\|^2\le\rho\,\E\|e_k\|^2+\eta^2\big(\tr(P\Sigma P)+2\,d'Nd\big).
+    \end{equation}
+    Iterating \eqref{eq:bound} from $e_0$ gives the stated bound, and $\rho<1$ sends
+    its geometric term to $0$, leaving the floor.
+\end{proof}
+The rate $\rho$ in Theorem~\ref{thm:mse} splits into a deterministic part
+$\|A\|_2^2$ and a multiplicative-noise part $2\eta^2\|N\|_2$, both functions of
+$\eta$; how small can tuning $\eta$ make it? Since $P\Hbar$ is similar to the
+symmetric $P^{1/2}\Hbar P^{1/2}\succ0$, its eigenvalues $\lambda_i(P\Hbar)$ are
+real and positive, so $A$ has eigenvalues $1-\eta\lambda_i(P\Hbar)$. The largest
+of their magnitudes, $\max_i|1-\eta\lambda_i(P\Hbar)|$, is minimized over $\eta$
+at $\eta=2/(\lambda_{\min}(P\Hbar)+\lambda_{\max}(P\Hbar))$, where it equals
+$(\kappa-1)/(\kappa+1)$ with $\kappa=\kappa(P\Hbar)$, and is larger at every other
+$\eta$. Since $\|A\|_2$ is at least this magnitude,
+\[
+    \rho\;\ge\;\|A\|_2^2\;\ge\;\Big(\frac{\kappa-1}{\kappa+1}\Big)^2
+    \qquad\text{for every }\eta ,
+\]
+so the condition number $\kappa(P\Hbar)$ lower-bounds the rate at any step size,
+with equality only for a normal $A$ at the optimal $\eta$ and no Hessian noise.
+
+
+\section{Picking $P=\Hbar^{-1}$ as a preconditioner}
+
+With $P=\Hbar^{-1}$ the preconditioned Hessian is $P\Hbar=I$, so $\kappa(P\Hbar)=1$,
+$A=(1-\eta)I$, and the rate is $\rho=(1-\eta)^2+2\eta^2\|N\|_2$. Minimizing over
+$\eta$ gives $\eta=1/(1+2\|N\|_2)$ and $\rho=2\|N\|_2/(1+2\|N\|_2)$. The
+condition-number bound $((\kappa-1)/(\kappa+1))^2$ is now $0$, so the rate is set
+entirely by the Hessian noise $N=\E[\tilde{H}_k\Hbar^{-2}\tilde{H}_k]$.
+Theorem~\ref{thm:mse} specializes as follows.
+\begin{corollary}
+    Take $P=\Hbar^{-1}$, and write $N=\E[\tilde{H}_k\Hbar^{-2}\tilde{H}_k]$ and
+    $\rho=(1-\eta)^2+2\eta^2\|N\|_2$. If $\rho<1$, then for every $k\ge0$,
+    \[
+        \E\|e_k\|^2\le\rho^k\,\E\|e_0\|^2
+        +\frac{1-\rho^k}{1-\rho}\,\eta^2\big(\tr(\Hbar^{-1}\Sigma\,\Hbar^{-1})
+        +2\,d'Nd\big).
+    \]
+\end{corollary}
+
+\begin{proof}
+    Substitute $P=\Hbar^{-1}$ into Theorem~\ref{thm:mse}: $P\Hbar=I$ gives
+    $\|A\|_2^2=(1-\eta)^2$, $N=\E[\tilde{H}_k\Hbar^{-2}\tilde{H}_k]$, and
+    $\tr(P\Sigma P)=\tr(\Hbar^{-1}\Sigma\,\Hbar^{-1})$.
+\end{proof}
+
+
+\section{Preconditioning with the inverse of an independent Hessian sample}
+
+Now precondition with the inverse of an independent Hessian sample. Draw an
+invertible $Q$ from the same distribution as the Hessian samples, independently
+of $(g_k,H_k)$ and $e_k$ and redrawn independently each step, and set $P=Q^{-1}$.
+The update uses this random $P$,
+\[
+    x_{k+1}=x_k-\eta\,P\,\nabla f(x_k;g_k,H_k).
+\]
+With $P$ random, $A=I-\eta P\Hbar$ is random and $N=\E[\tilde{H}_k P^2\tilde{H}_k]$
+now averages over $P$ as well, so the rate of Theorem~\ref{thm:mse} reads
+\[
+    \rho\equiv\|\E[A'A]\|_2+2\eta^2\|N\|_2 .
+\]
+
+\begin{corollary}\label{cor:stoch}
+    If $\rho<1$, then for every $k\ge0$,
+    \[
+        \E\|e_k\|^2\le\rho^k\,\E\|e_0\|^2
+        +\frac{1-\rho^k}{1-\rho}\,\eta^2\big(\E[\tr(P\Sigma P)]+2\,d'Nd\big),
+    \]
+    so $\E\|e_k\|^2$ decays at rate $\rho$ to a floor at most
+    $\eta^2\big(\E[\tr(P\Sigma P)]+2\,d'Nd\big)/(1-\rho)$.
+\end{corollary}
+
+\begin{proof}
+    For a fixed realization of $P$ the step is the deterministic-$P$ update, so the
+    conditional identity \eqref{eq:cond} holds. Averaging over $P$, independent of
+    $(g_k,H_k,e_k)$, turns $\tr(P\Sigma P)$ into $\E[\tr(P\Sigma P)]$, keeps
+    $N=\E[\tilde{H}_k P^2\tilde{H}_k]$ (now averaging $P$ too), and makes the
+    contraction obey $\E\|A e_k\|^2\le\|\E[A'A]\|_2\,\E\|e_k\|^2$. The bounding and
+    iteration of Theorem~\ref{thm:mse} then give the bound.
+\end{proof}
+
+For comparison, plain SGD ($P=I$) has contraction $\|I-\eta\Hbar\|_2^2$. To line
+the inverse-sample contraction up with it, split it into its mean and
+fluctuation,
+\[
+    \E[A'A]=\big(I-\eta\,\E[Q^{-1}]\Hbar\big)'\big(I-\eta\,\E[Q^{-1}]\Hbar\big)
+    +\eta^2\Hbar\operatorname{Cov}(Q^{-1})\Hbar .
+\]
+The first term is the $P=I$ contraction with $\Hbar$ replaced by
+$\E[Q^{-1}]\Hbar$; the second, absent under $P=I$, is the variance cost, growing
+with $\operatorname{Cov}(Q^{-1})$ and diverging as $Q$ nears singularity.
+Whether the replacement $\Hbar\mapsto\E[Q^{-1}]\Hbar$ helps is not something the
+model guarantees. Matrix Jensen gives only $\E[Q^{-1}]\succeq\Hbar^{-1}$, hence
+$\E[Q^{-1}]\Hbar\succeq I$; the gap $\E[Q^{-1}]-\Hbar^{-1}$ vanishes only for
+deterministic $Q$ and grows with the spread of $Q$. The replacement whitens,
+$\E[Q^{-1}]\Hbar\to I$, only if $Q$ concentrates near $\Hbar$. When instead $Q$
+puts mass near singular matrices, $\E[Q^{-1}]$ runs far above $\Hbar^{-1}$ and
+$\E[Q^{-1}]\Hbar$ is \emph{worse} conditioned than $\Hbar$. So the inverse
+sample can lose on conditioning as well as on variance.
+
+This variance falls on the contraction $\|\E[A'A]\|_2$ itself, not just the
+noise term, and the one-dimensional problem $\Hbar=h$ shows it cleanly. A
+deterministic preconditioner makes the contraction $(1-\eta h)^2$, which the step
+$\eta=1/h$ sends to $0$. The random inverse cannot: with $\mu_1=\E[Q^{-1}]$ and
+$\mu_2=\E[Q^{-2}]$, the contraction is a parabola in $\eta$,
+\[
+    \E[A^2]=1-2\eta h\mu_1+\eta^2h^2\mu_2\;\ge\;1-\frac{\mu_1^2}{\mu_2}\;>\;0
+    \qquad\text{for every }\eta,
+\]
+its floor $1-\mu_1^2/\mu_2$ reached at $\eta=\mu_1/(h\mu_2)$ and positive whenever
+$Q$ is random (Cauchy--Schwarz, $\mu_1^2<\mu_2$). So the variance of $Q^{-1}$
+keeps the contraction, and hence the rate, bounded away from $0$ at any step size,
+before any gradient or Hessian noise is added. That is what a deterministic
+preconditioner avoids and a random one cannot.
+
+
+\section{Preconditioning with the gradient's own Hessian}
+
+Take instead $P=H_k^{-1}$, the very Hessian in the gradient (assume $H_k$
+invertible), and substitute it into the error recurrence \eqref{eq:err}. Its
+multiplicative Hessian term recombines with $A=I-\eta H_k^{-1}\Hbar$: the
+$e_k$-coefficient collapses,
+$I-\eta H_k^{-1}\Hbar-\eta H_k^{-1}\tilde H_k=I-\eta H_k^{-1}H_k=(1-\eta)I$, while
+the additive terms combine into
+$-\eta H_k^{-1}(\tilde g_k+\tilde H_k d)=-\eta H_k^{-1}\nabla f(x^\star;g_k,H_k)$,
+the stochastic gradient at the optimum. So \eqref{eq:err} becomes
+\[
+    e_{k+1}=(1-\eta)e_k-\eta H_k^{-1}\nabla f(x^\star;g_k,H_k).
+\]
+After the cancellation this is \eqref{eq:err} of the first section, a contraction
+plus additive noise with no multiplicative Hessian term, except that the noise
+$H_k^{-1}\nabla f(x^\star)$ is not centered. Splitting it into mean and
+fluctuation, $\mu\equiv\E[H_k^{-1}\nabla f(x^\star)]$ and
+$\zeta_k\equiv H_k^{-1}\nabla f(x^\star)-\mu$ ($\zeta_k$ zero mean, i.i.d.,
+independent of $e_k$), the mean appears as an offset:
+\begin{equation}\label{eq:same}
+    e_{k+1}=(1-\eta)e_k-\eta\mu-\eta\zeta_k .
+\end{equation}
+The offset $\mu$ is a bias: the gradient at $x^\star$ is unbiased,
+$\E[\nabla f(x^\star)]=0$, yet preconditioning by the correlated $H_k^{-1}$ makes
+$\mu\neq0$. With $g_k\perp H_k$, since $\nabla f(x^\star)=g_k-H_k\Hbar^{-1}\gbar$,
+$\mu=(\E[H_k^{-1}]-\Hbar^{-1})\gbar$, nonzero by Jensen $\E[H_k^{-1}]\succeq\Hbar^{-1}$.
+
+Removing the offset recovers the first section's recurrence exactly: the deviation
+$e_k+\mu$ obeys $(e_{k+1}+\mu)=(1-\eta)(e_k+\mu)-\eta\zeta_k$, which is
+\eqref{eq:err} with $A=(1-\eta)I$, $N=0$, and zero-mean noise $\zeta_k$. So
+Theorem~\ref{thm:mse} specializes as follows.
+
+\begin{corollary}\label{cor:same}
+    With $\rho=(1-\eta)^2$, for every $k\ge0$,
+    \[
+        \E\|e_k+\mu\|^2\le\rho^k\,\E\|e_0+\mu\|^2
+        +\frac{1-\rho^k}{1-\rho}\,\eta^2\tr\operatorname{Cov}(\zeta_k),
+    \]
+    and $\E[e_k]\to-\mu$, so
+    $\E\|e_k\|^2\to\|\mu\|^2+\frac{\eta}{2-\eta}\tr\operatorname{Cov}(\zeta_k)$.
+\end{corollary}
+
+\begin{proof}
+    The deviation $e_k+\mu$ satisfies Theorem~\ref{thm:mse}'s recurrence with
+    $A=(1-\eta)I$, $N=0$, and gradient covariance $\operatorname{Cov}(\zeta_k)$,
+    giving the bound and $\E[e_k+\mu]\to0$; then
+    $\E\|e_k\|^2=\|\E[e_k]\|^2+\tr\operatorname{Cov}(e_k)$ gives the limit.
+\end{proof}
+
+So the iterate converges to $x^\star-\mu$, not $x^\star$: the bias $\|\mu\|^2$ is
+present for every $\eta$ and survives $\eta\to0$, unremovable by any step size.
+The independent sample of the previous section avoids it, since there $P$ shares
+nothing with the gradient and $\E[P\nabla f(x^\star)]=\E[P]\,\E[\nabla f(x^\star)]=0$.
+
+\begin{remark}[The floor in $\gbar$]
+    With $g_k\perp H_k$, both parts of the stationary error are exact quadratics in
+    the mean gradient. The bias is
+    $\|\mu\|^2=\gbar'(\E[H_k^{-1}]-\Hbar^{-1})^2\gbar$, and the fluctuation is
+    \[
+        \tr\operatorname{Cov}(\zeta_k)=\gbar'V\gbar+c,
+    \]
+    with $V=\E[(H_k^{-1}-\E[H_k^{-1}])^2]$ the covariance of the inverse Hessian and
+    $c=\tr(\E[H_k^{-2}]\Sigma)$ the variance of the preconditioned gradient noise
+    $H_k^{-1}\tilde g_k$.
+\end{remark}
+
+
+\end{document}
