@@ -65,11 +65,32 @@ def _config(activation: str, seed: int, arm: str) -> Config:
     )
 
 
+def _sgd(activation: str) -> Config:
+    """SGD at the streaming experiment's tuned rate, as the reference line.
+
+    Without it the figure only shows the two arms tracking each other, which says
+    nothing about whether either is any good.
+    """
+    return Config(
+        name=f"{activation}_seed0_sgd",
+        method="sgd",
+        activation=activation,
+        args=[
+            "--mode", "sgd",
+            "--lr", {"gelu": "0.1", "tanh": "0.03"}[activation],
+            "--num-steps", "30000",
+            "--activation", activation,
+            "--seed", "0",
+            *SHARED_ARGS,
+        ],
+    )
+
+
 CONFIGS = [
     _config(activation, seed, arm)
     for activation, seeds in SEEDS.items()
     for seed in seeds
     for arm in ARMS
-]
+] + [_sgd(activation) for activation in SEEDS]
 
 CONFIGS_BY_NAME = {config.name: config for config in CONFIGS}

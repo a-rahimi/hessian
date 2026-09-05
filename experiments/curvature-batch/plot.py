@@ -24,8 +24,10 @@ sys.path.insert(0, str(SCRIPT_DIR))
 import harness  # noqa: E402
 from experiments import CONFIGS, SEEDS  # noqa: E402
 
-# Okabe-Ito colorblind-safe palette: arm -> color.
-ARM_COLOR = {"same": "#0072B2", "fresh": "#D55E00"}
+# Okabe-Ito colorblind-safe palette: arm -> color. SGD is the reference line, so
+# it is drawn dashed and in the colour the other experiments already use for it.
+ARM_COLOR = {"same": "#0072B2", "fresh": "#009E73"}
+SGD_COLOR = "#D55E00"
 SEED_ALPHA = {0: 1.0, 1: 0.5, 2: 0.3}
 RANDOM_GUESS_LOSS = math.log(10)
 
@@ -52,15 +54,37 @@ def build_figure() -> plt.Figure:
             data = by_name(f"{activation}_seed0_{arm}")
             ax.plot(data["step"], data["probe_loss"], color=color, lw=1.6,
                     label=f"curvature batch: {arm}")
+        sgd = by_name(f"{activation}_seed0_sgd")
+        ax.plot(sgd["step"], sgd["probe_loss"], color=SGD_COLOR, lw=1.4, ls="--",
+                label="sgd")
         decorate(ax, f"{activation}, seed 0")
     ax_gelu.set_ylabel("held-out probe loss")
 
-    for seed in SEEDS["gelu"]:
-        for arm, color in ARM_COLOR.items():
-            data = by_name(f"gelu_seed{seed}_{arm}")
-            ax_seeds.plot(data["step"], data["probe_loss"], color=color, lw=1.4,
-                          alpha=SEED_ALPHA[seed], label=f"{arm}, seed {seed}")
-    decorate(ax_seeds, "gelu, all three seeds")
+    # A paired comparison rather than a time series: the question this panel
+    # answers is whether the seed-0 gap survives replication, and six overlaid
+    # curves cannot answer it when one seed's excursion sets the y range.
+    seeds = SEEDS["gelu"]
+    best = {
+        arm: [min(by_name(f"gelu_seed{seed}_{arm}")["probe_loss"]) for seed in seeds]
+        for arm in ARM_COLOR
+    }
+    for index, seed in enumerate(seeds):
+        ax_seeds.plot(
+            [index, index], [best["same"][index], best["fresh"][index]],
+            color="gray", lw=1, alpha=0.6, zorder=1,
+        )
+    for arm, color in ARM_COLOR.items():
+        ax_seeds.scatter(range(len(seeds)), best[arm], color=color, s=70, zorder=2,
+                         label=f"curvature batch: {arm}")
+    sgd_best = min(by_name("gelu_seed0_sgd")["probe_loss"])
+    ax_seeds.axhline(sgd_best, color=SGD_COLOR, ls="--", lw=1.4, label="sgd")
+    ax_seeds.axhline(RANDOM_GUESS_LOSS, ls=":", color="gray", lw=1, alpha=0.8)
+    ax_seeds.set_xticks(range(len(seeds)), [f"seed {seed}" for seed in seeds])
+    ax_seeds.set_xlim(-0.4, len(seeds) - 0.6)
+    ax_seeds.set_ylabel("best held-out probe loss")
+    ax_seeds.set_title("gelu, best loss per seed")
+    ax_seeds.grid(True, axis="y", alpha=0.15)
+    ax_seeds.legend(fontsize=8, loc="center right")
 
     fig.suptitle(
         "Trust-region curvature estimated on a batch of its own "
