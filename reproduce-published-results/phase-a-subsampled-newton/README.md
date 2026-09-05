@@ -100,10 +100,10 @@ modest variant at `lr = 0.1, ε = 1.0`.
 Compare to:
 
 - **SGD** on the same fixed batch at `lr = 0.01` reaches min loss `0.19` in
-  1000 steps ([exp-048b](../../experiments/runs/exp-048b-sgd-reuse-batch-lr0.01/)).
+  1000 steps ([exp-048b](../../experiments/archive/exp-048b-sgd-reuse-batch-lr0.01/)).
 - **Our linear-inverse Newton** on the same fixed batch reaches min loss `1.16`
   at `ε = 0.5, lr = 0.5` with LM-adaptive ε
-  ([exp-053](../../experiments/runs/exp-053-newton-memorize-lr0.5-lm/)).
+  ([exp-053](../../experiments/archive/exp-053-newton-memorize-lr0.5-lm/)).
 - **Hessian-Free in raw-Hessian mode**, which depends only on matrix-vector products with the *same* `H + ε I` we invert (see [phase-c-hessian-free](../phase-c-hessian-free/)), reaches `loss = 0.21` at step 247 on this diagnostic.
 
 Headline (single 64-sample batch, all `ε = 1.0`):

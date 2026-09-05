@@ -35,7 +35,7 @@ python train_hf_anchor.py --curvature-opt hessian --num-steps 1000 \
 ```
 
 Fixed-batch memorization diagnostic (single 64-sample batch held for the
-entire run), matching the [exp-048b](../../experiments/runs/) protocol:
+entire run), matching the [exp-048b](../../experiments/archive/) protocol:
 
 ```
 python train_hf_anchor.py --curvature-opt ggn     --fixed-batch \

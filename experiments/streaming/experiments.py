@@ -9,7 +9,11 @@ actually training on CIFAR-10 rather than memorizing a single batch.
 
 from __future__ import annotations
 
-import dataclasses
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from harness import Config  # noqa: E402
 
 # Same tall-skinny MLP as the memorization benchmark, minus --reuse-batch: with
 # the default reuse of 1 a new minibatch is drawn every step.
@@ -23,14 +27,6 @@ SHARED_ARGS = [
 ]
 
 ACTIVATION = "gelu"
-
-
-@dataclasses.dataclass(frozen=True)
-class Config:
-    name: str
-    method: str
-    activation: str
-    args: list[str]
 
 
 TR = Config(

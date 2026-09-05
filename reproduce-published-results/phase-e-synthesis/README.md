@@ -12,7 +12,7 @@ This document synthesizes Phases A, B, C, and D into a single read on why our li
 
 ## Method × diagnostic comparison table
 
-All numbers below are on the **Phase 5 anchor** (`SequenceOfDenseBlocks`, `num_layers=8, hidden_dim=24, image_size=16, activation=relu`, batch size 64) except where noted. The "fixed-batch memorization" column is the [exp-048b](../../experiments/runs/exp-048b-sgd-reuse-batch-lr0.01) protocol — a single 64-sample batch held for the whole run, with the loss on *that* batch reported. The "full CIFAR-10" column is `probe_loss` at the end of the budget.
+All numbers below are on the **Phase 5 anchor** (`SequenceOfDenseBlocks`, `num_layers=8, hidden_dim=24, image_size=16, activation=relu`, batch size 64) except where noted. The "fixed-batch memorization" column is the [exp-048b](../../experiments/archive/exp-048b-sgd-reuse-batch-lr0.01) protocol — a single 64-sample batch held for the whole run, with the loss on *that* batch reported. The "full CIFAR-10" column is `probe_loss` at the end of the budget.
 
 | Method                                                                         | Curvature inverse           | Step accept-rule                            | Full CIFAR-10 (probe_loss)       | Fixed-batch memorization (min loss) | Steps |
 | ------------------------------------------------------------------------------ | --------------------------- | ------------------------------------------- | -------------------------------- | ----------------------------------- | ----- |
