@@ -4,12 +4,11 @@ Reads the six CSVs written by run.py and produces
 results/memorization_curves.png: loss vs iteration (left) and loss vs
 wall-clock (right), both log-scaled.
 
-    python benchmarks/memorization/plot.py
+    python experiments/memorization/plot.py
 """
 
 from __future__ import annotations
 
-import csv
 import math
 import sys
 from pathlib import Path
@@ -19,7 +18,10 @@ import matplotlib.pyplot as plt
 SCRIPT_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = SCRIPT_DIR / "results"
 
+sys.path.insert(0, str(SCRIPT_DIR.parent))
 sys.path.insert(0, str(SCRIPT_DIR))
+
+import harness  # noqa: E402
 from experiments import CONFIGS  # noqa: E402
 
 # Okabe-Ito colorblind-safe palette: activation -> color.
@@ -32,14 +34,10 @@ RANDOM_GUESS_LOSS = math.log(10)  # ln(10) for uniform 10-class prediction
 
 
 def load_csv(name: str) -> dict[str, list[float]]:
-    path = RESULTS_DIR / f"{name}.csv"
-    cols: dict[str, list[float]] = {"step": [], "loss": [], "wall_clock_s": []}
-    with path.open(newline="") as f:
-        for row in csv.DictReader(f):
-            cols["step"].append(float(row["step"]))
-            cols["loss"].append(max(float(row["loss"]), LOSS_FLOOR))
-            cols["wall_clock_s"].append(float(row["wall_clock_s"]))
-    return cols
+    """One run's columns, with the loss floored so a log axis can render zero."""
+    columns = harness.load_csv(RESULTS_DIR, name)
+    columns["loss"] = [max(value, LOSS_FLOOR) for value in columns["loss"]]
+    return columns
 
 
 def build_figure() -> plt.Figure:

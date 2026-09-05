@@ -4,12 +4,11 @@ Reads the CSVs written by run.py and produces results/streaming_curves.png:
 held-out probe loss vs iteration (left) and vs wall-clock (right), both
 log-scaled.
 
-    python benchmarks/streaming/plot.py
+    python experiments/streaming/plot.py
 """
 
 from __future__ import annotations
 
-import csv
 import math
 import sys
 from pathlib import Path
@@ -19,7 +18,10 @@ import matplotlib.pyplot as plt
 SCRIPT_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = SCRIPT_DIR / "results"
 
+sys.path.insert(0, str(SCRIPT_DIR.parent))
 sys.path.insert(0, str(SCRIPT_DIR))
+
+import harness  # noqa: E402
 from experiments import CONFIGS  # noqa: E402
 
 # gelu is the only activation here, so distinguish the two runs by color.
@@ -29,14 +31,8 @@ RANDOM_GUESS_LOSS = math.log(10)
 
 
 def load_csv(name: str) -> dict[str, list[float]]:
-    path = RESULTS_DIR / f"{name}.csv"
-    cols: dict[str, list[float]] = {"step": [], "probe_loss": [], "wall_clock_s": []}
-    with path.open(newline="") as f:
-        for row in csv.DictReader(f):
-            cols["step"].append(float(row["step"]))
-            cols["probe_loss"].append(float(row["probe_loss"]))
-            cols["wall_clock_s"].append(float(row["wall_clock_s"]))
-    return cols
+    """One run's columns, straight from the shared harness."""
+    return harness.load_csv(RESULTS_DIR, name)
 
 
 def build_figure() -> plt.Figure:

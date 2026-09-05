@@ -103,7 +103,7 @@ python reproduce-published-results/phase-d-saddle-free-newton/train_sfn.py \
 ```
 
 D2 (single 64-sample batch held for 200 steps, matching the
-[exp-048b](../../experiments/runs/exp-048b-sgd-reuse-batch-lr0.01) protocol):
+[exp-048b](../../experiments/archive/exp-048b-sgd-reuse-batch-lr0.01) protocol):
 
 ```
 python reproduce-published-results/phase-d-saddle-free-newton/train_sfn.py \
@@ -124,11 +124,11 @@ Both runs went to 100 steps (not the 200 the README originally budgeted, because
 | Run | Method                                                             | Steps | Final `train_loss_avg10` | Final / min `probe_loss` | Min train loss seen |
 | --- | ------------------------------------------------------------------ | ----- | ------------------------ | ------------------------ | ------------------- |
 | D1  | SFN (k=20, ε=1.0 LM-adaptive, lr=0.5)                             | 100   | 2.118                    | **2.002** (min); 2.085 (final) | n/a (fresh batches) |
-| D1  | linear-Newton ref ([exp-028](../../experiments/runs/exp-028-newton-15-frozen-low-eps)) | 1000  | 2.22 – 2.30 band         | 2.22 – 2.30              | n/a                 |
+| D1  | linear-Newton ref ([exp-028](../../experiments/archive/exp-028-newton-15-frozen-low-eps)) | 1000  | 2.22 – 2.30 band         | 2.22 – 2.30              | n/a                 |
 | D1  | SGD ref ([Phase 4 anchor](../../experiments/summary-so-far.md))   | 1000  | n/a                      | 1.97                     | n/a                 |
 | D2  | SFN (k=20, ε=1.0 LM-adaptive, lr=0.5)                             | 100   | 0.251 (min)              | n/a (probe meaningless under memorization) | **0.179**           |
-| D2  | linear-Newton ref ([exp-053](../../experiments/runs/exp-053-newton-memorize-lr0.5-lm)) | 1000  | n/a                      | n/a                      | 1.16                |
-| D2  | SGD ref ([exp-048b](../../experiments/runs/exp-048b-sgd-reuse-batch-lr0.01))           | 1000  | n/a                      | n/a                      | 0.19                |
+| D2  | linear-Newton ref ([exp-053](../../experiments/archive/exp-053-newton-memorize-lr0.5-lm)) | 1000  | n/a                      | n/a                      | 1.16                |
+| D2  | SGD ref ([exp-048b](../../experiments/archive/exp-048b-sgd-reuse-batch-lr0.01))           | 1000  | n/a                      | n/a                      | 0.19                |
 
 The D1 trajectory descends monotonically from `probe_loss = 3.02` at step 0 to `2.00` at step 78 and stabilizes in the `2.00–2.10` band for the remainder of the run, escaping the `2.22–2.30` band our linear-Newton plateaus in. The D2 trajectory descends from train loss `3.01` at step 0 to `0.20` at step 95, with batch accuracy climbing to `0.98` (the model memorizes the 64-sample batch). One LM rejection at step 97 induces a transient loss spike to `1.77`; the minimum loss seen across the run is `0.179` at step 97 immediately before the rejection.
 

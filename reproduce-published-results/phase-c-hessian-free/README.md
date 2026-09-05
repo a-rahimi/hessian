@@ -86,7 +86,7 @@ steps):
 | SGD (ref)              | 1.97            |  -   | -           |
 
 Fixed-batch memorization (`--fixed-batch`, single 64-sample batch held for
-1000 steps; protocol matches [exp-048b](../../experiments/runs/)):
+1000 steps; protocol matches [exp-048b](../../experiments/archive/)):
 
 | run             | min training loss on fixed batch | step |
 | --------------- | -------------------------------- | ---- |

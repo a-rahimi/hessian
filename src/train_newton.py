@@ -627,10 +627,29 @@ def train(args: argparse.Namespace) -> None:
             elif args.mode == "trust-region":
                 g_flat = grad_vec.to_tensor().flatten()
 
+                # The curvature may be estimated on a batch of its own. The
+                # gradient, the trial loss, and the accept/reject ratio all stay
+                # on (x, y), so the only thing the second batch changes is which
+                # samples the quadratic term is fit to. `grad_vec` was already
+                # snapshotted into its own tensors above, so the backward pass
+                # that building the curvature runs cannot disturb it.
+                if args.curvature_batch == "fresh":
+                    try:
+                        curv_x, curv_y = next(data_iter)
+                    except StopIteration:
+                        data_iter = iter(loader)
+                        curv_x, curv_y = next(data_iter)
+                    curv_x = curv_x.to(device)
+                    curv_y = curv_y.to(device)
+                else:
+                    curv_x, curv_y = x, y
+
                 if args.tr_solver == "dense":
                     # Build the full dense Hessian (same path as dense-solve Newton)
                     def loss_fn(params):
-                        return torch.func.functional_call(model, params, (x, y))
+                        return torch.func.functional_call(
+                            model, params, (curv_x, curv_y)
+                        )
 
                     hessian_dict = torch.func.hessian(loss_fn)(
                         dict(model.named_parameters())
@@ -651,7 +670,9 @@ def train(args: argparse.Namespace) -> None:
                         )
                 else:
                     p_flat, lambda_star, step_type, hard_case, n_solves = (
-                        efficient_solve_trs(model, x, y, grad_vec, trust_radius)
+                        efficient_solve_trs(
+                            model, curv_x, curv_y, grad_vec, trust_radius
+                        )
                     )
                     scalars.tr_solves = float(n_solves)
                     # h_eig_min/max need an eigendecomposition we deliberately
@@ -763,6 +784,18 @@ def train(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--mode", choices=["sgd", "newton", "trust-region"], required=True)
+    p.add_argument(
+        "--curvature-batch",
+        choices=["same", "fresh"],
+        default="same",
+        help=(
+            "Which batch the trust region estimates curvature on. 'same' uses "
+            "the batch the gradient came from. 'fresh' draws a second batch for "
+            "the Hessian only, so the quadratic term is fit to samples the "
+            "gradient did not see, while the gradient and the accept/reject "
+            "ratio stay on the original batch. Ignored outside trust-region mode."
+        ),
+    )
     p.add_argument("--data-dir", default="./data")
     p.add_argument(
         "--logdir",

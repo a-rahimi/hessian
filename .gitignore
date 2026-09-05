@@ -35,3 +35,6 @@ src/hessian.egg-info/
 *.lof
 *.lot
 
+
+# Scratch artifacts written by src/demo_hessian.ipynb
+src/*.pt

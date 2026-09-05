@@ -7,7 +7,11 @@ activation) stay in sync. Each config carries a stable `name`, its `method` and
 
 from __future__ import annotations
 
-import dataclasses
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from harness import Config  # noqa: E402
 
 # Model/data config shared by every run: a tall-skinny MLP (width 8, depth 16)
 # memorizing one fixed 32-example minibatch. --reuse-batch is set absurdly high
@@ -26,14 +30,6 @@ ACTIVATIONS = ["tanh", "gelu", "relu"]
 
 # Best SGD learning rate per activation (tuned separately from this suite).
 SGD_LR = {"tanh": "0.01", "gelu": "0.03", "relu": "0.01"}
-
-
-@dataclasses.dataclass(frozen=True)
-class Config:
-    name: str
-    method: str
-    activation: str
-    args: list[str]
 
 
 def _trust_region(activation: str) -> Config:

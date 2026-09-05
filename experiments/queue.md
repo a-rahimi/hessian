@@ -34,7 +34,7 @@ Sensible scaling axes:
 **Git workflow:**
 - Working tree must be clean before the Executor runs an experiment (only `experiments/queue.md` may be dirty due to status flip).
 - Executor commits any `code_patch` + the queue status update before running, captures `git rev-parse HEAD`, and records it as `commit_hash` on the entry.
-- After the run finishes, Executor commits the result artifacts (`experiments/runs/<id>/...`, queue status=done) as a second commit. The recorded `commit_hash` always refers to the *training-time* commit.
+- After the run finishes, Executor commits the result artifacts (`experiments/archive/<id>/...`, queue status=done) as a second commit. The recorded `commit_hash` always refers to the *training-time* commit.
 
 ---
 
@@ -2031,4 +2031,57 @@ code_patch: |
   when lm-check-batch==same). New StepScalars fields: cos_step_neg_grad,
   pred_loss_change, actual_loss_change, h_eig_min, h_eig_max. Log line extended.
 predicted_outcome: diagnostic data — analysis comes after.
+```
+
+---
+
+```yaml
+id: exp-059-curvature-own-batch
+status: done
+commit_hash: null
+hypothesis: |
+  The trust region fits its quadratic model and checks that model's accuracy on the same
+  minibatch, so the curvature is fit to exactly the samples the step is then scored on and
+  the ratio test cannot tell a good step from an overfit one. Estimating the Hessian on a
+  batch of its own, while leaving the gradient and the accept/reject ratio on the original
+  batch, decouples the two. Every earlier attempt moved in the opposite direction: exp-002
+  reused one batch across consecutive steps so the Hessian would be locally accurate, and
+  exp-042 moved only the LM acceptance check to a fresh batch, never the curvature. This is
+  the sharpest test on tanh, where the streaming trust region reaches 2.3977, worse than the
+  random-guess loss of ln(10), so a curvature fit to the wrong samples is already doing harm.
+flags:
+  --mode: trust-region
+  --tr-solver: dense
+  --curvature-batch: fresh          # against `same` as the control
+  --delta-init: 1.0
+  --delta-max: 100
+  --tr-eta: 0.1
+  --num-steps: 400
+  --batch-size: 32
+  --num-layers: 16
+  --hidden-dim: 8
+  --image-size: 8
+  --activation: [gelu, tanh]
+  --seed: 0
+code_patch: |
+  New --curvature-batch {same,fresh} flag. When 'fresh', the trust-region branch draws a
+  second batch from the loader and uses it for the dense Hessian and for
+  hessian_inverse_setup, while the gradient, the trial loss, and rho stay on the original
+  batch. Default 'same' reproduces the previous per-step logs field for field.
+predicted_outcome: |
+  If the ratio test is being fooled by fitting curvature to the scored samples, the fresh
+  curvature should stop the tanh run from ending worse than guessing. If the stall is the
+  gradient noise rather than the curvature's provenance, both arms land together.
+outcome: |
+  Null. On tanh the fresh curvature moved best probe loss from 2.3977 to 2.3680, still worse
+  than the random-guess loss, so it did not fix the pathology it was aimed at. On gelu seed 0
+  looked like a large win, 2.2844 to 2.0973 with probe accuracy 0.148 to 0.238 and 332 accepted
+  steps against 285, but it did not replicate: seed 1 gave 2.2688 against 2.2400 and seed 2 gave
+  2.2957 against 2.2892. The `same` arm varies by only 0.027 across the three seeds, so seed 0's
+  2.0973 is far outside that spread, and with one hit in three I cannot separate an occasional
+  large win from a fluke. Reading the mean over seeds as the effect would be reading the outlier.
+  Two caveats stand: the fresh arm draws two batches per step, so the two arms see different
+  gradient streams and the comparison is unpaired, which `--curvature-batch previous` would fix
+  at no cost; and everything here is the dense subproblem solver on the streaming task, where
+  SGD reaches 1.8247 and every curvature variant tried so far sits above 2.2.
 ```
