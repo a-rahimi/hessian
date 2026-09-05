@@ -36,8 +36,13 @@ class Config:
     args: list[str]
 
 
-def _trust_region(activation: str) -> Config:
-    args = [
+def _trust_region_args(activation: str) -> list[str]:
+    """The arguments the two trust-region runs share.
+
+    They differ only in `--curvature`, so anything separating their curves is the
+    curvature matrix rather than the optimizer.
+    """
+    return [
         "--mode", "trust-region",
         "--tr-solver", "dense",
         "--delta-init", "1.0",
@@ -47,7 +52,21 @@ def _trust_region(activation: str) -> Config:
         "--activation", activation,
         *SHARED_ARGS,
     ]
+
+
+def _trust_region(activation: str) -> Config:
+    args = [*_trust_region_args(activation), "--curvature", "hessian"]
     return Config(f"tr_{activation}", "trust-region", activation, args)
+
+
+def _gauss_newton(activation: str) -> Config:
+    """The same trust region on the Gauss-Newton matrix instead of the Hessian.
+
+    G drops the network's own curvature, which is the term that makes the Hessian
+    indefinite, so the subproblem is built on a positive semidefinite matrix.
+    """
+    args = [*_trust_region_args(activation), "--curvature", "ggn"]
+    return Config(f"ggn_{activation}", "trust-region-ggn", activation, args)
 
 
 def _sgd(activation: str) -> Config:
@@ -61,6 +80,10 @@ def _sgd(activation: str) -> Config:
     return Config(f"sgd_{activation}", "sgd", activation, args)
 
 
-CONFIGS = [_trust_region(a) for a in ACTIVATIONS] + [_sgd(a) for a in ACTIVATIONS]
+CONFIGS = (
+    [_trust_region(a) for a in ACTIVATIONS]
+    + [_gauss_newton(a) for a in ACTIVATIONS]
+    + [_sgd(a) for a in ACTIVATIONS]
+)
 
 CONFIGS_BY_NAME = {c.name: c for c in CONFIGS}
